@@ -5,7 +5,7 @@
 # ==============================================================================
 
 # Stage 1: Dependencies
-FROM node:24-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 
 COPY apps/media-worker/package.json apps/media-worker/package-lock.json* ./apps/media-worker/
@@ -15,7 +15,7 @@ RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm inst
 
 # ------------------------------------------------------------------------------
 # Stage 2: Isolated Stateless Worker Runtime
-FROM node:24-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 
 # Install FFmpeg (6+/8+ per Debian release), FFprobe, yt-dlp, tini, curl, ca-certificates

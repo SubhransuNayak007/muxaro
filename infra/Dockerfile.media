@@ -3,7 +3,7 @@
 # Hardened Debian-based image with FFmpeg, FFprobe, and ephemeral scratch
 # ==============================================================================
 
-FROM node:20-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 
 # Install FFmpeg, FFprobe, tini (PID 1 process reaper), curl (healthchecks), and ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
