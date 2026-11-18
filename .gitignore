@@ -25,7 +25,8 @@ service-account*.json
 apps/api/.muxaro-data/
 apps/api/.muxaro-artifacts/
 apps/api/.muxaro-uploads/
-storage/
+/storage/
+apps/api/storage/
 *.db
 *.db-shm
 *.db-wal
