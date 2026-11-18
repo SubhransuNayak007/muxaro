@@ -140,26 +140,26 @@ Live progress tracking from queued execution through verification to ready downl
 
 ```mermaid
 flowchart LR
-    subgraph Client["Client & Web (apps/web · Next.js 14)"]
-        UI["Workspace UI<br/>Inspector · Tools · Dashboard · Admin"]
+    subgraph Client["Client and Web (apps/web - Next.js 14)"]
+        UI["Workspace UI - Inspector, Tools, Dashboard, Admin"]
     end
 
-    subgraph API["API Control Plane (apps/api · Fastify 5 · :4000)"]
-        AUTH["Auth & Identity<br/>Cookies · CSRF · Google PKCE · TOTP MFA"]
-        ENT["Entitlements & Credits<br/>Rolling 24h Quotas · Credit Ledger · GAM SSV"]
-        SEC["Security Guard<br/>SSRF Filter · 10-Policy Rate Limiter · Signed Tokens"]
-        QUEUE["TurboFlow Queue<br/>6 Queue Classes · 3-Tier Priority · SSE"]
+    subgraph API["API Control Plane (apps/api - Fastify 5 - Port 4000)"]
+        AUTH["Auth and Identity - Cookies, CSRF, Google PKCE, TOTP MFA"]
+        ENT["Entitlements and Credits - Rolling 24h Quotas, Ledger, GAM SSV"]
+        SEC["Security Guard - SSRF Filter, 10-Policy Rate Limiter, Signed Tokens"]
+        QUEUE["TurboFlow Queue - 6 Queue Classes, 3-Tier Priority, SSE"]
     end
 
     subgraph Exec["Media Execution"]
-        CLI["Local CLI Subprocess<br/>ffmpeg · ffprobe · yt-dlp (shell: false)"]
-        WORKER["Standalone Worker Service<br/>apps/media-worker (:3002 · 8 internal routes)"]
+        CLI["Local CLI Subprocess - ffmpeg, ffprobe, yt-dlp (shell: false)"]
+        WORKER["Standalone Worker Service - apps/media-worker (:3002, 8 routes)"]
     end
 
-    subgraph Storage["Persistence & Artifacts"]
-        SQLITE["Node 24 node:sqlite (WAL)<br/>22 Relational Tables (Active Runtime)"]
-        PG["PostgreSQL 16 Migration Schema<br/>infra/migrations/ (Production Blueprint)"]
-        OBJ["Local Disk / Cloudflare R2 (SigV4)<br/>60-min Auto-Delete Retention"]
+    subgraph Storage["Persistence and Artifacts"]
+        SQLITE["Node 24 node:sqlite (WAL) - 22 Tables (Active Runtime)"]
+        PG["PostgreSQL 16 Migration Schema - infra/migrations/ (Blueprint)"]
+        OBJ["Local Disk / Cloudflare R2 (SigV4) - 60-min Auto-Delete"]
     end
 
     UI -->|"REST (/api/v1/*)"| AUTH
@@ -208,15 +208,15 @@ For full architectural depth, see:
 
 ```mermaid
 flowchart TD
-    A["1. Ingest<br/>Permitted URL or Upload (Single-Stream / Resumable Multipart <= 2 GB)"]
-    B["2. Security & Rights Validation<br/>SSRF DNS/IP Filter · Path Sanitization · Rights Attestation"]
-    C["3. Stream Inspection<br/>ffprobe (-protocol_whitelist file,crypto,data)"]
-    D{"4. TurboFlow Lane Router<br/>Atomic Quota Reservation"}
-    E1["Instant Lane<br/>Stream-Copy Remux (-c copy)"]
-    E2["Smart Lane<br/>Standard Transcode / Audio Extract / Merge"]
-    E3["Power Lane<br/>High-Resolution Compression / Batch Packaging"]
-    F["5. Verification<br/>Post-Render ffprobe Stream Check + SHA-256 Digest"]
-    G["6. Ephemeral Delivery<br/>HMAC-SHA256 Signed Token · HTTP Range (200/206/416) · 60m Auto-Delete"]
+    A["1. Ingest - Permitted URL or Upload (Single-Stream / Multipart up to 2 GB)"]
+    B["2. Security and Rights Validation - SSRF DNS/IP Filter, Path Sanitizer, Rights Check"]
+    C["3. Stream Inspection - ffprobe (-protocol_whitelist file,crypto,data)"]
+    D{"4. TurboFlow Lane Router - Atomic Quota Reservation"}
+    E1["Instant Lane - Stream-Copy Remux (-c copy)"]
+    E2["Smart Lane - Standard Transcode / Audio Extract / Merge"]
+    E3["Power Lane - High-Resolution Compression / Batch Packaging"]
+    F["5. Verification - Post-Render ffprobe Stream Check and SHA-256 Digest"]
+    G["6. Ephemeral Delivery - HMAC-SHA256 Token, HTTP Range (200/206/416), 60m TTL"]
 
     A --> B --> C --> D
     D --> E1 --> F
@@ -377,7 +377,7 @@ The Fastify 5 API exposes **69 live endpoints** under `/api/v1` across 13 route 
 | **Auth & MFA** | `POST /api/v1/auth/{register,login,logout,verify-email,reset-password}`, `GET /api/v1/auth/google/{start,callback}`, `POST /api/v1/auth/mfa/{setup,verify,disable}` | Account lifecycle, OAuth 2.0 PKCE, and TOTP MFA |
 | **Media** | `POST /api/v1/media/inspect`, `POST /api/v1/media/upload`, `POST /api/v1/media/upload/{init,:uploadId/complete}`, `PUT /api/v1/media/upload/:uploadId/part/:partNumber` | URL stream inspection and single-stream / resumable multipart uploads |
 | **Jobs & SSE** | `POST /api/v1/jobs`, `GET /api/v1/jobs/:id`, `GET /api/v1/jobs/:id/events`, `POST /api/v1/jobs/:id/{cancel,retry}`, `GET /api/v1/jobs/:id/download` | Job submission, live SSE progress, retries, and download resolution |
-| **Tools & Batches** | `POST /api/v1/tools/merge`, `POST /api/v1/playlists/{inspect,process}`, `POST /api/v1/batches`, `GET /api/v1/batches/:id` | A/V merge, playlist inspection, and numbered batch orchestration |
+| **Tools & Batches** | `POST /api/v1/tools/merge`, `POST /api/v1/playlists/inspect`, `POST /api/v1/playlists/jobs`, `GET /api/v1/playlists/jobs/:id`, `POST /api/v1/batches`, `GET /api/v1/batches/:id` | A/V merge, playlist inspection/jobs, and numbered batch orchestration |
 | **Entitlements** | `GET /api/v1/entitlements`, `GET /api/v1/credits/ledger`, `GET /api/v1/account/{credits,history}`, `POST /api/v1/rewards/sessions` | Rolling 24h quotas, immutable credit ledger, and GAM SSV rewards |
 | **Downloads** | `GET /api/v1/download/:token` | Signed artifact streaming with RFC 9110 HTTP `Range` (`200`/`206`/`416`) |
 | **Admin & SRE** | `GET /api/v1/admin/metrics` *(public redacted)*, `/api/v1/admin/{users,settings,analytics,audit-logs,security-events}` *(MFA-gated)* | Operational telemetry and MFA-protected control centre |
@@ -422,7 +422,10 @@ MUXARO includes unit, security regression, concurrency, real-FFmpeg media engine
 
 ```bash
 # Security module tests (SSRF, FFmpeg sanitizer, rate limiter, request validation)
-npm --prefix security test
+node --experimental-strip-types security/tests/ssrf.test.ts
+node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts
+node --experimental-strip-types security/tests/rate-limiter.test.ts
+node --experimental-strip-types security/tests/validation.test.ts
 
 # Entitlements & source-adapter package suites
 npm --prefix packages/entitlements test
@@ -440,7 +443,7 @@ npx --prefix apps/api tsx --test tests/media/media-engine.test.ts
 npx --prefix apps/api tsx --test tests/integration/api-integration.test.ts
 
 # Frontend typecheck & production build verification
-npx --prefix apps/web tsc --noEmit
+(cd apps/web && npx tsc --noEmit)
 npm --prefix apps/web run build
 ```
 

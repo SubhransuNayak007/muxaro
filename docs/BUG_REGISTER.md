@@ -71,7 +71,7 @@
 ### BUG-005: Shell Command Path Escaping with Directory Whitespace
 - **Subsystem**: QA Test Harness (`qa/harness/run-all-tests.ts`)
 - **Severity**: High (Harness failure)
-- **Description**: Under Windows Node.js `child_process.spawn('npx', ['tsx', fullPath], { shell: true })`, the directory path `d:\yt doenlord\...` was parsed as `d:\yt` with an unescaped argument `doenlord\...`, causing `ERR_MODULE_NOT_FOUND`.
+- **Description**: Under Windows Node.js `child_process.spawn('npx', ['tsx', fullPath], { shell: true })`, an absolute repository path containing spaces (e.g., `<workspace path>/...`) was tokenized at the space boundary into an unescaped second argument, causing `ERR_MODULE_NOT_FOUND`.
 - **Root Cause**: Windows command shell tokenization on unquoted spaces.
 - **Remediation**: Refactored the test harness to pass normalized relative paths (`tests/...`) with explicit working directory `cwd: projectRoot`.
 - **Verification**: Test harness cleanly spawns and collects results across all 7 suites without shell escaping issues.
