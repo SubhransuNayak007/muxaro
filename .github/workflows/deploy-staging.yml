@@ -1,0 +1,108 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "infra/**"
+      - ".github/workflows/deploy-staging.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  CLOUDFLARE_PROJECT_NAME: "muxaro"
+  STAGING_SITE_URL: "https://staging.muxaro.pages.dev"
+  STAGING_API_URL: "https://api.muxaro.app"
+
+jobs:
+  deploy-staging:
+    name: Deploy Staging (Cloudflare Pages)
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ steps.cf_staging.outputs.deployment-url || env.STAGING_SITE_URL }}
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+    outputs:
+      staging_url: ${{ steps.cf_staging.outputs.deployment-url }}
+      deployed: ${{ steps.creds.outputs.cloudflare }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check staging deployment credentials
+        id: creds
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
+            echo "cloudflare=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cloudflare=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID not configured in 'staging' environment. Live upload skipped after build validation."
+          fi
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Web dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Build static bundle for staging
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_PAGES: "1"
+          NEXT_PUBLIC_SITE_URL: ${{ vars.STAGING_SITE_URL || env.STAGING_SITE_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.STAGING_API_URL || env.STAGING_API_URL }}
+        run: npx next build
+
+      - name: Verify static bundle hygiene
+        run: |
+          test -f apps/web/out/index.html
+          test -f apps/web/out/robots.txt
+          test -f apps/web/out/_headers
+          if grep -rnE "localhost:3000|localhost:4000|127\.0\.0\.1:4000" apps/web/out/; then
+            echo "::error::Localhost URL leaked into staging static export!"
+            exit 1
+          fi
+
+      - name: Deploy Staging Preview to Cloudflare Pages
+        id: cf_staging
+        if: steps.creds.outputs.cloudflare == 'true'
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/out --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }} --branch=staging
+
+  staging-smoke-tests:
+    name: Staging Smoke Verification
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: needs.deploy-staging.outputs.deployed == 'true' && needs.deploy-staging.outputs.staging_url != ''
+    permissions:
+      contents: read
+    steps:
+      - name: Verify HTTP 200, Security Headers & SEO Controls
+        env:
+          STAGING_URL: ${{ needs.deploy-staging.outputs.staging_url }}
+        run: |
+          curl -fsSI "${STAGING_URL}/" | grep -qi "x-content-type-options: nosniff"
+          curl -fsS "${STAGING_URL}/robots.txt" | grep -q "Disallow: /admin"
+          curl -fsS "${STAGING_URL}/sitemap.xml" | grep -q "muxaro"
+          curl -fsS "${STAGING_URL}/login" | grep -qi "noindex"
+          echo "Staging smoke verification passed."

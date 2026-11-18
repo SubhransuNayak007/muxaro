@@ -1,0 +1,99 @@
+# ==============================================================================
+# MUXARO Monorepo .gitignore
+# Protects secrets, local SQLite databases, ephemeral media, fixtures & artifacts
+# ==============================================================================
+
+# Environment & Secret Files (NEVER commit real credentials)
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.crt
+*.secret
+service-account*.json
+*credentials*.json
+
+# MUXARO Local Runtime Data, Ephemeral Media Artifacts & Uploads
+.muxaro-data/
+.muxaro-artifacts/
+.muxaro-uploads/
+apps/api/.muxaro-data/
+apps/api/.muxaro-artifacts/
+apps/api/.muxaro-uploads/
+storage/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+dev-outbox.jsonl
+
+# Local Design/QA Tooling & Ephemeral State
+.hallmark/
+tmp/
+temp/
+*.tmp
+
+# Generated Media Test Fixtures & Test Artifacts
+tests/media/fixtures/
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/cache/
+.pnp.*
+
+# Build Outputs (Next.js, Cloudflare Pages Static Export, TypeScript)
+.next/
+apps/web/.next/
+apps/web/out/
+out/
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+.cache/
+
+# Logs & Diagnostics
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Infrastructure State & Local Deployment Caches
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.wrangler/
+.vercel/
+.netlify/
+
+# OS & Editor Artifacts
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~

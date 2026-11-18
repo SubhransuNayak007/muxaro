@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a Security Vulnerability (Private)
+    url: https://github.com/SubhransuNayak007/muxaro/security/advisories/new
+    about: Privately report security vulnerabilities via GitHub Security Advisories instead of opening a public issue.
+  - name: Documentation & Architecture Guides
+    url: https://github.com/SubhransuNayak007/muxaro/tree/main/docs
+    about: Browse architecture, API reference, security, and deployment documentation before opening a question.
+  - name: Support & Troubleshooting
+    url: https://github.com/SubhransuNayak007/muxaro/blob/main/SUPPORT.md
+    about: Find troubleshooting steps and support channels in SUPPORT.md.

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- MUXARO Blueprint Favicon -->
+  <rect width="64" height="64" fill="#1b2a47"/>
+  <path d="M12 50V16L24 33L32 24L40 33L52 16V50" stroke="#f2f4f8" stroke-width="4" stroke-linecap="square" stroke-linejoin="miter" fill="none"/>
+  <line x1="12" y1="52" x2="52" y2="52" stroke="#f2f4f8" stroke-width="3"/>
+  <rect x="29" y="49" width="6" height="6" fill="#f2f4f8"/>
+</svg>

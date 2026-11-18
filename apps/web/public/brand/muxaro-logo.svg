@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" fill="none">
+  <defs>
+    <!-- Left Ribbon Gradient (Electric Violet -> Royal Blue) -->
+    <linearGradient id="logo-left-grad" x1="380" y1="310" x2="450" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7B2FFE" />
+      <stop offset="50%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+
+    <!-- Center Fold Gradient (Deep Blue -> Cyan) -->
+    <linearGradient id="logo-center-grad" x1="420" y1="180" x2="540" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E40AF" />
+      <stop offset="50%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#00D2FF" />
+    </linearGradient>
+
+    <!-- Right Ribbon Gradient (Cyan -> Signal Aquamarine) -->
+    <linearGradient id="logo-right-grad" x1="480" y1="120" x2="600" y2="310" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="50%" stop-color="#00D2FF" />
+      <stop offset="100%" stop-color="#0284C7" />
+    </linearGradient>
+
+    <!-- Drop Shadow / Ambient Glow -->
+    <filter id="logo-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="32" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="960" height="640" fill="#0B0E17" rx="16" />
+
+  <!-- Background Ambient Glow behind Mark -->
+  <circle cx="480" cy="220" r="180" fill="#2563EB" opacity="0.12" filter="url(#logo-glow)" />
+
+  <!-- 3D Ribbon "M" Symbol (Centered) -->
+  <g id="muxaro-mark" transform="translate(480, 210) scale(0.92) translate(-256, -240)">
+    <!-- Left Facet -->
+    <path d="M142 348 C124 348 112 332 118 314 L170 170 C182 138 214 116 250 118 C276 120 298 134 314 156 L356 220 L304 254 L262 196 C252 182 232 176 216 182 C202 188 192 204 186 218 L154 322 C150 338 146 348 142 348 Z" fill="url(#logo-left-grad)" />
+
+    <!-- Center Bridge -->
+    <path d="M186 218 C204 180 244 162 284 180 L356 212 L292 284 C274 304 246 308 224 292 L172 254 Z" fill="url(#logo-center-grad)" opacity="0.95" />
+
+    <!-- Right Facet -->
+    <path d="M262 196 L314 156 C332 132 362 118 392 120 C428 122 458 146 468 180 L514 314 C520 332 508 348 490 348 C484 348 478 344 474 336 L434 228 C428 212 414 198 396 198 C380 198 366 210 358 224 L318 288 C302 314 274 330 242 328 C218 326 196 312 184 294 L262 196 Z" fill="url(#logo-right-grad)" />
+  </g>
+
+  <!-- Typography: MUXARO (Vector Letterforms with Cyan Aperture) -->
+  <g id="muxaro-wordmark">
+    <!-- M -->
+    <path d="M228 428 L228 376 L254 376 L274 408 L294 376 L320 376 L320 428 L296 428 L296 400 L280 426 L268 426 L252 400 L252 428 Z" fill="#FFFFFF" />
+
+    <!-- U -->
+    <path d="M344 376 L368 376 L368 408 C368 418 376 424 386 424 C396 424 404 418 404 408 L404 376 L428 376 L428 408 C428 426 410 432 386 432 C362 432 344 426 344 408 Z" fill="#FFFFFF" />
+
+    <!-- X -->
+    <path d="M450 376 L476 376 L498 402 L520 376 L546 376 L512 412 L548 428 L522 428 L498 416 L474 428 L448 428 L484 412 Z" fill="#FFFFFF" />
+
+    <!-- A (with Stylized Cyan Triangle Aperture) -->
+    <path d="M576 376 L600 376 L628 428 L602 428 L596 414 L578 414 L572 428 L548 428 Z M584 398 L590 398 L594 406 L580 406 Z" fill="#FFFFFF" />
+    <!-- Signature Cyan Triangle -->
+    <polygon points="587,402 595,416 579,416" fill="#00E5FF" />
+
+    <!-- R -->
+    <path d="M648 376 L686 376 C698 376 708 384 708 396 C708 406 700 412 690 414 L712 428 L686 428 L668 416 L668 428 L648 428 Z M668 392 L668 402 L684 402 C688 402 690 400 690 396 C690 392 688 392 684 392 Z" fill="#FFFFFF" />
+
+    <!-- O -->
+    <path d="M728 402 C728 386 742 376 760 376 C778 376 792 386 792 402 C792 418 778 428 760 428 C742 428 728 418 728 402 Z M750 402 C750 410 754 414 760 414 C766 414 770 410 770 402 C770 394 766 390 760 390 C754 390 750 394 750 402 Z" fill="#FFFFFF" />
+  </g>
+
+  <!-- Tagline: YOUR MEDIA. ONE POWERFUL WORKSPACE. -->
+  <text x="480" y="476" text-anchor="middle" fill="#8992A8" font-family="'IBM Plex Mono', monospace, sans-serif" font-size="13" font-weight="600" letter-spacing="4">YOUR MEDIA. ONE POWERFUL WORKSPACE.</text>
+</svg>

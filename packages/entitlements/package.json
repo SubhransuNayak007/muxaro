@@ -1,0 +1,35 @@
+{
+  "name": "@muxaro/entitlements",
+  "version": "1.0.0",
+  "description": "Enterprise-grade authentication, rolling quota enforcement, atomic reservation, and transaction ledger engine for Muxaro - Your Media. One Powerful Workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npx tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "entitlements",
+    "quota",
+    "rbac",
+    "session-auth",
+    "idempotency",
+    "sliding-window",
+    "credit-ledger"
+  ],
+  "author": "Muxaro Core Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

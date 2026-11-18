@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "MUXARO — Your Media. One Powerful Workspace."
+message: "If you use or reference MUXARO in your work, please cite it using the metadata below."
+type: software
+version: "0.1.0"
+date-released: "2026-11-18"
+license: Apache-2.0
+repository-code: "https://github.com/SubhransuNayak007/muxaro"
+abstract: >-
+  MUXARO is an open-source, clean-room media processing workspace built with
+  Next.js 14, Fastify 5, Node.js 24, and FFmpeg/FFprobe. It provides video
+  conversion, audio extraction, audio/video merging, resumable chunked uploads,
+  HTTP Range artifact delivery, rolling quota entitlements, and defense-in-depth
+  SSRF, CSRF, IDOR, and TOTP MFA security controls.
+authors:
+  - alias: "SubhransuNayak007"
+    given-names: "Subhransu"
+    family-names: "Nayak"
+keywords:
+  - media-processing
+  - ffmpeg
+  - nextjs
+  - fastify
+  - typescript
+  - video-converter
+  - audio-extractor
+  - ssrf-protection

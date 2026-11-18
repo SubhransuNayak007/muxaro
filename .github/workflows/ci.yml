@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+  PRODUCTION_SITE_URL: "https://muxaro.app"
+  PRODUCTION_API_URL: "https://api.muxaro.app"
+
+jobs:
+  typecheck-and-lint:
+    name: TypeCheck & Static Invariants
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Web dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Media Worker dependencies
+        working-directory: apps/media-worker
+        run: npm install --no-audit --no-fund
+
+      - name: Install Entitlements dependencies
+        working-directory: packages/entitlements
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Source Adapters dependencies
+        working-directory: packages/source-adapters
+        run: npm install --no-audit --no-fund
+
+      - name: TypeCheck Web (apps/web)
+        working-directory: apps/web
+        run: npx tsc --noEmit
+
+      - name: Build & TypeCheck Media Worker (apps/media-worker)
+        working-directory: apps/media-worker
+        run: npm run build
+
+      - name: TypeCheck Entitlements (packages/entitlements)
+        working-directory: packages/entitlements
+        run: npm run typecheck
+
+      - name: TypeCheck Source Adapters (packages/source-adapters)
+        working-directory: packages/source-adapters
+        run: npm run typecheck
+
+      - name: Verify UI CSS performance invariants
+        run: |
+          if grep -rnE "transition:\s*all" apps/web/app apps/web/components; then
+            echo "::error::Forbidden 'transition: all' detected in UI source."
+            exit 1
+          fi
+          echo "UI CSS invariants verified."
+
+  unit-and-security-tests:
+    name: Unit, Concurrency & Security Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install API dependencies (tsx test runner)
+        working-directory: apps/api
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Entitlements dependencies
+        working-directory: packages/entitlements
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Source Adapters dependencies
+        working-directory: packages/source-adapters
+        run: npm install --no-audit --no-fund
+
+      - name: Run security module test suite
+        run: |
+          node --experimental-strip-types security/tests/ssrf.test.ts
+          node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts
+          node --experimental-strip-types security/tests/rate-limiter.test.ts
+          node --experimental-strip-types security/tests/validation.test.ts
+
+      - name: Run entitlements package test suite
+        working-directory: packages/entitlements
+        run: npm test
+
+      - name: Run source-adapters package test suite
+        working-directory: packages/source-adapters
+        run: npm test
+
+      - name: Run cross-package unit, concurrency & SSRF regression suites
+        run: |
+          npx --prefix apps/api tsx --test tests/unit/adapters.test.ts
+          npx --prefix apps/api tsx --test tests/unit/entitlements.test.ts
+          npx --prefix apps/api tsx --test tests/concurrency/quota-race.test.ts
+          node --experimental-strip-types tests/security/ssrf-regression.test.ts
+
+  media-and-integration-tests:
+    name: Media Worker & API Integration Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install FFmpeg & FFprobe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
+      - name: Install API dependencies
+        working-directory: apps/api
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Media Worker dependencies
+        working-directory: apps/media-worker
+        run: npm install --no-audit --no-fund
+
+      - name: Run Media Worker test suite (FFmpeg/FFprobe)
+        working-directory: apps/media-worker
+        run: npm test
+
+      - name: Run synthetic media engine test suite
+        run: npx --prefix apps/api tsx --test tests/media/media-engine.test.ts
+
+      - name: Run API integration test suite
+        env:
+          NODE_ENV: test
+          RATE_LIMIT_ENABLED: "true"
+        run: npx --prefix apps/api tsx --test tests/integration/api-integration.test.ts
+
+  build-and-containers:
+    name: Build Static Frontend & Verify Containers
+    runs-on: ubuntu-latest
+    needs:
+      - typecheck-and-lint
+      - unit-and-security-tests
+      - media-and-integration-tests
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Web dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Cloudflare Pages static export (apps/web/out)
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_PAGES: "1"
+          NEXT_PUBLIC_SITE_URL: ${{ env.PRODUCTION_SITE_URL }}
+          NEXT_PUBLIC_API_URL: ${{ env.PRODUCTION_API_URL }}
+        run: npx next build
+
+      - name: Verify static export artifacts & zero localhost leaks
+        run: |
+          test -f apps/web/out/index.html
+          test -f apps/web/out/robots.txt
+          test -f apps/web/out/sitemap.xml
+          test -f apps/web/out/_headers
+          test -f apps/web/out/_redirects
+          if grep -rnE "localhost:3000|localhost:4000|127\.0\.0\.1:4000" apps/web/out/; then
+            echo "::error::Hardcoded localhost URL leaked into production static export!"
+            exit 1
+          fi
+          echo "Verified clean static export with zero localhost leaks."
+
+      - name: Upload Cloudflare Pages build artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cloudflare-pages-out
+          path: apps/web/out
+          retention-days: 7
+
+      - name: Verify API & Worker Dockerfiles build cleanly
+        run: |
+          docker build -f infra/Dockerfile.api -t muxaro-api:ci-check .
+          docker build -f infra/Dockerfile.worker -t muxaro-worker:ci-check .

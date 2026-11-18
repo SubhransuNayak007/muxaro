@@ -1,0 +1,18 @@
+title = "MUXARO Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Official AWS SigV4 documentation example test vectors in SigV4 harness and audit docs"
+condition = "AND"
+paths = [
+  '''^qa/harness/verify-r2-sigv4\.ts$''',
+  '''^docs/repository/REPOSITORY_AUDIT\.md$''',
+  '''^docs/repository/PUBLICATION_CHECKLIST\.md$''',
+  '''^\.github/gitleaks\.toml$''',
+]
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+]

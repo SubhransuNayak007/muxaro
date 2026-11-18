@@ -1,0 +1,27 @@
+# ==============================================================================
+# MUXARO Repository Code Ownership
+# ==============================================================================
+
+# Default repository owner
+* @SubhransuNayak007
+
+# CI/CD, GitHub governance & security automation
+/.github/ @SubhransuNayak007
+
+# Security modules & policies
+/security/ @SubhransuNayak007
+/SECURITY.md @SubhransuNayak007
+
+# Applications & core workspace packages
+/apps/web/ @SubhransuNayak007
+/apps/api/ @SubhransuNayak007
+/apps/media-worker/ @SubhransuNayak007
+/packages/entitlements/ @SubhransuNayak007
+/packages/source-adapters/ @SubhransuNayak007
+
+# Infrastructure, containers & database migrations
+/infra/ @SubhransuNayak007
+
+# Documentation & tests
+/docs/ @SubhransuNayak007
+/tests/ @SubhransuNayak007

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 560" width="1120" height="560" fill="none" role="img" aria-label="MUXARO Database Architecture Diagram">
+  <title>MUXARO Relational Database Schema (22 Tables)</title>
+  <defs>
+    <linearGradient id="db-top" x1="0" y1="0" x2="1120" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#695BFF"/>
+      <stop offset="50%" stop-color="#4677FF"/>
+      <stop offset="100%" stop-color="#36D6D1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1120" height="560" rx="16" fill="#0A0D14"/>
+  <rect x="0.75" y="0.75" width="1118.5" height="558.5" rx="15.25" stroke="#23293D" stroke-width="1.5"/>
+  <rect x="24" y="0" width="1072" height="3" rx="1.5" fill="url(#db-top)"/>
+
+  <text x="36" y="42" fill="#F8FAFC" font-family="'Inter', system-ui, sans-serif" font-size="20" font-weight="700">MUXARO Relational Database Schema (22 Tables)</text>
+  <text x="36" y="64" fill="#9AA8BE" font-family="'Inter', system-ui, sans-serif" font-size="12.5">Local runtime: Node 24 node:sqlite (WAL + foreign_keys=ON) · Production schema: infra/migrations/002_account_rewards_analytics.sql (PostgreSQL)</text>
+
+  <!-- Domain 1: Identity & Auth (7 tables) -->
+  <rect x="36" y="92" width="250" height="436" rx="12" fill="#111520" stroke="#695BFF" stroke-opacity="0.6" stroke-width="1.5"/>
+  <rect x="36" y="92" width="250" height="36" rx="12" fill="#181D2C"/>
+  <rect x="36" y="116" width="250" height="12" fill="#181D2C"/>
+  <text x="52" y="115" fill="#A59BFF" font-family="'JetBrains Mono', monospace" font-size="11.5" font-weight="600">IDENTITY &amp; AUTH (7)</text>
+
+  <g font-family="'JetBrains Mono', monospace" font-size="11.5">
+    <rect x="50" y="142" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="160" fill="#F8FAFC" font-weight="600">users</text>
+    <text x="62" y="177" fill="#7887A2" font-size="10">id, public_user_id (MXR-), role, tier</text>
+
+    <rect x="50" y="196" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="214" fill="#F8FAFC" font-weight="600">oauth_accounts</text>
+    <text x="62" y="231" fill="#7887A2" font-size="10">user_id → users, provider, subject</text>
+
+    <rect x="50" y="250" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="268" fill="#F8FAFC" font-weight="600">oauth_states</text>
+    <text x="62" y="285" fill="#7887A2" font-size="10">state, nonce, code_verifier (PKCE)</text>
+
+    <rect x="50" y="304" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="322" fill="#F8FAFC" font-weight="600">user_sessions</text>
+    <text x="62" y="339" fill="#7887A2" font-size="10">token_hash, csrf_token, mfa_verified</text>
+
+    <rect x="50" y="358" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="376" fill="#F8FAFC" font-weight="600">email_verifications</text>
+    <text x="62" y="393" fill="#7887A2" font-size="10">token_hash, code_hash, attempts</text>
+
+    <rect x="50" y="412" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="430" fill="#F8FAFC" font-weight="600">password_resets</text>
+    <text x="62" y="447" fill="#7887A2" font-size="10">user_id, token_hash, expires_at</text>
+
+    <rect x="50" y="466" width="222" height="44" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="62" y="484" fill="#F8FAFC" font-weight="600">user_mfa</text>
+    <text x="62" y="501" fill="#7887A2" font-size="10">TOTP secret, backup_codes_json</text>
+  </g>
+
+  <!-- Domain 2: Quotas & Rewards (5 tables) -->
+  <rect x="302" y="92" width="250" height="436" rx="12" fill="#111520" stroke="#4677FF" stroke-opacity="0.6" stroke-width="1.5"/>
+  <rect x="302" y="92" width="250" height="36" rx="12" fill="#181D2C"/>
+  <rect x="302" y="116" width="250" height="12" fill="#181D2C"/>
+  <text x="318" y="115" fill="#7EA3FF" font-family="'JetBrains Mono', monospace" font-size="11.5" font-weight="600">QUOTAS &amp; REWARDS (5)</text>
+
+  <g font-family="'JetBrains Mono', monospace" font-size="11.5">
+    <rect x="316" y="142" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="328" y="162" fill="#F8FAFC" font-weight="600">entitlements</text>
+    <text x="328" y="179" fill="#7887A2" font-size="10">tier, base_individual_limit,</text>
+    <text x="328" y="194" fill="#7887A2" font-size="10">extra_credits_balance, concurrency</text>
+
+    <rect x="316" y="216" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="328" y="236" fill="#F8FAFC" font-weight="600">quota_reservations</text>
+    <text x="328" y="253" fill="#7887A2" font-size="10">bucket, units, status (RESERVED),</text>
+    <text x="328" y="268" fill="#7887A2" font-size="10">idempotency_key, 24h window</text>
+
+    <rect x="316" y="290" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="328" y="310" fill="#F8FAFC" font-weight="600">credit_ledger</text>
+    <text x="328" y="327" fill="#7887A2" font-size="10">immutable append-only delta,</text>
+    <text x="328" y="342" fill="#7887A2" font-size="10">balance_after, expiry tracking</text>
+
+    <rect x="316" y="364" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="328" y="384" fill="#F8FAFC" font-weight="600">reward_sessions</text>
+    <text x="328" y="401" fill="#7887A2" font-size="10">provider=gam, custom_data_hash,</text>
+    <text x="328" y="416" fill="#7887A2" font-size="10">reward_amount, verified_at</text>
+
+    <rect x="316" y="438" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="328" y="458" fill="#F8FAFC" font-weight="600">reward_provider_events</text>
+    <text x="328" y="475" fill="#7887A2" font-size="10">UNIQUE provider_transaction_id,</text>
+    <text x="328" y="490" fill="#7887A2" font-size="10">ECDSA signature_valid (replay guard)</text>
+  </g>
+
+  <!-- Domain 3: Media & Processing Jobs (5 tables) -->
+  <rect x="568" y="92" width="250" height="436" rx="12" fill="#111520" stroke="#36D6D1" stroke-opacity="0.6" stroke-width="1.5"/>
+  <rect x="568" y="92" width="250" height="36" rx="12" fill="#181D2C"/>
+  <rect x="568" y="116" width="250" height="12" fill="#181D2C"/>
+  <text x="584" y="115" fill="#36D6D1" font-family="'JetBrains Mono', monospace" font-size="11.5" font-weight="600">MEDIA &amp; JOBS (5)</text>
+
+  <g font-family="'JetBrains Mono', monospace" font-size="11.5">
+    <rect x="582" y="142" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="594" y="162" fill="#F8FAFC" font-weight="600">media_assets</text>
+    <text x="594" y="179" fill="#7887A2" font-size="10">source_type, container, duration,</text>
+    <text x="594" y="194" fill="#7887A2" font-size="10">manifest_json, expires_at</text>
+
+    <rect x="582" y="216" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="594" y="236" fill="#F8FAFC" font-weight="600">batches</text>
+    <text x="594" y="253" fill="#7887A2" font-size="10">MXB-YYYYMMDD-XXXXXX, progress,</text>
+    <text x="594" y="268" fill="#7887A2" font-size="10">zip_download_url, item counts</text>
+
+    <rect x="582" y="290" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="594" y="310" fill="#F8FAFC" font-weight="600">processing_jobs</text>
+    <text x="594" y="327" fill="#7887A2" font-size="10">MXJ-XXXXXXXXXX, queue_class,</text>
+    <text x="594" y="342" fill="#7887A2" font-size="10">processing_lane, status, priority</text>
+
+    <rect x="582" y="364" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="594" y="384" fill="#F8FAFC" font-weight="600">job_events</text>
+    <text x="594" y="401" fill="#7887A2" font-size="10">job_id → processing_jobs,</text>
+    <text x="594" y="416" fill="#7887A2" font-size="10">status, progress, stage, message</text>
+
+    <rect x="582" y="438" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="594" y="458" fill="#F8FAFC" font-weight="600">output_artifacts</text>
+    <text x="594" y="475" fill="#7887A2" font-size="10">mime_type, size_bytes, codec,</text>
+    <text x="594" y="490" fill="#7887A2" font-size="10">checksum_sha256, 60m expires_at</text>
+  </g>
+
+  <!-- Domain 4: Security, Admin & Ops (5 tables) -->
+  <rect x="834" y="92" width="250" height="436" rx="12" fill="#111520" stroke="#10B981" stroke-opacity="0.55" stroke-width="1.5"/>
+  <rect x="834" y="92" width="250" height="36" rx="12" fill="#181D2C"/>
+  <rect x="834" y="116" width="250" height="12" fill="#181D2C"/>
+  <text x="850" y="115" fill="#10B981" font-family="'JetBrains Mono', monospace" font-size="11.5" font-weight="600">SECURITY &amp; OPS (5)</text>
+
+  <g font-family="'JetBrains Mono', monospace" font-size="11.5">
+    <rect x="848" y="142" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="860" y="162" fill="#F8FAFC" font-weight="600">rate_limit_counters</text>
+    <text x="860" y="179" fill="#7887A2" font-size="10">bucket_key, hits, window_ms,</text>
+    <text x="860" y="194" fill="#7887A2" font-size="10">blocked_until_ms</text>
+
+    <rect x="848" y="216" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="860" y="236" fill="#F8FAFC" font-weight="600">security_events</text>
+    <text x="860" y="253" fill="#7887A2" font-size="10">event_type, severity, ip_prefix,</text>
+    <text x="860" y="268" fill="#7887A2" font-size="10">endpoint, request_id</text>
+
+    <rect x="848" y="290" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="860" y="310" fill="#F8FAFC" font-weight="600">admin_audit_logs</text>
+    <text x="860" y="327" fill="#7887A2" font-size="10">immutable action, target_type,</text>
+    <text x="860" y="342" fill="#7887A2" font-size="10">before_json, after_json</text>
+
+    <rect x="848" y="364" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="860" y="384" fill="#F8FAFC" font-weight="600">system_settings</text>
+    <text x="860" y="401" fill="#7887A2" font-size="10">runtime limits, caps, feature flags,</text>
+    <text x="860" y="416" fill="#7887A2" font-size="10">artifact_retention_minutes (60)</text>
+
+    <rect x="848" y="438" width="222" height="62" rx="7" fill="#181D2C" stroke="#2D354F"/>
+    <text x="860" y="458" fill="#F8FAFC" font-weight="600">analytics_events</text>
+    <text x="860" y="475" fill="#7887A2" font-size="10">PII-free server-side KPI metrics,</text>
+    <text x="860" y="490" fill="#7887A2" font-size="10">event_name, tier, properties_json</text>
+  </g>
+</svg>

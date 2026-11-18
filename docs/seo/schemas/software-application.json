@@ -1,0 +1,76 @@
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebApplication",
+      "@id": "https://muxaro.com/#webapp",
+      "name": "muxaro.com Utility Suite",
+      "alternateName": "muxaro.com",
+      "url": "https://muxaro.com",
+      "description": "High-integrity, cloud-native media processing platform providing stream inspection, lossless audio extraction, audio/video remuxing, and multi-format conversion.",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "All modern web browsers (Chrome, Firefox, Safari, Edge)",
+      "browserRequirements": "Requires JavaScript. HTML5 Media Source Extensions supported.",
+      "softwareVersion": "1.0.0",
+      "inLanguage": "en-US",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0.00",
+        "priceCurrency": "USD",
+        "description": "Free tier includes 10 single media processing jobs and 1 playlist job per rolling 24-hour window."
+      },
+      "featureList": [
+        "Lossless audio demuxing and extraction (AAC, Opus, MP3)",
+        "DASH and HLS separate stream merging with millisecond sync validation",
+        "Full stream metadata probing via FFprobe architecture",
+        "Stream-copy remuxing without generational quality degradation",
+        "Zero-retention ephemeral scratch storage",
+        "No unauthorized scraping, no CAPTCHA bypass, strict copyright compliance"
+      ],
+      "creator": {
+        "@type": "Organization",
+        "name": "muxaro.com Engineering",
+        "url": "https://muxaro.com"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://muxaro.com/tools/audio-extractor#app",
+      "name": "Muxaro Lossless Audio Extractor",
+      "url": "https://muxaro.com/tools/audio-extractor",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Any web browser",
+      "offers": {
+        "@type": "Offer",
+        "price": "0.00",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "Direct bitstream copy (-c:a copy)",
+        "Zero quality loss extraction",
+        "Instant stream inspection",
+        "Support for MP4, WebM, MKV, and direct media URLs"
+      ]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://muxaro.com/tools/audio-video-merger#app",
+      "name": "Muxaro Audio-Video Stream Merger",
+      "url": "https://muxaro.com/tools/audio-video-merger",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "Any web browser",
+      "offers": {
+        "@type": "Offer",
+        "price": "0.00",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "Combines disjoint DASH/HLS audio and video tracks",
+        "Presentation timestamp (PTS) sync alignment",
+        "Direct container remuxing without transcoding loss",
+        "Supports 1080p, 1440p, 4K UHD, and 8K FUHD video sources"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "@id": "https://muxaro.com/docs/faq#faq",
+  "name": "muxaro.com Engineering & Platform FAQ",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What do the MUXARO consumer processing presets do?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "MUXARO provides four one-click presets: Best Quality (highest available resolution up to 8K), Balanced (1080p optimized for compact file size and high fidelity), Audio-Only (native bitstream Opus/AAC or MP3 extraction), and Lossless Stream Copy (direct container remuxing with zero re-encoding and zero quality degradation in seconds)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the daily processing quota work?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Every user receives 10 individual video processing jobs and 1 batch playlist job (up to 50 items) per rolling 24-hour window. Quotas are calculated continuously: each consumed credit restores exactly 24 hours after completion rather than resetting at arbitrary midnight boundaries. Running a playlist job consumes only the playlist credit and does not deplete your 10 individual video credits."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can MUXARO upsample 128kbps audio to 320kbps or FLAC lossless?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. We practice strict technical honesty. In lossy compression (such as 128kbps AAC or Opus), high-frequency acoustic harmonics and psychoacoustically masked data are discarded permanently. Converting lossy audio to 320kbps MP3 or 1411kbps FLAC merely inflates the file size with quantization noise; it cannot restore lost acoustic information. When you select stream-copy, we extract the exact bitstream as delivered by the source with zero generational degradation."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why are 1080p, 4K, and 8K videos stored as separate streams on modern video platforms?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Modern streaming platforms utilize Dynamic Adaptive Streaming over HTTP (DASH) and HLS protocols. To optimize bandwidth for billions of mobile and desktop devices, high-resolution video streams (1080p, 1440p, 4K, 8K) and audio tracks are stored as disjoint files. A single progressive MP4 with baked-in audio is typically only preserved up to 720p or 360p. To obtain a standalone 1080p or 4K video file, the disjoint video and audio tracks must be multiplexed (merged) into a container."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is stream-copy remuxing so much faster than video transcoding?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Stream-copy remuxing (equivalent to FFmpeg's -c copy) avoids decoding and re-encoding individual video frames. Instead, it reads raw compressed packets from the input container and packs them directly into the output container (such as moving H.264 video from an MKV into an MP4). Because CPU-intensive motion estimation and discrete cosine transforms are bypassed, processing is bound purely by disk I/O and finishes in seconds."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How long are uploaded or converted files stored on Muxaro servers?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Files are stored strictly on ephemeral scratch storage during processing. Once processing completes, files are held temporarily in isolated object storage for download access and automatically purged upon download or expiry. Files are never stored permanently, never analyzed for commercial targeting, and never used to train machine learning models."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the policy regarding copyright and unauthorized downloading?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "MUXARO operates in strict compliance with international copyright treaties and Section 512 of the Digital Millennium Copyright Act (DMCA). The platform is intended exclusively for user-owned content, public domain works, Creative Commons media, and authorized archival tasks. We prohibit the circumvention of technological DRM measures, unauthorized commercial downloading, and proxy scraping."
+      }
+    }
+  ]
+}

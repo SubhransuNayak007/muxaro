@@ -1,0 +1,41 @@
+MUXARO — Your Media. One Powerful Workspace.
+Copyright 2026 SubhransuNayak007 and MUXARO Contributors
+
+This product includes software developed for the MUXARO project
+(https://github.com/SubhransuNayak007/muxaro) and licensed under the
+Apache License, Version 2.0 (see LICENSE).
+
+===============================================================================
+THIRD-PARTY SOFTWARE & EXTERNAL TOOLS
+===============================================================================
+
+1. Third-Party JavaScript/TypeScript Dependencies, Fonts, and Icons
+   MUXARO uses permissively licensed open-source packages (MIT, ISC,
+   Apache-2.0, BSD-3-Clause, BlueOak-1.0.0, 0BSD, CC-BY-4.0), SIL OFL-1.1
+   typefaces (Inter, JetBrains Mono), and ISC-licensed icons (Lucide).
+   See THIRD_PARTY_NOTICES.md for the complete attribution registry.
+
+2. External Out-of-Process CLI Binaries (Not Bundled in Source)
+   MUXARO invokes external system utilities (`ffmpeg`, `ffprobe`, and `yt-dlp`)
+   strictly as independent out-of-process executables via OS pipes (`execFile` /
+   `spawn`) without static or dynamic linking to their libraries:
+
+   - FFmpeg / FFprobe (https://ffmpeg.org/)
+     Upstream FFmpeg is licensed under LGPL-2.1+ or GPL-2.0+/GPL-3.0 depending
+     on build configuration. MUXARO does not redistribute FFmpeg source or
+     binaries in this Git repository. Operators who build and redistribute
+     container images (e.g., via `infra/Dockerfile.api`, `infra/Dockerfile.worker`,
+     or `infra/Dockerfile.media`) that install Debian's `ffmpeg` package (which
+     is compiled under GPL-3.0) are responsible for complying with the
+     corresponding-source and attribution requirements of FFmpeg and Debian
+     for those distributed container images.
+
+   - yt-dlp (https://github.com/yt-dlp/yt-dlp)
+     Licensed under The Unlicense (public domain dedication). Downloaded only
+     at container build time or installed independently by the operator.
+
+3. Trademarks
+   "MUXARO", the MUXARO logo marks, and the tagline "Your Media. One Powerful
+   Workspace." are project identifiers reserved under Section 6 of the Apache
+   License, Version 2.0. This license does not grant trademark rights beyond
+   reasonable and customary attribution.

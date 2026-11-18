@@ -1,0 +1,95 @@
+{
+  "site": {
+    "name": "Muxaro",
+    "domain": "muxaro.com",
+    "baseUrl": "https://muxaro.com",
+    "defaultOgImage": "https://muxaro.com/og/default-share.png",
+    "twitter": "@Muxaromedia"
+  },
+  "routes": {
+    "/": {
+      "title": "Muxaro — High-Integrity Cloud Media Processing Suite",
+      "description": "Inspect, demux, remux, and convert audio and video streams online. Built with clean-room FFmpeg architecture, zero lossy upsampling claims, and honest rolling quotas.",
+      "canonical": "https://muxaro.com/",
+      "priority": 1.0,
+      "changefreq": "daily"
+    },
+    "/tools/audio-extractor": {
+      "title": "Lossless Audio Extractor — Direct Bitstream Demuxing | Muxaro",
+      "description": "Extract native AAC, Opus, and MP3 audio tracks directly from video containers with zero generational loss. No fake upsampling, pure bitstream extraction.",
+      "canonical": "https://muxaro.com/tools/audio-extractor",
+      "priority": 0.9,
+      "changefreq": "weekly"
+    },
+    "/tools/audio-video-merger": {
+      "title": "Audio-Video Stream Merger — Zero-Loss Remuxing | Muxaro",
+      "description": "Combine separate 1080p, 4K, and 8K DASH video and audio streams into single MP4 or MKV containers with millisecond timestamp synchronization.",
+      "canonical": "https://muxaro.com/tools/audio-video-merger",
+      "priority": 0.9,
+      "changefreq": "weekly"
+    },
+    "/tools/media-converter": {
+      "title": "Universal Media Format Converter | Muxaro",
+      "description": "Convert between MP4, WebM, MKV, MP3, AAC, and FLAC containers and codecs with granular control over bitrates, sample rates, and stream copying.",
+      "canonical": "https://muxaro.com/tools/media-converter",
+      "priority": 0.9,
+      "changefreq": "weekly"
+    },
+    "/docs/formats": {
+      "title": "Containers vs Codecs: MP4, WebM, MKV & Bitstream Demuxing | Muxaro Docs",
+      "description": "Deep technical guide explaining the difference between multimedia containers (ISOBMFF, Matroska) and video/audio codecs (H.264, VP9, AV1, Opus, AAC).",
+      "canonical": "https://muxaro.com/docs/formats",
+      "priority": 0.7,
+      "changefreq": "monthly"
+    },
+    "/docs/resolutions": {
+      "title": "1080p, 4K & 8K Streaming Realities: Bitrate vs Resolution | Muxaro Docs",
+      "description": "Understanding separate DASH streams, high-resolution bitrate starvation, VP9/AV1 decoding overhead, and stream multiplexing realities.",
+      "canonical": "https://muxaro.com/docs/resolutions",
+      "priority": 0.7,
+      "changefreq": "monthly"
+    },
+    "/docs/audio-quality": {
+      "title": "Audio Quality Engineering: Lossy vs Lossless Mythbusting | Muxaro Docs",
+      "description": "Objective psychoacoustic analysis of AAC, Opus, MP3, and FLAC. Why upsampling lossy streams to 320kbps or FLAC produces pure file bloat.",
+      "canonical": "https://muxaro.com/docs/audio-quality",
+      "priority": 0.7,
+      "changefreq": "monthly"
+    },
+    "/docs/troubleshooting": {
+      "title": "Media Processing Diagnostics & Troubleshooting Guide | Muxaro Docs",
+      "description": "Resolve A/V desync, PTS timestamp drift, corrupted moov atoms, unsupported container errors, and 429 rate limit backoff.",
+      "canonical": "https://muxaro.com/docs/troubleshooting",
+      "priority": 0.6,
+      "changefreq": "monthly"
+    },
+    "/docs/faq": {
+      "title": "Frequently Asked Questions & Platform Policy | Muxaro Docs",
+      "description": "Details on rolling 24-hour quota math, ephemeral storage security, copyright compliance, and processing engine speeds.",
+      "canonical": "https://muxaro.com/docs/faq",
+      "priority": 0.6,
+      "changefreq": "monthly"
+    },
+    "/legal/terms": {
+      "title": "Terms of Service | Muxaro",
+      "description": "Permitted use, user representations, rolling quota limits, copyright compliance, and limitation of liability.",
+      "canonical": "https://muxaro.com/legal/terms",
+      "priority": 0.3,
+      "changefreq": "monthly"
+    },
+    "/legal/privacy": {
+      "title": "Privacy Policy & Ephemeral Storage Guarantees | Muxaro",
+      "description": "GDPR and CCPA compliant privacy policy. Zero tracking cookies, zero model training on user files, immediate scratch file destruction.",
+      "canonical": "https://muxaro.com/legal/privacy",
+      "priority": 0.3,
+      "changefreq": "monthly"
+    },
+    "/legal/dmca": {
+      "title": "Copyright Policy & DMCA Takedown Procedure | Muxaro",
+      "description": "Formal DMCA Section 512 notice guidelines, designated agent contact, counter-notification procedure, and repeat infringer policy.",
+      "canonical": "https://muxaro.com/legal/dmca",
+      "priority": 0.3,
+      "changefreq": "monthly"
+    }
+  }
+}

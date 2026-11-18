@@ -1,0 +1,45 @@
+# ==============================================================================
+# MUXARO — Production robots.txt
+# https://muxaro.com
+# ==============================================================================
+
+User-agent: *
+# Allow indexing of public landing pages, tools, educational docs, and legal
+Allow: /
+Allow: /tools/
+Allow: /docs/
+Allow: /legal/
+Allow: /status
+
+# Disallow private user states, authenticated routes, job IDs, and dynamic API endpoints
+Disallow: /api/
+Disallow: /dashboard/
+Disallow: /admin/
+Disallow: /jobs/
+Disallow: /account/
+Disallow: /credits/
+Disallow: /*?*token=*
+Disallow: /*?*jobId=*
+Disallow: /*?*download=*
+Disallow: /*?*session=*
+
+# Disallow aggressive scraping crawlers with zero attribution or high server burden
+User-agent: CCBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /api/
+Disallow: /jobs/
+
+User-agent: GPTBot
+Disallow: /api/
+Disallow: /jobs/
+
+# Crawl-delay for well-behaved crawlers to protect media worker capacity
+Crawl-delay: 1
+
+# Host directive
+Host: https://muxaro.com
+
+# Sitemap declaration
+Sitemap: https://muxaro.com/sitemap.xml
