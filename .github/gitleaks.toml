@@ -16,3 +16,21 @@ regexes = [
   '''AKIAIOSFODNN7EXAMPLE''',
   '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
 ]
+
+[[allowlists]]
+description = "Benign non-secret UI storage key and synthetic QA/unit test identifiers"
+condition = "AND"
+paths = [
+  '''^apps/web/lib/analytics\.ts$''',
+  '''^packages/entitlements/tests/idempotency\.test\.ts$''',
+  '''^tests/unit/entitlements\.test\.ts$''',
+  '''^qa/harness/verify-account-platform\.mjs$''',
+  '''^\.github/gitleaks\.toml$''',
+]
+regexes = [
+  '''muxaro-consent-v2''',
+  '''idem-req-uuid-12345''',
+  '''idem_key_unique_12345''',
+  '''Argon2id/Scrypt''',
+  '''eyJhbGciOiJIUzI1NiJ9\.abc\.def''',
+]
