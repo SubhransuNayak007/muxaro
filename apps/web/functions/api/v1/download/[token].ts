@@ -11,6 +11,13 @@ import { jsonResponse, optionsResponse, tryProxyUpstream } from '../_utils';
 
 export const onRequestOptions: PagesFunction = async () => optionsResponse();
 
+export const onRequestHead: PagesFunction = async (context) => {
+  const token = String(context.params?.token || '');
+  const upstream = await tryProxyUpstream(context.request, context.env, `download/${token}`);
+  if (upstream) return upstream;
+  return new Response(null, { status: 404, headers: { 'Content-Type': 'application/json' } });
+};
+
 export const onRequestGet: PagesFunction = async (context) => {
   const token = String(context.params?.token || '');
   const upstream = await tryProxyUpstream(context.request, context.env, `download/${token}`);
