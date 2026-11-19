@@ -29,8 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     ffmpeg \
     python3 \
+    python3-pip \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod 0755 /usr/local/bin/yt-dlp \
+    && python3 -m pip install --no-cache-dir --break-system-packages -U bgutil-ytdlp-pot-provider \
     && apt-get purge -y --auto-remove \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
