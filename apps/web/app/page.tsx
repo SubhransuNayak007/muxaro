@@ -389,20 +389,6 @@ export default function HomePage() {
         <div className="muxaro-aurora-glow" aria-hidden="true" />
 
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Violet-Style Top Announcement Banner */}
-          <div className="flex justify-center mb-6">
-            <Link
-              href="/docs"
-              className="violet-announcement-pill group"
-            >
-              <span className="font-bold text-brand">✦ V0.1.0</span>
-              <span className="text-content">MUXARO — High-performance media conversion & stream remuxing</span>
-              <span className="text-content-secondary hidden sm:inline group-hover:text-brand transition-colors">
-                Read docs →
-              </span>
-            </Link>
-          </div>
-
           {/* Hero Header */}
           <div className="text-center max-w-3xl mx-auto mb-8 sm:mb-10">
             <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-content tracking-tight leading-[1.12] mb-4">

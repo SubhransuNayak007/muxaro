@@ -70,6 +70,17 @@ export default function Navbar() {
   const [accountMenuOpen, setAccountMenuOpen] = useState<boolean>(false);
   const [signingOut, setSigningOut] = useState<boolean>(false);
 
+  // Desktop Navigation Sliding Indicator State
+  const navContainerRef = useRef<HTMLElement>(null);
+  const linkRefs = useRef<{ [href: string]: HTMLAnchorElement | null }>({});
+  const [sliderStyle, setSliderStyle] = useState<{
+    left: number;
+    width: number;
+    opacity: number;
+  }>({ left: 0, width: 0, opacity: 0 });
+  const [hoveredHref, setHoveredHref] = useState<string | null>(null);
+  const [hasPositioned, setHasPositioned] = useState<boolean>(false);
+
   useEffect(() => {
     setMounted(true);
     const isDarkMode =
@@ -214,10 +225,60 @@ export default function Navbar() {
     { href: '/account', label: 'Account' },
   ];
 
-  const isLinkActive = (href: string) => {
-    if (href === '/') return pathname === '/';
-    return pathname === href || pathname.startsWith(`${href}/`);
-  };
+  const isLinkActive = useCallback(
+    (href: string) => {
+      if (href === '/') return pathname === '/';
+      return pathname === href || pathname.startsWith(`${href}/`);
+    },
+    [pathname]
+  );
+
+  const updateSlider = useCallback(
+    (overrideHref?: string | null) => {
+      const activeItem = navLinks.find((item) => isLinkActive(item.href));
+      const effectiveHref =
+        overrideHref !== undefined && overrideHref !== null
+          ? overrideHref
+          : activeItem
+          ? activeItem.href
+          : null;
+
+      if (!effectiveHref) {
+        setSliderStyle((prev) => ({ ...prev, opacity: 0 }));
+        return;
+      }
+
+      const targetEl = linkRefs.current[effectiveHref];
+      if (targetEl) {
+        setSliderStyle({
+          left: targetEl.offsetLeft,
+          width: targetEl.offsetWidth,
+          opacity: 1,
+        });
+        setHasPositioned(true);
+      }
+    },
+    [isLinkActive]
+  );
+
+  useEffect(() => {
+    if (!mounted) return;
+    updateSlider();
+
+    const timer = setTimeout(() => {
+      updateSlider();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [pathname, mounted, updateSlider]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const handleResize = () => {
+      updateSlider();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [mounted, updateSlider]);
 
   const isLightweightActive = mounted && lightweight;
   const lightweightLabel = isLightweightActive
@@ -269,23 +330,49 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* Center: Clean Segmented Navigation (Desktop) */}
+        {/* Center: Clean Segmented Navigation (Desktop) with Smooth Sliding Indicator */}
         <nav
-          className="hidden lg:flex items-center gap-1 p-1 rounded-full bg-elevated border border-line shadow-xs"
+          ref={navContainerRef}
+          onMouseLeave={() => {
+            setHoveredHref(null);
+            updateSlider(null);
+          }}
+          className="relative hidden lg:flex items-center p-1 rounded-full bg-elevated border border-line shadow-xs"
           aria-label="Main navigation"
         >
+          {/* Animated sliding pill */}
+          <div
+            className="absolute top-1 bottom-1 rounded-full bg-surface shadow-xs pointer-events-none"
+            style={{
+              transform: `translate3d(${sliderStyle.left}px, 0, 0)`,
+              width: `${sliderStyle.width}px`,
+              opacity: mounted ? sliderStyle.opacity : 0,
+              transition: hasPositioned
+                ? 'transform 320ms cubic-bezier(0.16, 1, 0.3, 1), width 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease'
+                : 'opacity 180ms ease',
+            }}
+            aria-hidden="true"
+          />
+
           {navLinks.map((item) => {
             const active = isLinkActive(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                ref={(el) => {
+                  linkRefs.current[item.href] = el;
+                }}
+                onMouseEnter={() => {
+                  setHoveredHref(item.href);
+                  updateSlider(item.href);
+                }}
                 aria-current={active ? 'page' : undefined}
-                className={`px-3.5 py-1 text-xs font-medium rounded-full whitespace-nowrap transition-colors duration-150 active:translate-y-px ${
+                className={`relative z-10 px-3.5 py-1 text-xs font-medium rounded-full whitespace-nowrap transition-colors duration-150 select-none active:translate-y-px ${
                   active
-                    ? 'text-content bg-surface shadow-xs font-semibold'
-                    : 'text-content-secondary hover:text-content hover:bg-surface/60'
-                }`}
+                    ? 'text-content font-semibold'
+                    : 'text-content-secondary hover:text-content'
+                } ${!mounted && active ? 'bg-surface shadow-xs' : ''}`}
               >
                 {item.label}
               </Link>
