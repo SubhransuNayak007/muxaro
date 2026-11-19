@@ -1388,10 +1388,14 @@ export class QueueService extends EventEmitter {
         return;
       }
 
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.TRUST_PROXY;
+
       const proc = spawn(binary, args, {
         shell: false,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: cleanEnv,
       });
 
       this.activeProcesses.set(job.jobId, proc);
@@ -1518,7 +1522,11 @@ export class QueueService extends EventEmitter {
       '--progress',
       '--newline',
       '--js-runtimes',
-      'node',
+      'deno,node',
+      '--extractor-args',
+      'youtube:player_client=ios,android,web;po_token=web',
+      '--extractor-args',
+      'youtubepot-bgutilhttp:base_url=http://172.17.0.1:4416',
       '--user-agent',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     ];

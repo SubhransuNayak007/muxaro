@@ -241,6 +241,12 @@ export class AdapterService {
       '--no-write-auto-subs',
       '--no-cache-dir',
       '--skip-download',
+      '--js-runtimes',
+      'deno,node',
+      '--extractor-args',
+      'youtube:player_client=ios,android,web;po_token=web',
+      '--extractor-args',
+      'youtubepot-bgutilhttp:base_url=http://172.17.0.1:4416',
       '--user-agent',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
     ];
@@ -251,6 +257,9 @@ export class AdapterService {
     }
     ytArgs.push(rawUrl);
 
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.TRUST_PROXY;
+
     const { stdout } = await execFileAsync(
       'yt-dlp',
       ytArgs,
@@ -258,6 +267,7 @@ export class AdapterService {
         timeout: 60000,
         maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
+        env: cleanEnv,
       }
     );
 

@@ -475,23 +475,15 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
               </div>
             )}
 
-            {/* MUXARO Direct Hybrid Mode Badge */}
-            <div className="mt-3.5 flex items-center gap-2">
-              {isDirectActive ? (
+            {/* MUXARO Direct Mode Badge (only if active) */}
+            {isDirectActive && (
+              <div className="mt-3.5 flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-                  MUXARO Direct Active (Residential Mode)
+                  MUXARO Direct Active (Residential Acceleration)
                 </span>
-              ) : (
-                <Link
-                  href="/tools/direct-helper"
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-light border border-brand/20 text-brand text-xs font-medium hover:bg-brand/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                >
-                  <Zap className="w-3 h-3 text-brand" />
-                  <span>Enable MUXARO Direct (Bypass Cloud Bot Checks)</span>
-                </Link>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
