@@ -12,12 +12,22 @@ import {
   Activity,
 } from 'lucide-react';
 import { ALL_DOCS } from '@/content';
+import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
-export const metadata = {
-  title: 'Documentation & Media Guides — MUXARO',
+export const metadata = constructMetadata({
+  title: 'Documentation & Media Architecture Guides — MUXARO',
   description:
-    'Plain-English guides to video formats, resolutions, audio quality, troubleshooting, and Muxaro workspace policies.',
-};
+    'Engineering guides to video containers, audio codecs, streaming resolution realities, psychoacoustic fidelity, and troubleshooting.',
+  path: '/docs',
+  keywords: [
+    'media architecture guides',
+    'video containers vs codecs',
+    'dash streaming',
+    'psychoacoustic audio analysis',
+    'ffmpeg troubleshooting',
+    'muxaro documentation',
+  ],
+});
 
 function getDocIcon(slug: string) {
   switch (slug) {
@@ -31,14 +41,25 @@ function getDocIcon(slug: string) {
       return Wrench;
     case 'faq':
       return HelpCircle;
+    case 'security':
+      return ShieldCheck;
     default:
       return BookOpen;
   }
 }
 
 export default function DocsIndexPage() {
+  const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'Documentation', path: '/docs' },
+  ]);
+
   return (
     <div className="min-h-screen bg-base">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
+      />
       {/* Header Band */}
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">

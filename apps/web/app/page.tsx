@@ -21,7 +21,11 @@ import {
   X,
   Clock,
   Sparkles,
+  ArrowUp,
+  ExternalLink,
 } from 'lucide-react';
+import AntigravityOrbitalField from '@/components/AntigravityOrbitalField';
+import CursorSpotlight from '@/components/CursorSpotlight';
 import { api } from '@/lib/api-client';
 import { useDeviceMode } from '@/lib/device-mode';
 import { useAuth } from '@/lib/auth-context';
@@ -174,12 +178,18 @@ export default function HomePage() {
   }, []);
 
   const inspectTargetUrl = useCallback(async (targetUrl: string) => {
-    const trimmed = targetUrl.trim();
+    let trimmed = targetUrl.trim();
     if (!trimmed) {
       setErrorMessage('Please paste a valid media link to get started.');
       setLastFailedAction(null);
       return;
     }
+
+    // Auto-normalize protocol if user enters or pastes link without https://
+    if (!/^https?:\/\//i.test(trimmed)) {
+      trimmed = `https://${trimmed}`;
+    }
+    setUrl(trimmed);
 
     setInspecting(true);
     setErrorMessage(null);
@@ -334,11 +344,16 @@ export default function HomePage() {
   };
 
   const handleRetryLastAction = () => {
-    if (!lastFailedAction) return;
-    if (lastFailedAction.type === 'url') {
-      void inspectTargetUrl(lastFailedAction.url);
+    if (lastFailedAction) {
+      if (lastFailedAction.type === 'url') {
+        void inspectTargetUrl(lastFailedAction.url);
+      } else {
+        void handleFileUpload(lastFailedAction.file);
+      }
+    } else if (url.trim()) {
+      void inspectTargetUrl(url.trim());
     } else {
-      void handleFileUpload(lastFailedAction.file);
+      setErrorMessage(null);
     }
   };
 
@@ -361,21 +376,39 @@ export default function HomePage() {
   const uploadScale = uploadProgress !== null ? uploadProgress / 100 : 0;
 
   return (
-    <div className="w-full">
-      {/* Hero Section with MUXARO Aurora Flow */}
+    <div className="w-full relative">
+      <CursorSpotlight />
+
+      {/* Hero Section with Google Antigravity 3D Particle Swarm + Aurora Mesh */}
       <section
-        className={`muxaro-aurora-shell w-full pt-10 pb-14 sm:pt-14 sm:pb-16${
+        className={`muxaro-aurora-shell w-full pt-8 pb-14 sm:pt-12 sm:pb-20 relative overflow-hidden${
           inputFocused ? ' muxaro-aurora-focused' : ''
         }${inspecting || uploading ? ' muxaro-aurora-analyzing' : ''}`}
         data-aurora-paused={!shouldAnimateAurora ? 'true' : undefined}
       >
+        <AntigravityOrbitalField />
         <div className="muxaro-aurora-ribbon" aria-hidden="true" />
         <div className="muxaro-aurora-glow" aria-hidden="true" />
 
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
+          {/* Antigravity Announcement Pill Bar */}
+          <div className="flex justify-center mb-6">
+            <Link
+              href="/docs"
+              className="antigravity-announcement inline-flex items-center gap-2 group"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
+              <span className="font-semibold text-brand-violet">✦ NEW</span>
+              <span className="text-content">MUXARO v0.1.0 — High-performance media conversion & stream remuxing</span>
+              <span className="text-content-muted hidden sm:inline group-hover:text-brand-violet transition-colors">
+                Explore features →
+              </span>
+            </Link>
+          </div>
+
           {/* Hero Header */}
-          <div className="text-center max-w-3xl mx-auto mb-8">
-            <h1 className="text-4xl sm:text-5xl lg:text-[3.35rem] font-extrabold text-content tracking-tight leading-[1.12] mb-4">
+          <div className="text-center max-w-3xl mx-auto mb-8 sm:mb-10">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-content tracking-tight leading-[1.12] mb-4">
               Your media,{' '}
               <span className="muxaro-text-gradient block sm:inline">
                 ready in seconds.
@@ -383,7 +416,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-content-secondary max-w-2xl mx-auto leading-relaxed">
-              Convert videos, compress large files, and extract audio in one private workspace.
+              Convert video formats, extract high-fidelity audio, and remux streams with zero quality loss.
             </p>
           </div>
 
@@ -418,210 +451,257 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Floating Elevated Workspace Card */}
+          {/* DeepSeek-Style Floating Workspace Input Card */}
           <div className="max-w-3xl mx-auto">
-            <div className="rounded-2xl shadow-lg bg-surface border border-line overflow-hidden">
-              <div className="p-4 sm:p-6">
-                {/* Segmented Input Mode Tabs */}
-                <div
-                  role="tablist"
-                  aria-label="Choose how to add media"
-                  className="inline-flex items-center gap-1 p-1 rounded-xl bg-elevated mb-5"
-                >
+            <div className="deepseek-input-card p-4 sm:p-6 relative overflow-hidden">
+              {/* Active Link Pill Indicator (if link entered or pasted) */}
+              {url.trim().length > 0 && activeTab === 'link' && (
+                <div className="mb-3 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-surface-elevated border border-line text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Link2 className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
+                    <span className="font-mono text-content truncate max-w-[220px] sm:max-w-md">
+                      {url}
+                    </span>
+                  </div>
                   <button
                     type="button"
-                    role="tab"
-                    id="tab-link"
-                    aria-selected={activeTab === 'link'}
-                    aria-controls="panel-link"
-                    onClick={() => setActiveTab('link')}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium active:translate-y-px transition-[background-color,color,box-shadow] duration-150 whitespace-nowrap ${
-                      activeTab === 'link'
-                        ? 'bg-surface text-content shadow-sm font-semibold'
-                        : 'text-content-secondary hover:text-content'
-                    }`}
+                    onClick={() => {
+                      setUrl('');
+                      setManifest(null);
+                      setErrorMessage(null);
+                      urlInputRef.current?.focus();
+                    }}
+                    className="text-content-muted hover:text-content p-1 rounded-md transition-colors"
+                    title="Clear link"
+                    aria-label="Clear link"
                   >
-                    <Link2 className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
-                    <span>Paste a link</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="tab"
-                    id="tab-upload"
-                    aria-selected={activeTab === 'upload'}
-                    aria-controls="panel-upload"
-                    onClick={() => setActiveTab('upload')}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium active:translate-y-px transition-[background-color,color,box-shadow] duration-150 whitespace-nowrap ${
-                      activeTab === 'upload'
-                        ? 'bg-surface text-content shadow-sm font-semibold'
-                        : 'text-content-secondary hover:text-content'
-                    }`}
-                  >
-                    <UploadCloud className="w-4 h-4 text-brand-blue shrink-0" aria-hidden="true" />
-                    <span>Upload a file</span>
+                    <X className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
                 </div>
+              )}
 
-                {/* Panel 1: Paste a Link */}
-                {activeTab === 'link' ? (
-                  <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
-                    <form onSubmit={handleSubmit}>
-                      <div className="flex flex-col sm:flex-row items-stretch gap-3">
-                        <div className="relative flex-1 min-w-0">
-                          <Link2
-                            className="w-4 h-4 text-content-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            aria-hidden="true"
+              {/* Segmented Input Mode Tabs */}
+              <div
+                role="tablist"
+                aria-label="Choose how to add media"
+                className="inline-flex items-center gap-1 p-1 rounded-xl bg-elevated mb-4"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-link"
+                  aria-selected={activeTab === 'link'}
+                  aria-controls="panel-link"
+                  onClick={() => setActiveTab('link')}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium active:translate-y-px transition-colors duration-150 whitespace-nowrap ${
+                    activeTab === 'link'
+                      ? 'bg-surface text-content shadow-sm font-semibold'
+                      : 'text-content-secondary hover:text-content'
+                  }`}
+                >
+                  <Link2 className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                  <span>Paste a link</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-upload"
+                  aria-selected={activeTab === 'upload'}
+                  aria-controls="panel-upload"
+                  onClick={() => setActiveTab('upload')}
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium active:translate-y-px transition-colors duration-150 whitespace-nowrap ${
+                    activeTab === 'upload'
+                      ? 'bg-surface text-content shadow-sm font-semibold'
+                      : 'text-content-secondary hover:text-content'
+                  }`}
+                >
+                  <UploadCloud className="w-4 h-4 text-brand-blue shrink-0" aria-hidden="true" />
+                  <span>Upload a file</span>
+                </button>
+              </div>
+
+              {/* Panel 1: Paste a Link */}
+              {activeTab === 'link' ? (
+                <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
+                  <form onSubmit={handleSubmit} className="space-y-3">
+                    <div className="relative">
+                      <Link2
+                        className="w-4 h-4 text-content-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                        aria-hidden="true"
+                      />
+                      <input
+                        ref={urlInputRef}
+                        type="text"
+                        inputMode="url"
+                        value={url}
+                        onFocus={() => setInputFocused(true)}
+                        onBlur={() => setInputFocused(false)}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder="Paste a video or audio link (YouTube, Vimeo, direct media URL)…"
+                        aria-label="Media link"
+                        className="w-full pl-10 pr-24 py-3.5 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans focus:border-brand-violet transition-colors duration-150"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleClipboardPaste}
+                        aria-label="Paste link from clipboard"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-violet dark:text-content bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                      >
+                        {pastedFeedback ? (
+                          <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <ClipboardPaste className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                        )}
+                        <span className="whitespace-nowrap">{pasteLabel}</span>
+                      </button>
+                    </div>
+
+                    {/* Bottom Action Strip with DeepSeek-style circular action button */}
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                      <div className="flex items-center gap-2 text-xs text-content-secondary">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                          <span className="hidden sm:inline">Permission-verified media</span>
+                          <span className="sm:hidden">Verified media</span>
+                        </span>
+                        <span className="text-content-muted">•</span>
+                        <span>Auto-deletes in 60m</span>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="submit"
+                          disabled={inspecting || !url.trim()}
+                          className="deepseek-action-circle"
+                          title={inspecting ? 'Analysing link...' : 'Analyse media'}
+                          aria-label={inspecting ? 'Analysing media link' : 'Analyse media link'}
+                        >
+                          {inspecting ? (
+                            <Loader2 className="w-5 h-5 motion-safe:animate-spin" aria-hidden="true" />
+                          ) : (
+                            <ArrowUp className="w-5 h-5" aria-hidden="true" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                /* Panel 2: Upload a File */
+                <div id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (!uploading) setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    className={`p-8 sm:p-10 border-2 border-dashed rounded-xl text-center transition-colors duration-150 ${
+                      isDragging
+                        ? 'border-brand-violet bg-interactive'
+                        : 'border-line bg-base hover:border-brand-violet'
+                    }`}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-2xl bg-interactive text-brand-violet dark:text-content mx-auto flex items-center justify-center mb-3"
+                      aria-hidden="true"
+                    >
+                      {uploading ? (
+                        <Loader2 className="w-6 h-6 motion-safe:animate-spin" />
+                      ) : (
+                        <UploadCloud className="w-6 h-6" />
+                      )}
+                    </div>
+
+                    {uploading ? (
+                      <div className="max-w-md mx-auto space-y-4">
+                        <div>
+                          <h2 className="text-base font-semibold text-content mb-1">
+                            {uploadProgress !== null
+                              ? `Uploading your file (${uploadProgress}%)…`
+                              : 'Uploading your file…'}
+                          </h2>
+                          {selectedFileName && (
+                            <p className="text-sm text-content-secondary truncate">
+                              {selectedFileName}
+                            </p>
+                          )}
+                        </div>
+
+                        <div
+                          role="progressbar"
+                          aria-label="Upload progress"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={uploadProgress ?? undefined}
+                          className="w-full h-2 rounded-full bg-elevated overflow-hidden"
+                        >
+                          <div
+                            className="h-full w-full origin-left bg-muxaro-gradient motion-safe:transition-transform motion-safe:duration-150"
+                            style={{ transform: `scaleX(${uploadScale})` }}
                           />
-                          <input
-                            ref={urlInputRef}
-                            type="url"
-                            required
-                            value={url}
-                            onFocus={() => setInputFocused(true)}
-                            onBlur={() => setInputFocused(false)}
-                            onChange={(e) => setUrl(e.target.value)}
-                            placeholder="Paste a video or audio link here…"
-                            aria-label="Media link"
-                            className="w-full pl-10 pr-24 py-3.5 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans focus:border-brand-violet transition-colors duration-150"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleClipboardPaste}
-                            aria-label="Paste link from clipboard"
-                            className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-violet dark:text-content bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                          >
-                            {pastedFeedback ? (
-                              <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                            ) : (
-                              <ClipboardPaste className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                            )}
-                            <span className="whitespace-nowrap">{pasteLabel}</span>
-                          </button>
                         </div>
 
                         <button
-                          type="submit"
-                          disabled={inspecting}
-                          aria-disabled={inspecting}
-                          className="muxaro-btn-primary px-7 py-3.5 rounded-xl text-sm sm:text-base font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 active:translate-y-px disabled:opacity-70"
+                          type="button"
+                          onClick={handleCancelUpload}
+                          className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-line bg-surface text-sm font-medium text-content-secondary hover:text-content hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                         >
-                          {inspecting && (
-                            <Loader2 className="w-4 h-4 motion-safe:animate-spin shrink-0" aria-hidden="true" />
-                          )}
-                          <span className="whitespace-nowrap">{analyseLabel}</span>
+                          <X className="w-4 h-4 shrink-0" aria-hidden="true" />
+                          <span>Cancel upload</span>
                         </button>
                       </div>
-                    </form>
-                  </div>
-                ) : (
-                  /* Panel 2: Upload a File */
-                  <div id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
-                    <div
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        if (!uploading) setIsDragging(true);
+                    ) : (
+                      <>
+                        <h2 className="text-base font-semibold text-content mb-1">
+                          Drop a file from your computer
+                        </h2>
+                        <p className="text-sm text-content-secondary max-w-md mx-auto mb-5">
+                          Compress a video, change its format, or extract audio. Supports MP4, MOV, MKV, WebM, MP3, and WAV up to 2 GB.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="muxaro-btn-primary px-5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center justify-center whitespace-nowrap active:translate-y-px"
+                        >
+                          Choose a file
+                        </button>
+                      </>
+                    )}
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      disabled={uploading}
+                      accept="video/*,audio/*,.mp4,.mkv,.webm,.mov,.mp3,.flac,.wav,.aac,.m4a"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          void handleFileUpload(e.target.files[0]);
+                        }
                       }}
-                      onDragLeave={() => setIsDragging(false)}
-                      onDrop={handleDrop}
-                      className={`p-8 sm:p-10 border-2 border-dashed rounded-xl text-center transition-colors duration-150 ${
-                        isDragging
-                          ? 'border-brand-violet bg-interactive'
-                          : 'border-line bg-base hover:border-brand-violet'
-                      }`}
-                    >
-                      <div
-                        className="w-12 h-12 rounded-2xl bg-interactive text-brand-violet dark:text-content mx-auto flex items-center justify-center mb-3"
-                        aria-hidden="true"
-                      >
-                        {uploading ? (
-                          <Loader2 className="w-6 h-6 motion-safe:animate-spin" />
-                        ) : (
-                          <UploadCloud className="w-6 h-6" />
-                        )}
-                      </div>
-
-                      {uploading ? (
-                        <div className="max-w-md mx-auto space-y-4">
-                          <div>
-                            <h2 className="text-base font-semibold text-content mb-1">
-                              {uploadProgress !== null
-                                ? `Uploading your file (${uploadProgress}%)…`
-                                : 'Uploading your file…'}
-                            </h2>
-                            {selectedFileName && (
-                              <p className="text-sm text-content-secondary truncate">
-                                {selectedFileName}
-                              </p>
-                            )}
-                          </div>
-
-                          <div
-                            role="progressbar"
-                            aria-label="Upload progress"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={uploadProgress ?? undefined}
-                            className="w-full h-2 rounded-full bg-elevated overflow-hidden"
-                          >
-                            <div
-                              className="h-full w-full origin-left bg-muxaro-gradient motion-safe:transition-transform motion-safe:duration-150"
-                              style={{ transform: `scaleX(${uploadScale})` }}
-                            />
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={handleCancelUpload}
-                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-line bg-surface text-sm font-medium text-content-secondary hover:text-content hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                          >
-                            <X className="w-4 h-4 shrink-0" aria-hidden="true" />
-                            <span>Cancel upload</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <h2 className="text-base font-semibold text-content mb-1">
-                            Drop a file from your computer
-                          </h2>
-                          <p className="text-sm text-content-secondary max-w-md mx-auto mb-5">
-                            Compress a video, change its format, or extract audio. Supports MP4, MOV, MKV, WebM, MP3, and WAV up to 2 GB.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="muxaro-btn-primary px-5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center justify-center whitespace-nowrap active:translate-y-px"
-                          >
-                            Choose a file
-                          </button>
-                        </>
-                      )}
-
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="hidden"
-                        disabled={uploading}
-                        accept="video/*,audio/*,.mp4,.mkv,.webm,.mov,.mp3,.flac,.wav,.aac,.m4a"
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) {
-                            void handleFileUpload(e.target.files[0]);
-                          }
-                        }}
-                      />
-                    </div>
+                    />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+            </div>
 
-              {/* Clean Privacy & Authorisation Line */}
-              <div className="px-4 sm:px-6 py-3 bg-elevated border-t border-line text-xs text-content-secondary flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
-                  <span>For media you own or have permission to use.</span>
-                </span>
-                <span className="text-content-secondary">Files auto-delete after 60 minutes</span>
-              </div>
+            {/* Quick Action Tool Pills (DeepSeek style) */}
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-5">
+              {CAPABILITIES.map((cap) => {
+                const Icon = cap.icon;
+                return (
+                  <Link
+                    key={cap.href}
+                    href={cap.href}
+                    className="deepseek-pill-btn"
+                  >
+                    <Icon className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                    <span>{cap.title}</span>
+                  </Link>
+                );
+              })}
             </div>
 
             {/* Calm Cancellation Notice */}
@@ -652,16 +732,26 @@ export default function HomePage() {
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
                   <span>{errorMessage}</span>
                 </div>
-                {lastFailedAction && (
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={handleRetryLastAction}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-error text-error text-xs font-semibold hover:bg-error-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap shrink-0"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-error text-error text-xs font-semibold hover:bg-error-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                   >
                     <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Retry</span>
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setErrorMessage(null);
+                      setLastFailedAction(null);
+                    }}
+                    className="text-xs font-medium text-content-secondary hover:text-content px-2 py-1 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -688,7 +778,7 @@ export default function HomePage() {
         )}
 
         {/* Helpful Sign-In Prompt for Guest Inspection (non-blocking, preserves task) */}
-        {!authLoading && !authenticated && manifest && (
+        {!authLoading && !authenticated && manifest && !activeJob && (
           <div className="max-w-3xl mx-auto mb-5">
             <div className="rounded-2xl bg-surface border border-line shadow-sm px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start sm:items-center gap-2.5 text-sm text-content min-w-0">
@@ -718,7 +808,7 @@ export default function HomePage() {
         )}
 
         {/* Media Inspection Manifest Island */}
-        {manifest && (
+        {manifest && !activeJob && (
           <div className="max-w-3xl mx-auto mb-14">
             <MediaInspector
               manifest={manifest}

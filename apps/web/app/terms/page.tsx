@@ -3,12 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Link from 'next/link';
 import { FileText, Calendar, ChevronRight } from 'lucide-react';
+import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
-export const metadata = {
+export const metadata = constructMetadata({
   title: 'Terms of Service — MUXARO',
   description:
     'Terms of service governing authorised media processing, daily rolling quotas, acceptable use, and user warranties.',
-};
+  path: '/terms',
+  keywords: [
+    'terms of service',
+    'muxaro terms',
+    'acceptable use policy',
+    'daily quota policy',
+  ],
+});
 
 const LEGAL_LINKS = [
   { href: '/privacy', label: 'Privacy policy' },
@@ -234,8 +242,17 @@ export default function TermsPage() {
     : 'Terms of service governing the use of the Muxaro media workspace.';
   const blocks = parseLegalBlocks(body);
 
+  const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'Terms of Service', path: '/terms' },
+  ]);
+
   return (
     <div className="min-h-screen bg-base">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
+      />
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">
           <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-content-secondary mb-5">

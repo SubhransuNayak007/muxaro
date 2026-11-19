@@ -232,7 +232,10 @@ export function mapFriendlyError(
     upper.includes('ETIMEDOUT') ||
     upper.includes('ECONNREFUSED') ||
     upper.includes('NETWORK') ||
-    upper.includes('FETCH FAILED')
+    upper.includes('FETCH FAILED') ||
+    upper.includes('NOT_RESOLVED') ||
+    upper.includes('ENOTFOUND') ||
+    upper.includes('OFFLINE')
   ) {
     return 'We had trouble reaching the server. Check your connection and try again.';
   }

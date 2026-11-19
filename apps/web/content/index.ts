@@ -67,6 +67,15 @@ export const DOCS_REGISTRY: Record<string, DocItem> = {
     filePath: 'apps/web/content/docs/faq.md',
     lastUpdated: '2026-11-18',
   },
+  security: {
+    slug: 'security',
+    title: 'Enterprise Security, Privacy Compliance & Verifiable Trust Architecture',
+    description: 'Independent technical audit, GDPR & CCPA zero-retention verification, verified developer provenance, and defense-in-depth security engineering controls across MUXARO.',
+    category: 'Trust & Security',
+    readingTime: '8 min read',
+    filePath: 'apps/web/content/docs/security.md',
+    lastUpdated: '2026-11-19',
+  },
 };
 
 export const LEGAL_REGISTRY: Record<string, LegalItem> = {

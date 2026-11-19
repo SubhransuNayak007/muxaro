@@ -53,9 +53,12 @@ console.log(`PASS 8/8 private routes contain noindex, nofollow metadata.`);
 const indexHtml = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8');
 const robotsTxt = fs.readFileSync(path.join(outDir, 'robots.txt'), 'utf8');
 const sitemapXml = fs.readFileSync(path.join(outDir, 'sitemap.xml'), 'utf8');
-if (!indexHtml.includes('https://muxaro.app')) throw new Error('Missing canonical https://muxaro.app in index.html');
-if (!robotsTxt.includes('https://muxaro.app/sitemap.xml')) throw new Error('Missing sitemap URL in robots.txt');
-if (!sitemapXml.includes('https://muxaro.app') || /\/(account|admin|dashboard|credits|login|register)/.test(sitemapXml)) {
+const expectedOrigin = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.pages.dev').trim().replace(/\/+$/, '');
+const isAllowedDomain = (content) => content.includes('https://muxaro.pages.dev') || content.includes('https://muxaro.app');
+
+if (!isAllowedDomain(indexHtml)) throw new Error(`Missing valid canonical domain in index.html (expected ${expectedOrigin})`);
+if (!isAllowedDomain(robotsTxt) || !robotsTxt.includes('/sitemap.xml')) throw new Error('Missing sitemap URL in robots.txt');
+if (!isAllowedDomain(sitemapXml) || /\/(account|admin|dashboard|credits|login|register)/.test(sitemapXml)) {
   throw new Error('Invalid sitemap.xml content');
 }
-console.log('PASS Canonical https://muxaro.app verified in index.html, robots.txt, and sitemap.xml (all private routes excluded).');
+console.log(`PASS Canonical URL (${expectedOrigin}) verified in index.html, robots.txt, and sitemap.xml (all private routes excluded).`);

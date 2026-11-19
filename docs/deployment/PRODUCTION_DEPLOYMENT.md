@@ -1,7 +1,8 @@
 # MUXARO Production Deployment Guide
 
-**Target Architecture:** Cloudflare Pages (Static Frontend) + Google Cloud Run (`muxaro-api` Public API + `muxaro-worker` Internal Media Worker) + PostgreSQL 16 (Supabase / Cloud SQL) + Cloudflare R2 (Private Object Storage)  
-**Deployment Status Notice:** All Dockerfiles, Cloud Run manifests, Cloudflare Pages configs, migration scripts, and CI/CD templates are implemented and locally validated in this repository. **Live cloud infrastructure, domain registration (`muxaro.app`), and production secrets have not been provisioned yet** and require owner cloud accounts and explicit approval.
+**Live Frontend Deployment:** [`https://muxaro.pages.dev/`](https://muxaro.pages.dev/) (Cloudflare Pages static export — live and HTTPS/TLS 1.3 verified on `2026-11-18`)  
+**Target Full Production Architecture:** Cloudflare Pages (`muxaro.pages.dev` → custom domain `muxaro.app`) + Google Cloud Run (`muxaro-api` Public API + `muxaro-worker` Internal Media Worker) + PostgreSQL 16 (Supabase / Cloud SQL) + Cloudflare R2 (Private Object Storage)  
+**Deployment Status Notice:** The static web frontend (`apps/web/out/`) is **live on Cloudflare Pages at `https://muxaro.pages.dev/`** with verified TLS 1.3, `301` HTTPS redirect, security headers, and zero mixed content. Custom domain cutover (`muxaro.app` / `api.muxaro.app`), Google Cloud Run API/worker provisioning, managed PostgreSQL, Cloudflare R2 bucket creation, and production secret injection remain **pending** owner cloud setup.
 
 ---
 

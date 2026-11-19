@@ -1,5 +1,5 @@
 export function formatBytes(bytes: number, decimals: number = 2): string {
-  if (!bytes || bytes === 0) return '0 B';
+  if (!bytes || bytes <= 0 || !Number.isFinite(bytes)) return '0 B';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];

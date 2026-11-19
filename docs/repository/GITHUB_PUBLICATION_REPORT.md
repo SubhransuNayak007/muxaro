@@ -16,6 +16,7 @@ Verified live via `gh api repos/SubhransuNayak007/muxaro`:
 | :--- | :--- |
 | Full Name | `SubhransuNayak007/muxaro` |
 | HTML URL | `https://github.com/SubhransuNayak007/muxaro` |
+| Live Frontend Homepage | `https://muxaro.pages.dev/` (verified live Cloudflare Pages deployment) |
 | Visibility | `public` |
 | Default Branch | `main` |
 | SPDX License | `Apache-2.0` |
@@ -81,7 +82,7 @@ All production workflows use least-privilege `permissions:`, zero error swallowi
 | Deploy Staging | [`.github/workflows/deploy-staging.yml`](../../.github/workflows/deploy-staging.yml) | `44280042827` | `main` (`9563bc4`) | `success` | [View Run](https://github.com/SubhransuNayak007/muxaro/actions/runs/44280042827) |
 | Release | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | `44281748834` | `v0.1.0` (`0af394c`) | `success` | [View Run](https://github.com/SubhransuNayak007/muxaro/actions/runs/44281748834) |
 
-> **Note on Deploy Workflows:** `.github/workflows/deploy-staging.yml` and `.github/workflows/deploy-production.yml` are configured with protected `staging`/`production` environments and OIDC Workload Identity Federation for Google Cloud. Live Cloudflare Pages / Cloud Run upload steps remain safely gated until deployment secrets are configured in GitHub Environments.
+> **Note on Deploy Workflows:** `.github/workflows/deploy-staging.yml` and `.github/workflows/deploy-production.yml` are configured with protected `staging`/`production` environments and OIDC Workload Identity Federation for Google Cloud. The live frontend is currently deployed on Cloudflare Pages at [`https://muxaro.pages.dev/`](https://muxaro.pages.dev/) (verified HTTP `200`, `301` HTTP→HTTPS redirect, `TLSv1.3` / `TLS_AES_256_GCM_SHA384`, Let's Encrypt certificate `CN=muxaro.pages.dev` valid `2026-11-18` → `2027-02-16`, zero mixed content; see [`docs/deployment/SSL_TLS.md`](../deployment/SSL_TLS.md)). Live GitHub Actions deploy uploads and custom domain (`muxaro.app` / `api.muxaro.app`) / Cloud Run backend provisioning remain safely gated until deployment secrets are configured in GitHub Environments.
 
 ---
 

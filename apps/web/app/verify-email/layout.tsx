@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Verify email — MUXARO',
+  title: 'Verify Email — MUXARO',
+  alternates: {
+    canonical: '/verify-email',
+  },
   robots: {
     index: false,
     follow: false,

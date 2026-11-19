@@ -4,7 +4,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { setAnalyticsUserId, trackEvent } from './analytics';
 import { getApiBaseUrl } from './api-client';
 
-const API_BASE = getApiBaseUrl();
 const PENDING_TASK_STORAGE_KEY = 'muxaro-pending-task';
 const PENDING_TASK_TTL_MS = 30 * 60 * 1000;
 
@@ -177,7 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshSession = useCallback(async (): Promise<AuthUser | null> => {
     try {
-      const response = await fetch(`${API_BASE}/auth/session`, {
+      const response = await fetch(`${getApiBaseUrl()}/auth/session`, {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -231,7 +230,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        await fetch(`${API_BASE}${endpoint}`, {
+        await fetch(`${getApiBaseUrl()}${endpoint}`, {
           method: 'POST',
           credentials: 'include',
           headers,

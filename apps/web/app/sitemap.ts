@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 
 export const dynamic = 'force-static';
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.app')
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.pages.dev')
   .trim()
   .replace(/\/+$/, '');
 
@@ -26,6 +26,7 @@ const PUBLIC_ROUTES: Array<{
   { path: '/docs/audio-quality', changeFrequency: 'monthly', priority: 0.7 },
   { path: '/docs/troubleshooting', changeFrequency: 'monthly', priority: 0.6 },
   { path: '/docs/faq', changeFrequency: 'monthly', priority: 0.6 },
+  { path: '/docs/security', changeFrequency: 'monthly', priority: 0.8 },
   { path: '/status', changeFrequency: 'hourly', priority: 0.5 },
   { path: '/terms', changeFrequency: 'monthly', priority: 0.3 },
   { path: '/privacy', changeFrequency: 'monthly', priority: 0.3 },

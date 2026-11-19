@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'My Downloads — MUXARO',
+  title: 'My Downloads & Workspace — MUXARO',
+  alternates: {
+    canonical: '/dashboard',
+  },
   robots: {
     index: false,
     follow: false,

@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Create free account — MUXARO',
+  title: 'Create an Account — MUXARO',
+  alternates: {
+    canonical: '/register',
+  },
   robots: {
     index: false,
     follow: false,

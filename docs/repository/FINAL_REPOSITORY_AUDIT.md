@@ -30,6 +30,7 @@ All publication blockers identified in [`REPOSITORY_AUDIT.md`](REPOSITORY_AUDIT.
 | `.gitignore` Runtime Isolation | `git ls-files` audit against `.env*`, `.hallmark/`, `.muxaro-*`, `node_modules/`, `.next/`, `out/` | **PASS — only `.env.example` and `infra/.env.example` tracked** |
 | Large File Hygiene | `git ls-files` size audit | **PASS — largest tracked file is 1.22 MB (`assets/animations/muxaro-demo.gif`)** |
 | Local Path & PII Scrub | Workspace grep + visual screenshot inspection | **PASS — 0 local path leaks, 0 PII** |
+| Live Frontend HTTPS & TLS | Live probe of `https://muxaro.pages.dev/` (`2026-11-18T10:08:53Z`) | **PASS — HTTP 301→HTTPS, TLSv1.3 (`TLS_AES_256_GCM_SHA384`), Let's Encrypt cert valid through `2027-02-16`, HTTP 200, security headers active, 0 mixed content** |
 
 ---
 

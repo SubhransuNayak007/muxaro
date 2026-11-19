@@ -12,6 +12,12 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { DOCS_REGISTRY, ALL_DOCS } from '@/content';
+import {
+  constructMetadata,
+  buildTechArticleJsonLd,
+  buildBreadcrumbsJsonLd,
+  buildFaqJsonLd,
+} from '@/lib/seo';
 
 interface Props {
   params: {
@@ -27,11 +33,22 @@ export function generateStaticParams() {
 
 export function generateMetadata({ params }: Props) {
   const doc = DOCS_REGISTRY[params.slug];
-  if (!doc) return { title: 'Guide Not Found — MUXARO' };
-  return {
+  if (!doc) {
+    return constructMetadata({
+      title: 'Guide Not Found — MUXARO',
+      description: 'The requested engineering guide could not be found.',
+      path: `/docs/${params.slug}`,
+      noIndex: true,
+    });
+  }
+  return constructMetadata({
     title: `${doc.title} — MUXARO Docs`,
     description: doc.description,
-  };
+    path: `/docs/${doc.slug}`,
+    ogType: 'article',
+    publishedTime: `${doc.lastUpdated}T00:00:00.000Z`,
+    modifiedTime: `${doc.lastUpdated}T00:00:00.000Z`,
+  });
 }
 
 function readMarkdownFile(filePathFromRoot: string): string | null {
@@ -291,8 +308,67 @@ export default function DocDetailPage({ params }: Props) {
   const prevDoc = currentIdx > 0 ? ALL_DOCS[currentIdx - 1] : null;
   const nextDoc = currentIdx >= 0 && currentIdx < ALL_DOCS.length - 1 ? ALL_DOCS[currentIdx + 1] : null;
 
+  const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'Documentation', path: '/docs' },
+    { name: doc.title, path: `/docs/${doc.slug}` },
+  ]);
+
+  const articleJsonLd = buildTechArticleJsonLd({
+    title: doc.title,
+    description: doc.description,
+    path: `/docs/${doc.slug}`,
+    publishedAt: `${doc.lastUpdated}T00:00:00.000Z`,
+    updatedAt: `${doc.lastUpdated}T00:00:00.000Z`,
+  });
+
+  const faqJsonLd = doc.slug === 'faq' ? buildFaqJsonLd([
+    {
+      question: 'What do the MUXARO consumer processing presets do?',
+      answer: 'MUXARO provides four one-click presets: Best Quality (highest available resolution up to 8K), Balanced (1080p optimized for compact file size and high fidelity), Audio-Only (native bitstream Opus/AAC or MP3 extraction), and Lossless Stream Copy (direct container remuxing with zero re-encoding and zero quality degradation in seconds).'
+    },
+    {
+      question: 'How does the daily processing quota work?',
+      answer: 'Every user receives 10 individual video processing jobs and 1 batch playlist job (up to 50 items) per rolling 24-hour window. Quotas are calculated continuously: each consumed credit restores exactly 24 hours after completion rather than resetting at arbitrary midnight boundaries.'
+    },
+    {
+      question: 'Can MUXARO upsample 128kbps audio to 320kbps or FLAC lossless?',
+      answer: 'No. We practice strict technical honesty. In lossy compression (such as 128kbps AAC or Opus), high-frequency acoustic harmonics and psychoacoustically masked data are discarded permanently. Converting lossy audio to 320kbps MP3 or 1411kbps FLAC merely inflates file size without restoring lost acoustic information.'
+    },
+    {
+      question: 'Why are 1080p, 4K, and 8K videos stored as separate streams on modern video platforms?',
+      answer: 'Modern streaming platforms utilize Dynamic Adaptive Streaming over HTTP (DASH) and HLS protocols. To optimize bandwidth, high-resolution video streams and audio tracks are stored as disjoint files. To obtain a standalone 1080p or 4K file, disjoint streams must be multiplexed (merged) into a container.'
+    },
+    {
+      question: 'Why is stream-copy remuxing so much faster than video transcoding?',
+      answer: 'Stream-copy remuxing (equivalent to FFmpeg -c copy) avoids decoding and re-encoding individual video frames. Raw compressed packets are transferred directly into the output container, bypassing CPU-intensive motion estimation and completing in seconds.'
+    },
+    {
+      question: 'How long are uploaded or converted files stored on MUXARO servers?',
+      answer: 'Files are stored strictly on ephemeral scratch storage during processing and automatically purged upon download or within 60 minutes. Files are never stored permanently, never analyzed for commercial targeting, and never used to train machine learning models.'
+    },
+    {
+      question: 'What is the policy regarding copyright and unauthorized downloading?',
+      answer: 'MUXARO operates in strict compliance with international copyright treaties and Section 512 of the Digital Millennium Copyright Act (DMCA). The platform is intended exclusively for user-owned content, public domain works, Creative Commons media, and authorized archival tasks.'
+    }
+  ]) : null;
+
   return (
     <div className="min-h-screen bg-base">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
+      {faqJsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+        />
+      )}
       {/* Editorial Header */}
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">

@@ -448,6 +448,123 @@ a:active {
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
+/* DeepSeek-inspired Floating Squircle Input Card */
+.deepseek-input-card {
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-primary);
+  border: 1px solid var(--muxaro-border);
+  border-radius: 24px;
+  box-shadow: 0 12px 36px -8px rgba(23, 27, 43, 0.08), 0 2px 6px rgba(23, 27, 43, 0.03);
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.dark .deepseek-input-card {
+  background-color: rgba(17, 21, 32, 0.88);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 16px 44px -10px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.deepseek-input-card:focus-within {
+  border-color: var(--muxaro-indigo);
+  box-shadow: 0 16px 48px -8px rgba(105, 91, 255, 0.18), 0 0 0 1px var(--muxaro-indigo);
+}
+
+/* DeepSeek Signature Circular Action Button (Upward Arrow) */
+.deepseek-action-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 9999px;
+  background-image: var(--muxaro-gradient-primary);
+  color: var(--muxaro-btn-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--muxaro-shadow-btn);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, opacity 160ms ease;
+  flex-shrink: 0;
+}
+
+.deepseek-action-circle:hover {
+  transform: scale(1.05);
+  box-shadow: var(--muxaro-shadow-btn-hover);
+}
+
+.deepseek-action-circle:active {
+  transform: scale(0.96);
+}
+
+.deepseek-action-circle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Ethereal Quick Action Pills */
+.deepseek-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--muxaro-border);
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-secondary);
+  box-shadow: 0 1px 3px rgba(23, 27, 43, 0.03);
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  white-space: nowrap;
+}
+
+.dark .deepseek-pill-btn {
+  background-color: rgba(17, 21, 32, 0.7);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.deepseek-pill-btn:hover {
+  color: var(--muxaro-text-primary);
+  border-color: var(--muxaro-indigo);
+  background-color: var(--muxaro-bg-interactive);
+  box-shadow: 0 4px 12px rgba(105, 91, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.deepseek-pill-btn:active {
+  transform: translateY(0);
+}
+
+/* Antigravity Announcement Pill Bar */
+.antigravity-announcement {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--muxaro-border);
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-secondary);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 2px 8px rgba(23, 27, 43, 0.04);
+  transition: border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.dark .antigravity-announcement {
+  background-color: rgba(17, 21, 32, 0.75);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.antigravity-announcement:hover {
+  border-color: var(--muxaro-indigo);
+  color: var(--muxaro-text-primary);
+  box-shadow: 0 4px 14px rgba(105, 91, 255, 0.15);
+  transform: translateY(-1px);
+}
+
 /* Monospace measurements and units */
 .mono-metric {
   font-family: var(--font-mono), monospace;

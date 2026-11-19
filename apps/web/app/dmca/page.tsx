@@ -3,12 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Link from 'next/link';
 import { Scale, Calendar, ChevronRight } from 'lucide-react';
+import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
-export const metadata = {
+export const metadata = constructMetadata({
   title: 'DMCA & Copyright Takedown Procedure — MUXARO',
   description:
     'Digital Millennium Copyright Act compliance, designated agent notification procedure, and counter-notice process.',
-};
+  path: '/dmca',
+  keywords: [
+    'dmca procedure',
+    'copyright policy',
+    'muxaro copyright agent',
+    'notice and takedown',
+  ],
+});
 
 const LEGAL_LINKS = [
   { href: '/privacy', label: 'Privacy policy' },
@@ -239,8 +247,17 @@ export default function DmcaPage() {
     : 'Muxaro Copyright Policy and Digital Millennium Copyright Act (17 U.S.C. § 512) takedown procedure.';
   const blocks = parseLegalBlocks(body);
 
+  const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'DMCA Policy', path: '/dmca' },
+  ]);
+
   return (
     <div className="min-h-screen bg-base">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
+      />
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">
           <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-content-secondary mb-5">

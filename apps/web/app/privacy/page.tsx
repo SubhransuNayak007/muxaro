@@ -3,12 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Link from 'next/link';
 import { Shield, Calendar, ChevronRight } from 'lucide-react';
+import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
-export const metadata = {
-  title: 'Privacy Policy — MUXARO',
+export const metadata = constructMetadata({
+  title: 'Privacy Policy & Ephemeral Storage Guarantees — MUXARO',
   description:
-    'Privacy-by-design architecture, zero tracking cookies, GDPR and CCPA compliance, and automatic ephemeral file deletion.',
-};
+    'Privacy-by-design architecture, zero tracking cookies, GDPR and CCPA compliance, and automatic ephemeral file deletion within 60 minutes.',
+  path: '/privacy',
+  keywords: [
+    'privacy policy',
+    'ephemeral storage security',
+    'zero tracking cookies',
+    'gdpr ccpa compliant media converter',
+  ],
+});
 
 const LEGAL_LINKS = [
   { href: '/privacy', label: 'Privacy policy' },
@@ -256,8 +264,17 @@ export default function PrivacyPage() {
     : 'Muxaro operates on privacy by design with zero tracking cookies and automatic deletion of processed files.';
   const blocks = parseLegalBlocks(body);
 
+  const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'Privacy Policy', path: '/privacy' },
+  ]);
+
   return (
     <div className="min-h-screen bg-base">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbsJsonLd) }}
+      />
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">
           <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-content-secondary mb-5">

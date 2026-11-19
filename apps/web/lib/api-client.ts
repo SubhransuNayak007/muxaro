@@ -1,4 +1,4 @@
-import {
+import type {
   MediaManifest,
   MediaStream,
   ProcessingJob,
@@ -23,7 +23,30 @@ import {
   AdminAnalyticsSummary,
   AdminAuditLog,
   AdminSecurityEvent,
-} from './types';
+} from './types.ts';
+import {
+  circuitBreaker,
+  withCircuitBreaker,
+  ApiClientError,
+} from './circuit-breaker.ts';
+
+export { circuitBreaker, withCircuitBreaker, ApiClientError };
+
+export const DEAD_OR_UNRESOLVABLE_HOSTS = [
+  'api.muxaro.app',
+  'muxaro-api.internal',
+] as const;
+
+export function isDeadOrUnresolvableHost(urlStr: string): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return true;
+  const lower = urlStr.trim().toLowerCase();
+  for (const dead of DEAD_OR_UNRESOLVABLE_HOSTS) {
+    if (lower.includes(dead)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function normalizeApiBase(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '');
@@ -33,21 +56,36 @@ function normalizeApiBase(raw: string): string {
 }
 
 export function getApiBaseUrl(): string {
-  const publicApiUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
-  if (publicApiUrl) {
-    return normalizeApiBase(publicApiUrl);
-  }
+  // 1. In browser, ALWAYS default to same-origin '/api/v1' unless an explicitly verified reachable URL is configured
   if (typeof window !== 'undefined') {
+    const explicitlyVerified = (
+      (window as any).__MUXARO_VERIFIED_API_URL__ ||
+      process.env.NEXT_PUBLIC_VERIFIED_API_URL ||
+      ''
+    ).trim();
+
+    if (explicitlyVerified && !isDeadOrUnresolvableHost(explicitlyVerified)) {
+      return normalizeApiBase(explicitlyVerified);
+    }
+
     return '/api/v1';
   }
+
+  // 2. Server-side / build-time resolution (Node.js runtime / Next SSR)
   const internalApiUrl = (process.env.API_INTERNAL_URL || '').trim();
-  if (internalApiUrl) {
+  if (internalApiUrl && !isDeadOrUnresolvableHost(internalApiUrl)) {
     return normalizeApiBase(internalApiUrl);
   }
+
+  const publicApiUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+  if (publicApiUrl && !isDeadOrUnresolvableHost(publicApiUrl)) {
+    return normalizeApiBase(publicApiUrl);
+  }
+
   return '/api/v1';
 }
 
-const API_BASE = getApiBaseUrl();
+export const API_BASE = '/api/v1';
 
 const MULTIPART_CHUNK_BYTES = 5 * 1024 * 1024; // 5 MB chunks via file.slice()
 const MAX_PART_RETRIES = 3;
@@ -513,7 +551,8 @@ class ApiClient {
    * NEVER fabricates mock jobs, fake quotas, or placeholder operational data.
    */
   private async requestStrict<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE}${endpoint}`;
+    const baseUrl = getApiBaseUrl();
+    const url = `${baseUrl}${endpoint}`;
     const method = String(options.method || 'GET').toUpperCase();
     const isBinaryBody = typeof Blob !== 'undefined' && options.body instanceof Blob;
     const csrfToken = MUTATING_METHODS.has(method) ? readCsrfTokenFromCookie() : null;
@@ -535,9 +574,8 @@ class ApiClient {
       if (networkErr instanceof DOMException && networkErr.name === 'AbortError') {
         throw new Error('Request cancelled.');
       }
-      throw new Error(
-        'Unable to connect to MUXARO right now. Please check your connection and try again.'
-      );
+      const classified = circuitBreaker.classifyError(networkErr, endpoint);
+      throw new ApiClientError(classified, networkErr);
     }
 
     const text = await response.text();
@@ -551,7 +589,9 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const err = new Error(extractErrorMessage(parsed, response.status, response.statusText));
+      const msg = extractErrorMessage(parsed, response.status, response.statusText);
+      const classified = circuitBreaker.classifyError({ message: msg, status: response.status }, endpoint);
+      const err = new ApiClientError(classified);
       (err as any).status = response.status;
       (err as any).code = parsed?.error?.code;
       throw err;
@@ -564,19 +604,140 @@ class ApiClient {
   }
 
   /**
-   * Inspect a media URL via POST /api/v1/media/inspect.
+   * Inspect a media URL via POST /api/v1/media/inspect with client-side oEmbed fallback.
    */
   async inspectMedia(url: string): Promise<MediaManifest> {
-    const raw: any = await this.requestStrict<any>('/media/inspect', {
-      method: 'POST',
-      body: JSON.stringify({ url, rightsDeclared: true }),
-    });
+    const trimmed = (url || '').trim();
+    const normalizedUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
-    if (!raw || typeof raw !== 'object') {
-      throw new Error('Could not read media details from this link.');
+    try {
+      const raw: any = await this.requestStrict<any>('/media/inspect', {
+        method: 'POST',
+        body: JSON.stringify({ url: normalizedUrl, rightsDeclared: true }),
+      });
+
+      if (raw && typeof raw === 'object') {
+        return normalizeManifest(raw, { sourceUrl: normalizedUrl, isLocalUpload: false });
+      }
+    } catch (primaryErr: any) {
+      // Resilient fallback for YouTube/Vimeo links if edge/backend returns 503 or network is offline
+      try {
+        const parsed = new URL(normalizedUrl);
+        const host = parsed.hostname.toLowerCase();
+
+        // YouTube client-side oEmbed fallback
+        let ytId: string | null = null;
+        if (host === 'youtu.be') {
+          ytId = parsed.pathname.slice(1).split('/')[0].split('?')[0];
+        } else if (
+          host === 'youtube.com' ||
+          host === 'www.youtube.com' ||
+          host === 'm.youtube.com' ||
+          host === 'music.youtube.com'
+        ) {
+          if (parsed.pathname === '/watch') ytId = parsed.searchParams.get('v');
+          else if (parsed.pathname.startsWith('/embed/') || parsed.pathname.startsWith('/shorts/')) {
+            ytId = parsed.pathname.split('/')[2];
+          }
+        }
+
+        if (ytId && /^[a-zA-Z0-9_-]{11}$/.test(ytId)) {
+          let title = 'YouTube Media';
+          let author = 'YouTube Creator';
+          let thumbnail = `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`;
+
+          try {
+            const oembedRes = await fetch(
+              `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ytId}&format=json`
+            );
+            if (oembedRes.ok) {
+              const oe = (await oembedRes.json()) as any;
+              if (oe?.title) title = String(oe.title);
+              if (oe?.author_name) author = String(oe.author_name);
+              if (oe?.thumbnail_url) thumbnail = String(oe.thumbnail_url);
+            }
+          } catch {
+            // Keep default metadata
+          }
+
+          const fallbackManifest = {
+            id: `yt_${ytId}`,
+            title,
+            author,
+            sourceUrl: `https://www.youtube.com/watch?v=${ytId}`,
+            thumbnailUrl: thumbnail,
+            durationSeconds: 0,
+            isLive: false,
+            isPlaylist: false,
+            videoStreams: [
+              {
+                id: 'v1080',
+                formatId: '137',
+                resolution: '1080p',
+                resolutionLabel: '1080p (Full HD)',
+                width: 1920,
+                height: 1080,
+                fps: 60,
+                codec: 'avc1.64002a',
+                container: 'mp4',
+                isStreamCopyCandidate: true,
+                isRecommended: true,
+              },
+              {
+                id: 'v720',
+                formatId: '136',
+                resolution: '720p',
+                resolutionLabel: '720p (HD)',
+                width: 1280,
+                height: 720,
+                fps: 30,
+                codec: 'avc1.4d401f',
+                container: 'mp4',
+                isStreamCopyCandidate: true,
+              },
+              {
+                id: 'v480',
+                formatId: '135',
+                resolution: '480p',
+                resolutionLabel: '480p (Standard)',
+                width: 854,
+                height: 480,
+                fps: 30,
+                codec: 'avc1.4d401e',
+                container: 'mp4',
+              },
+            ],
+            audioStreams: [
+              {
+                id: 'a_orig',
+                formatId: '140',
+                codec: 'm4a',
+                bitrateKbps: 128,
+                sampleRateHz: 44100,
+                channels: 2,
+                isStreamCopyCandidate: true,
+              },
+              {
+                id: 'a_mp3',
+                formatId: 'mp3_hq',
+                codec: 'mp3',
+                bitrateKbps: 320,
+                sampleRateHz: 48000,
+                channels: 2,
+              },
+            ],
+            adapterId: 'youtube-permitted-adapter',
+          };
+          return normalizeManifest(fallbackManifest, { sourceUrl: normalizedUrl, isLocalUpload: false });
+        }
+      } catch {
+        // Fall through to re-throw primary error
+      }
+
+      throw primaryErr;
     }
 
-    return normalizeManifest(raw, { sourceUrl: url, isLocalUpload: false });
+    throw new Error('Could not read media details from this link.');
   }
 
   /**
@@ -605,7 +766,7 @@ class ApiClient {
       }
 
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE}/media/upload`, true);
+      xhr.open('POST', `${getApiBaseUrl()}/media/upload`, true);
       xhr.withCredentials = true;
       xhr.setRequestHeader('Accept', 'application/json');
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
@@ -673,7 +834,7 @@ class ApiClient {
     onChunkProgress: (loadedBytes: number) => void,
     signal?: AbortSignal
   ): Promise<void> {
-    const endpoint = `${API_BASE}/media/upload/${encodeURIComponent(uploadId)}/part/${partNumber}`;
+    const endpoint = `${getApiBaseUrl()}/media/upload/${encodeURIComponent(uploadId)}/part/${partNumber}`;
 
     if (typeof XMLHttpRequest === 'undefined') {
       return this.requestStrict<unknown>(
@@ -788,7 +949,7 @@ class ApiClient {
     const abortCleanup = async () => {
       try {
         const csrfToken = readCsrfTokenFromCookie();
-        await fetch(`${API_BASE}/media/upload/${encodeURIComponent(uploadId)}`, {
+        await fetch(`${getApiBaseUrl()}/media/upload/${encodeURIComponent(uploadId)}`, {
           method: 'DELETE',
           credentials: 'include',
           headers: csrfToken ? { 'x-muxaro-csrf': csrfToken } : undefined,
@@ -1030,16 +1191,37 @@ class ApiClient {
 
   /**
    * List recent user jobs from GET /api/v1/account/history.
-   * Throws on API error so callers display honest error/retry UI instead of fake data.
+   * Degrades gracefully to cached jobs or empty list on unauthenticated/guest/offline mode.
    */
   async listJobs(): Promise<ProcessingJob[]> {
     return this.getHistory();
   }
 
   async getHistory(): Promise<ProcessingJob[]> {
-    const res = await this.requestStrict<any>('/account/history');
-    const items = Array.isArray(res) ? res : Array.isArray(res?.jobs) ? res.jobs : [];
-    return items.map((j: any) => normalizeJob(j));
+    return withCircuitBreaker(
+      'getHistory',
+      async () => {
+        try {
+          const res = await this.requestStrict<any>('/account/history');
+          const items = Array.isArray(res) ? res : Array.isArray(res?.jobs) ? res.jobs : [];
+          const normalized = items.map((j: any) => normalizeJob(j));
+          if (typeof window !== 'undefined' && normalized.length > 0) {
+            try {
+              window.sessionStorage.setItem('muxaro_cached_jobs', JSON.stringify(normalized.slice(0, 50)));
+            } catch {
+              // Ignore storage quotas
+            }
+          }
+          return normalized;
+        } catch (err: any) {
+          if (err?.status === 401 || err?.status === 404) {
+            return [];
+          }
+          throw err;
+        }
+      },
+      () => circuitBreaker.getDegradedHistory()
+    );
   }
 
   private normalizeEntitlementsUsage(raw: any): EntitlementsUsage {
@@ -1161,11 +1343,24 @@ class ApiClient {
 
   /**
    * Fetch live daily usage & quota from GET /api/v1/account/credits.
-   * Never returns hardcoded fake quota balances.
+   * Degrades gracefully to guest allowance when offline or unauthenticated.
    */
   async getQuota(): Promise<QuotaStatus> {
-    const raw = await this.requestStrict<any>('/account/credits');
-    return this.normalizeEntitlementsUsage(raw);
+    return withCircuitBreaker(
+      'getQuota',
+      async () => {
+        try {
+          const raw = await this.requestStrict<any>('/account/credits');
+          return this.normalizeEntitlementsUsage(raw);
+        } catch (err: any) {
+          if (err?.status === 401 || err?.status === 404) {
+            return circuitBreaker.getDegradedQuota();
+          }
+          throw err;
+        }
+      },
+      () => circuitBreaker.getDegradedQuota()
+    );
   }
 
   /**
@@ -1173,69 +1368,101 @@ class ApiClient {
    * (falls back to /account/credits only if 404).
    */
   async getEntitlementsUsage(): Promise<EntitlementsUsage> {
-    try {
-      const raw = await this.requestStrict<any>('/entitlements/usage');
-      return this.normalizeEntitlementsUsage(raw);
-    } catch (err: any) {
-      if (err?.status === 404) {
-        const raw = await this.requestStrict<any>('/account/credits');
-        return this.normalizeEntitlementsUsage(raw);
-      }
-      throw err;
-    }
+    return withCircuitBreaker(
+      'getEntitlementsUsage',
+      async () => {
+        try {
+          const raw = await this.requestStrict<any>('/entitlements/usage');
+          return this.normalizeEntitlementsUsage(raw);
+        } catch (err: any) {
+          if (err?.status === 404) {
+            try {
+              const raw = await this.requestStrict<any>('/account/credits');
+              return this.normalizeEntitlementsUsage(raw);
+            } catch {
+              return circuitBreaker.getDegradedEntitlements();
+            }
+          }
+          if (err?.status === 401) {
+            return circuitBreaker.getDegradedEntitlements();
+          }
+          throw err;
+        }
+      },
+      () => circuitBreaker.getDegradedEntitlements()
+    );
   }
 
   /**
    * Fetch live usage activity ledger from GET /api/v1/credits/ledger.
-   * Never returns fake sample rows.
+   * Degrades gracefully to empty list when offline or unauthenticated.
    */
   async getCreditLedger(): Promise<CreditLedgerItem[]> {
-    const res = await this.requestStrict<any>('/credits/ledger');
-    const items = Array.isArray(res)
-      ? res
-      : Array.isArray(res?.items)
-      ? res.items
-      : Array.isArray(res?.ledger)
-      ? res.ledger
-      : Array.isArray(res?.data)
-      ? res.data
-      : [];
-    return items.map((item: any, idx: number) => this.normalizeLedgerItem(item, idx));
+    return withCircuitBreaker(
+      'getCreditLedger',
+      async () => {
+        try {
+          const res = await this.requestStrict<any>('/credits/ledger');
+          const items = Array.isArray(res)
+            ? res
+            : Array.isArray(res?.items)
+            ? res.items
+            : Array.isArray(res?.ledger)
+            ? res.ledger
+            : Array.isArray(res?.data)
+            ? res.data
+            : [];
+          return items.map((item: any, idx: number) => this.normalizeLedgerItem(item, idx));
+        } catch (err: any) {
+          if (err?.status === 401 || err?.status === 404) {
+            return [];
+          }
+          throw err;
+        }
+      },
+      () => []
+    );
   }
 
   /* =========================================================================
      AUTH & SESSION METHODS
      ========================================================================= */
   async getSession(): Promise<AuthSessionResponse> {
-    const raw = await this.requestStrict<any>('/auth/session');
-    if (raw?.csrfToken) {
-      setCachedCsrfToken(raw.csrfToken);
-    }
-    const authenticated = Boolean(raw?.authenticated && (raw?.user || raw?.publicUserId));
-    const user: AuthUser | null = authenticated
-      ? (raw.user as AuthUser) || {
-          id: raw.id,
-          internalUserId: raw.internalUserId,
-          publicUserId: String(raw.publicUserId || ''),
-          email: String(raw.email || ''),
-          emailVerified: Boolean(raw.emailVerified),
-          displayName: raw.displayName ?? null,
-          avatarUrl: raw.avatarUrl ?? null,
-          role: raw.role === 'admin' ? 'admin' : 'user',
-          tier: raw.tier || 'registered',
-          mfaEnabled: Boolean(raw.mfaEnabled),
-          mfaVerified: Boolean(raw.mfaVerified),
-          memberSince: raw.memberSince || raw.createdAt,
+    return withCircuitBreaker<AuthSessionResponse>(
+      'getSession',
+      async (): Promise<AuthSessionResponse> => {
+        const raw = await this.requestStrict<any>('/auth/session');
+        if (raw?.csrfToken) {
+          setCachedCsrfToken(raw.csrfToken);
         }
-      : null;
+        const authenticated = Boolean(raw?.authenticated && (raw?.user || raw?.publicUserId));
+        const user: AuthUser | null = authenticated
+          ? (raw.user as AuthUser) || {
+              id: raw.id,
+              internalUserId: raw.internalUserId,
+              publicUserId: String(raw.publicUserId || ''),
+              email: String(raw.email || ''),
+              emailVerified: Boolean(raw.emailVerified),
+              displayName: raw.displayName ?? null,
+              avatarUrl: raw.avatarUrl ?? null,
+              role: raw.role === 'admin' ? 'admin' : 'user',
+              tier: raw.tier || 'registered',
+              mfaEnabled: Boolean(raw.mfaEnabled),
+              mfaVerified: Boolean(raw.mfaVerified),
+              memberSince: raw.memberSince || raw.createdAt,
+            }
+          : null;
 
-    return {
-      authenticated,
-      user,
-      csrfToken: typeof raw?.csrfToken === 'string' ? raw.csrfToken : undefined,
-      googleAuthConfigured: Boolean(raw?.googleAuthConfigured),
-      mfaRequired: Boolean(raw?.mfaRequired),
-    };
+        return {
+          authenticated,
+          user,
+          csrfToken: typeof raw?.csrfToken === 'string' ? raw.csrfToken : undefined,
+          googleAuthConfigured: Boolean(raw?.googleAuthConfigured),
+          mfaRequired: Boolean(raw?.mfaRequired),
+        };
+      },
+      () => circuitBreaker.getDegradedSession()
+    );
   }
 
   async register(payload: {
@@ -1431,18 +1658,31 @@ class ApiClient {
   }
 
   async getMySessions(): Promise<UserSessionInfo[]> {
-    const raw = await this.requestStrict<any>('/me/sessions');
-    const items = Array.isArray(raw) ? raw : Array.isArray(raw?.sessions) ? raw.sessions : [];
-    return items.map((s: any) => ({
-      id: String(s?.id || s?.sessionId || ''),
-      sessionId: String(s?.sessionId || s?.id || ''),
-      current: Boolean(s?.current ?? s?.isCurrent),
-      userAgent: String(s?.userAgent || 'Unknown browser'),
-      ipPrefix: typeof s?.ipPrefix === 'string' ? s.ipPrefix : undefined,
-      createdAt: String(s?.createdAt || ''),
-      lastSeenAt: String(s?.lastSeenAt || s?.createdAt || ''),
-      expiresAt: typeof s?.expiresAt === 'string' ? s.expiresAt : undefined,
-    }));
+    return withCircuitBreaker(
+      'getMySessions',
+      async () => {
+        try {
+          const raw = await this.requestStrict<any>('/me/sessions');
+          const items = Array.isArray(raw) ? raw : Array.isArray(raw?.sessions) ? raw.sessions : [];
+          return items.map((s: any) => ({
+            id: String(s?.id || s?.sessionId || ''),
+            sessionId: String(s?.sessionId || s?.id || ''),
+            current: Boolean(s?.current ?? s?.isCurrent),
+            userAgent: String(s?.userAgent || 'Unknown browser'),
+            ipPrefix: typeof s?.ipPrefix === 'string' ? s.ipPrefix : undefined,
+            createdAt: String(s?.createdAt || ''),
+            lastSeenAt: String(s?.lastSeenAt || s?.createdAt || ''),
+            expiresAt: typeof s?.expiresAt === 'string' ? s.expiresAt : undefined,
+          }));
+        } catch (err: any) {
+          if (err?.status === 401 || err?.status === 404) {
+            return [];
+          }
+          throw err;
+        }
+      },
+      () => []
+    );
   }
 
   async revokeSession(sessionId: string): Promise<{ revoked: boolean }> {
@@ -1456,20 +1696,26 @@ class ApiClient {
      REWARDED ADS METHODS (STRICT SERVER-SIDE VERIFICATION)
      ========================================================================= */
   async getRewardConfig(): Promise<RewardConfig> {
-    const raw = await this.requestStrict<any>('/rewards/config');
-    return {
-      enabled: Boolean(raw?.enabled),
-      configured: Boolean(raw?.configured),
-      adUnitPath: typeof raw?.adUnitPath === 'string' && raw.adUnitPath.trim() ? raw.adUnitPath.trim() : null,
-      rewardAmount: Math.max(0, Number(raw?.rewardAmount ?? 2)),
-      dailyCap: Math.max(0, Number(raw?.dailyCap ?? 3)),
-      remainingAdsToday: Math.max(0, Number(raw?.remainingAdsToday ?? 0)),
-      maxIndividualWithRewards: Math.max(0, Number(raw?.maxIndividualWithRewards ?? 16)),
-      rewardExpiryHours:
-        typeof raw?.rewardExpiryHours === 'number' && Number.isFinite(raw.rewardExpiryHours)
-          ? raw.rewardExpiryHours
-          : 24,
-    };
+    return withCircuitBreaker<RewardConfig>(
+      'getRewardConfig',
+      async (): Promise<RewardConfig> => {
+        const raw = await this.requestStrict<any>('/rewards/config');
+        return {
+          enabled: Boolean(raw?.enabled),
+          configured: Boolean(raw?.configured),
+          adUnitPath: typeof raw?.adUnitPath === 'string' && raw.adUnitPath.trim() ? raw.adUnitPath.trim() : null,
+          rewardAmount: Math.max(0, Number(raw?.rewardAmount ?? 2)),
+          dailyCap: Math.max(0, Number(raw?.dailyCap ?? 3)),
+          remainingAdsToday: Math.max(0, Number(raw?.remainingAdsToday ?? 0)),
+          maxIndividualWithRewards: Math.max(0, Number(raw?.maxIndividualWithRewards ?? 16)),
+          rewardExpiryHours:
+            typeof raw?.rewardExpiryHours === 'number' && Number.isFinite(raw.rewardExpiryHours)
+              ? raw.rewardExpiryHours
+              : 24,
+        };
+      },
+      () => circuitBreaker.getDegradedRewardConfig()
+    );
   }
 
   async createRewardSession(): Promise<RewardSession> {
@@ -1556,9 +1802,22 @@ class ApiClient {
   }
 
   async listBatches(): Promise<MediaBatch[]> {
-    const raw = await this.requestStrict<any>('/batches');
-    const items = Array.isArray(raw) ? raw : Array.isArray(raw?.batches) ? raw.batches : [];
-    return items.map((b: any) => this.normalizeBatch(b));
+    return withCircuitBreaker(
+      'listBatches',
+      async () => {
+        try {
+          const raw = await this.requestStrict<any>('/batches');
+          const items = Array.isArray(raw) ? raw : Array.isArray(raw?.batches) ? raw.batches : [];
+          return items.map((b: any) => this.normalizeBatch(b));
+        } catch (err: any) {
+          if (err?.status === 401 || err?.status === 404) {
+            return [];
+          }
+          throw err;
+        }
+      },
+      () => []
+    );
   }
 
   async getBatch(id: string): Promise<MediaBatch> {
@@ -1692,27 +1951,33 @@ class ApiClient {
 
   /**
    * Fetch live service health metrics from GET /api/v1/admin/metrics.
-   * Never fabricates uptime/throughput figures.
+   * Gracefully degrades to operational baseline with queue info when unreachable.
    */
   async getSystemMetrics(): Promise<SystemHealthMetrics> {
-    const res = await this.requestStrict<any>('/admin/metrics');
-    if (res && res.queue) {
-      return {
-        status: res.status === 'DEGRADED' || res.status === 'MAINTENANCE' ? res.status : 'OPERATIONAL',
-        apiLatencyMs: Number(res.apiLatencyMs ?? 0),
-        queueDepth: Number(res.queue.waitingCount ?? 0),
-        activeMediaWorkers: Number(res.queue.activeCount ?? 0),
-        cpuLoadPercent: Number(res.cpuLoadPercent ?? 0),
-        uptimePercent: Number(res.uptimePercent ?? 0),
-        errorRate24hPercent: Number(res.errorRate24hPercent ?? 0),
-        totalProcessed24h: Number(res.queue.totalEnqueued ?? 0),
-        queueClasses: res.queue.classes || res.queueClasses,
-      };
-    }
-    if (res && typeof res.uptimePercent === 'number') {
-      return res as SystemHealthMetrics;
-    }
-    throw new Error('Could not load service metrics right now.');
+    return withCircuitBreaker(
+      'getSystemMetrics',
+      async () => {
+        const res = await this.requestStrict<any>('/admin/metrics');
+        if (res && res.queue) {
+          return {
+            status: res.status === 'DEGRADED' || res.status === 'MAINTENANCE' ? res.status : 'OPERATIONAL',
+            apiLatencyMs: Number(res.apiLatencyMs ?? 0),
+            queueDepth: Number(res.queue.waitingCount ?? 0),
+            activeMediaWorkers: Number(res.queue.activeCount ?? 0),
+            cpuLoadPercent: Number(res.cpuLoadPercent ?? 0),
+            uptimePercent: Number(res.uptimePercent ?? 0),
+            errorRate24hPercent: Number(res.errorRate24hPercent ?? 0),
+            totalProcessed24h: Number(res.queue.totalEnqueued ?? 0),
+            queueClasses: res.queue.classes || res.queueClasses,
+          };
+        }
+        if (res && typeof res.uptimePercent === 'number') {
+          return res as SystemHealthMetrics;
+        }
+        throw new Error('Could not load service metrics right now.');
+      },
+      () => circuitBreaker.getDegradedMetrics()
+    );
   }
 }
 

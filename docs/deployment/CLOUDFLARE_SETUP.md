@@ -1,5 +1,6 @@
 # MUXARO Cloudflare Setup Guide (Pages, DNS, WAF & Headers)
 
+**Live Deployment URL:** [`https://muxaro.pages.dev/`](https://muxaro.pages.dev/) *(verified live on `2026-11-18`: HTTP `200`, TLS 1.3 Let's Encrypt `YE1`, `301` HTTP→HTTPS redirect, security & `X-Robots-Tag` headers active)*  
 **Frontend Project Config:** `apps/web/wrangler.toml`, `apps/web/next.config.mjs`  
 **Edge Headers & Redirects:** `apps/web/public/_headers`, `apps/web/public/_redirects`  
 **Infrastructure IaC Reference:** `infra/terraform/modules/cloudflare/main.tf`

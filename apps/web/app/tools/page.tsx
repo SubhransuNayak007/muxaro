@@ -11,12 +11,22 @@ import {
   ArrowRight,
   Sparkles,
 } from 'lucide-react';
+import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
-export const metadata = {
-  title: 'Media Tools | MUXARO',
+export const metadata = constructMetadata({
+  title: 'Creator Media Processing Tools | MUXARO',
   description:
-    'Standalone audio extraction, video conversion, track merging, and batch playlist processing tools.',
-};
+    'High-integrity creator tools for lossless audio extraction, stream copy remuxing, video conversion, and batch playlist processing.',
+  path: '/tools',
+  keywords: [
+    'creator media tools',
+    'lossless audio extractor',
+    'audio video merger',
+    'video format converter',
+    'batch media processing',
+    'playlist downloader',
+  ],
+});
 
 const TOOLS = [
   {
@@ -70,8 +80,17 @@ const TOOLS = [
 ];
 
 export default function ToolsIndexPage() {
+  const breadcrumbJsonLd = buildBreadcrumbsJsonLd([
+    { name: 'Home', path: '/' },
+    { name: 'Tools', path: '/tools' },
+  ]);
+
   return (
     <div className="w-full">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <div className="mb-6">

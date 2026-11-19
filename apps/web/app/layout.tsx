@@ -6,6 +6,7 @@ import Footer from '@/components/Footer';
 import { AuthProvider } from '@/lib/auth-context';
 import { AnalyticsProvider } from '@/components/AnalyticsProvider';
 import { ConsentBanner } from '@/components/ConsentBanner';
+import { buildRootWebAppContextJsonLd } from '@/lib/seo';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -20,7 +21,7 @@ const jetbrainsMono = JetBrains_Mono({
   variable: '--font-mono',
 });
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.app')
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.pages.dev')
   .trim()
   .replace(/\/+$/, '');
 
@@ -82,6 +83,12 @@ export default function RootLayout({
     >
       <head>
         <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(buildRootWebAppContextJsonLd(SITE_URL)),
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var d=document.documentElement;var t=localStorage.getItem('theme');if(t==='dark'){d.classList.add('dark');d.setAttribute('data-theme','dark');}else{d.classList.remove('dark');d.setAttribute('data-theme','light');}if(localStorage.getItem('muxaro-lightweight')==='true'){d.setAttribute('data-lightweight','true');}}catch(e){}})();`,

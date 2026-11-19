@@ -1,10 +1,33 @@
-# MUXARO SSL/TLS & HTTPS Security Guide (`muxaro.app`)
+# MUXARO SSL/TLS & HTTPS Security Guide
 
-> **Certificate Issuance Status (Truthfulness Notice):** No live TLS certificate has been issued for `muxaro.app` or `api.muxaro.app` yet because domain registration and cloud deployment have not been executed. This document specifies the exact validation, encryption, HSTS, cookie, mixed-content, and automated renewal procedures required during live provisioning.
+> **Verified Live Deployment & Certificate Status (`2026-11-18T10:08:53Z`):**
+> - **Cloudflare Pages Frontend (`https://muxaro.pages.dev/`):** **LIVE & TLS-VERIFIED** (`TLSv1.3`, `TLS_AES_256_GCM_SHA384`, valid Let's Encrypt `YE1` certificate, `301` HTTP→HTTPS redirect, zero mixed content, security headers verified live).
+> - **Custom Domain (`muxaro.app`) & Cloud Run API (`api.muxaro.app`):** **Pending provisioning.** No live TLS certificate has been issued for `muxaro.app` or `api.muxaro.app` yet because custom domain registration and GCP Cloud Run provisioning have not been executed.
 
 ---
 
-## 1. End-to-End TLS Architecture
+## 1. Verified Live HTTPS & TLS Inspection (`https://muxaro.pages.dev/`)
+
+Measured directly via Node.js `node:tls` and HTTP probes on `2026-11-18T10:08:53Z`:
+
+| Check | Verified Live Result |
+| :--- | :--- |
+| **HTTP → HTTPS Redirect (`http://muxaro.pages.dev/`)** | `HTTP 301` → `Location: https://muxaro.pages.dev/` (`server: cloudflare`) |
+| **TLS Protocol & Cipher** | **`TLSv1.3`** / **`TLS_AES_256_GCM_SHA384`** (`authorized: true`) |
+| **Certificate Subject & SANs** | `CN=muxaro.pages.dev` (`DNS:*.muxaro.pages.dev`, `DNS:muxaro.pages.dev`) |
+| **Certificate Issuer** | `Let's Encrypt` (`CN=YE1, O=Let's Encrypt, C=US`) |
+| **Validity Window** | `Nov 18 08:59:58 2026 GMT` → `Feb 16 08:59:57 2027 GMT` (automated Cloudflare renewal) |
+| **SHA-256 Fingerprint** | `AC:6C:74:2D:6A:D1:27:2E:E2:9A:CB:A1:BC:56:C8:0A:A1:F1:BC:70:76:CA:7E:AE:58:6A:A5:4A:39:4B:8A:19` |
+| **Homepage (`https://muxaro.pages.dev/`)** | `HTTP 200` (`41,406` bytes; `<title>MUXARO — Your Media. One Powerful Workspace.</title>`) |
+| **Security Headers Observed** | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()` |
+| **HSTS / CSP Headers on `*.pages.dev`** | `Strict-Transport-Security`: not set on default `pages.dev` hostname (configured per custom Cloudflare zone upon attaching `muxaro.app`); `Content-Security-Policy`: not yet set in `_headers` |
+| **Private Route Indexing (`https://muxaro.pages.dev/account`)** | `HTTP 200`, `X-Robots-Tag: noindex, nofollow`, `X-Frame-Options: DENY` |
+| **Brand Asset Caching (`/brand/muxaro-mark.svg`)** | `HTTP 200`, `image/svg+xml`, `Cache-Control: public, max-age=86400, stale-while-revalidate=604800` |
+| **Mixed-Content Audit (Homepage HTML)** | **0** insecure `http://` asset/script/link/image URLs (only standard SVG namespace `http://www.w3.org/2000/svg` in inline SVG markup) |
+
+---
+
+## 2. End-to-End TLS Architecture (Custom Domain Target: `muxaro.app`)
 
 Because `.app` is a Google Registry top-level domain included in the **global browser HSTS preload list**, modern browsers refuse plaintext HTTP connections to `muxaro.app` and all subdomains. Every public hop must terminate valid, CA-signed TLS certificates:
 
@@ -19,14 +42,14 @@ flowchart LR
 
 ---
 
-## 2. Certificate Provisioning & DNS Validation Process
+## 3. Certificate Provisioning & DNS Validation Process
 
-### 2.1 Frontend Edge Certificate (`muxaro.app` & `www.muxaro.app`)
+### 3.1 Frontend Edge Certificate (`muxaro.app` & `www.muxaro.app`)
 - **Issuer:** Cloudflare Universal SSL / Pages Managed Certificate (Let's Encrypt / Google Trust Services).
 - **Validation Method:** Automatic **DNS-01** validation performed by Cloudflare when the `muxaro.app` zone is authoritative on Cloudflare DNS and custom domains are bound in Cloudflare Pages.
 - **Renewal:** Fully automated by Cloudflare prior to expiry (zero manual CSR/key rotation required).
 
-### 2.2 API Origin Certificate (`api.muxaro.app`)
+### 3.2 API Origin Certificate (`api.muxaro.app`)
 - **Issuer:** Google Cloud Run Managed TLS Certificate (Let's Encrypt / Google Trust Services).
 - **Validation Sequence:**
   1. Complete domain ownership verification in GCP for `muxaro.app` (DNS `TXT` record).
@@ -37,9 +60,9 @@ flowchart LR
 
 ---
 
-## 3. HTTPS Enforcement & HSTS Rollout Policy
+## 4. HTTPS Enforcement & HSTS Rollout Policy
 
-### 3.1 Cloudflare SSL/TLS Settings
+### 4.1 Cloudflare SSL/TLS Settings
 | Setting | Required Value | Purpose |
 | :--- | :--- | :--- |
 | **SSL/TLS Encryption Mode** | **Full (Strict)** | Enforces authenticated TLS between Cloudflare Edge and Cloud Run origin |
@@ -48,7 +71,7 @@ flowchart LR
 | **Always Use HTTPS** | **Enabled** | Redirects any `http://` request with `301` to `https://` |
 | **Automatic HTTPS Rewrites** | **Enabled** | Rewrites accidental insecure asset URLs to HTTPS |
 
-### 3.2 Staged Custom HSTS Header Rollout
+### 4.2 Staged Custom HSTS Header Rollout
 Because `.app` is natively HSTS-preloaded by browsers, do **not** immediately emit a 1-year `Strict-Transport-Security` header with `includeSubDomains; preload` until every subdomain (`muxaro.app`, `www.muxaro.app`, `api.muxaro.app`) has been verified healthy:
 1. **Day 0–7 (Initial Validation):** `Strict-Transport-Security: max-age=300`
 2. **Day 7+ (Verified Stable):** `Strict-Transport-Security: max-age=15552000; includeSubDomains`
@@ -56,7 +79,7 @@ Because `.app` is natively HSTS-preloaded by browsers, do **not** immediately em
 
 ---
 
-## 4. Secure Cookies & Proxy Header Trust
+## 5. Secure Cookies & Proxy Header Trust
 
 In `apps/api/src/middleware/auth.middleware.ts`:
 - `isSecureRequest(request)` sets the `Secure` cookie flag whenever `NODE_ENV === 'production'`, `x-forwarded-proto === 'https'`, or `request.protocol === 'https'`.
@@ -70,7 +93,7 @@ In `apps/api/src/middleware/auth.middleware.ts`:
 
 ---
 
-## 5. Mixed-Content Prevention
+## 6. Mixed-Content Prevention
 
 - `apps/web/app/layout.tsx` self-hosts `Inter` and `JetBrains_Mono` via `next/font/google` (no external `http://` font stylesheets).
 - All brand assets resolve via relative `/brand/*` paths.
@@ -80,7 +103,7 @@ In `apps/api/src/middleware/auth.middleware.ts`:
 
 ---
 
-## 6. Post-Provisioning TLS Verification Commands
+## 7. Post-Provisioning TLS Verification Commands
 
 Run these checks **after** live domain and Cloud Run provisioning:
 
