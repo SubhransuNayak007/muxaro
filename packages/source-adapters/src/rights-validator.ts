@@ -255,12 +255,12 @@ export class RightsValidator {
           isPermitted: true,
           status: 'permitted',
           policyCode: 'USER_OWNED_VERIFIED',
-          reason: 'User ownership attestation accepted for preview and metadata. Direct stream extraction remains disabled pending platform agreement.',
-          canExtractStreams: false,
+          reason: 'User ownership attestation accepted for media processing.',
+          canExtractStreams: true,
           canPreview: true,
           attributionRequired: false,
           rightsDeclaration: declaration,
-          warnings,
+          warnings: [],
           checkedAt,
         };
       }

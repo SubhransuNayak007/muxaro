@@ -129,7 +129,7 @@ export default function VideoMergerPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 deepseek-input-card p-6 sm:p-8">
+          <div className="lg:col-span-2 muxaro-media-card p-6 sm:p-8">
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="flex items-center justify-between gap-4 pb-3 border-b border-line">
                 <span className="text-sm font-semibold text-content">
@@ -138,9 +138,9 @@ export default function VideoMergerPage() {
                 <button
                   type="button"
                   onClick={handleAddVideo}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-line bg-surface hover:bg-surface-elevated text-content transition-colors active:scale-[0.98] shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-line bg-surface hover:bg-surface-elevated text-content transition-colors active:scale-[0.98] shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
-                  <Plus className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                  <Plus className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
                   <span>Add clip</span>
                 </button>
               </div>
@@ -151,7 +151,7 @@ export default function VideoMergerPage() {
                   return (
                     <div key={idx} className="space-y-1.5">
                       <div className="flex items-center gap-2.5">
-                        <span className="w-7 h-7 rounded-full bg-surface-elevated border border-line text-brand-violet font-semibold text-xs flex items-center justify-center shrink-0">
+                        <span className="w-7 h-7 rounded-full bg-surface-elevated border border-line text-brand font-semibold text-xs flex items-center justify-center shrink-0">
                           {idx + 1}
                         </span>
                         <input
@@ -164,7 +164,7 @@ export default function VideoMergerPage() {
                           onChange={(e) => handleUpdateVideo(idx, e.target.value)}
                           placeholder={`Paste clip ${idx + 1} link (e.g. youtube.com/watch?v=... or direct MP4)`}
                           aria-label={`Video clip ${idx + 1} URL`}
-                          className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                          className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                         />
                         {videoList.length > 2 && (
                           <button
@@ -253,9 +253,9 @@ export default function VideoMergerPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="deepseek-input-card p-6 space-y-4">
+            <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <Film className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <Film className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Concatenation specs</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
@@ -283,9 +283,9 @@ export default function VideoMergerPage() {
               </ul>
             </div>
 
-            <div className="deepseek-input-card p-6 space-y-2">
+            <div className="muxaro-media-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <ShieldCheck className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Automatic cleanup</span>
               </div>
               <p className="text-xs text-content-secondary leading-relaxed">

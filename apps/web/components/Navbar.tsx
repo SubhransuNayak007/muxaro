@@ -269,9 +269,9 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* Center: Google Antigravity Floating Pill Navigation (Desktop) */}
+        {/* Center: Clean Segmented Navigation (Desktop) */}
         <nav
-          className="hidden lg:flex items-center gap-1 px-1.5 py-1 rounded-full bg-surface-elevated/80 border border-line/60 shadow-xs"
+          className="hidden lg:flex items-center gap-1 p-1 rounded-full bg-elevated border border-line shadow-xs"
           aria-label="Main navigation"
         >
           {navLinks.map((item) => {
@@ -281,10 +281,10 @@ export default function Navbar() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={`px-3.5 py-1 text-xs font-medium rounded-full whitespace-nowrap transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                className={`px-3.5 py-1 text-xs font-medium rounded-full whitespace-nowrap transition-colors duration-150 active:translate-y-px ${
                   active
-                    ? 'text-brand-violet dark:text-content bg-surface shadow-xs font-semibold'
-                    : 'text-content-secondary hover:text-content hover:bg-surface/50'
+                    ? 'text-content bg-surface shadow-xs font-semibold'
+                    : 'text-content-secondary hover:text-content hover:bg-surface/60'
                 }`}
               >
                 {item.label}

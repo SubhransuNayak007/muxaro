@@ -1915,6 +1915,7 @@ export class QueueService extends EventEmitter {
         const outputTemplate = path.join(jobDir, 'output.%(ext)s');
         const ytArgs = [
           '--no-playlist',
+          '--no-cache-dir',
           '--no-warnings',
           '--progress',
           '--newline',
@@ -1970,6 +1971,7 @@ export class QueueService extends EventEmitter {
 
         const ytArgs = [
           '--no-playlist',
+          '--no-cache-dir',
           '--no-warnings',
           '--progress',
           '--newline',

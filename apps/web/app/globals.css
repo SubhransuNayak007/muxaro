@@ -8,25 +8,25 @@
 @tailwind utilities;
 
 :root {
-  /* Brand Core Palette */
-  --muxaro-indigo: #695bff;
+  /* Brand Core Palette (Refined SaaS Purple/Indigo) */
+  --muxaro-indigo: #6558F5;
   --muxaro-blue: #4677ff;
   --muxaro-cyan: #36d6d1;
-  --muxaro-gradient-primary: linear-gradient(135deg, #695bff 0%, #4677ff 50%, #36d6d1 100%);
-  --muxaro-gradient-hover: linear-gradient(135deg, #5b4de6 0%, #3b6bee 50%, #2cc5c0 100%);
-  --muxaro-gradient-subtle: linear-gradient(135deg, rgba(105, 91, 255, 0.08) 0%, rgba(70, 119, 255, 0.08) 100%);
+  --muxaro-gradient-primary: linear-gradient(135deg, #6558F5 0%, #4677ff 50%, #36d6d1 100%);
+  --muxaro-gradient-hover: linear-gradient(135deg, #5345E7 0%, #3b6bee 50%, #2cc5c0 100%);
+  --muxaro-gradient-subtle: linear-gradient(135deg, rgba(101, 88, 245, 0.08) 0%, rgba(70, 119, 255, 0.08) 100%);
   
-  /* Light Theme (Default Consumer SaaS Canvas) */
-  --muxaro-bg-base: #f7f8fc;
+  /* Light Theme (Clean Violet & Alex Reji SaaS Canvas) */
+  --muxaro-bg-base: #F8F9FC;
   --muxaro-bg-surface: #ffffff;
-  --muxaro-bg-elevated: #f1f3f9;
+  --muxaro-bg-elevated: #F2F4F7;
   --muxaro-bg-interactive: #eef1f8;
   
-  --muxaro-border: #e8eaf1;
+  --muxaro-border: #E6E9F1;
   --muxaro-border-subtle: #f0f2f7;
-  --muxaro-border-focus: #695bff;
+  --muxaro-border-focus: #6558F5;
 
-  --muxaro-text-primary: #171b2b;
+  --muxaro-text-primary: #171A2B;
   --muxaro-text-secondary: #5e667e;
   --muxaro-text-tertiary: #666e85;
   
@@ -40,18 +40,18 @@
   --muxaro-info: #4677ff;
   --muxaro-info-bg: rgba(70, 119, 255, 0.1);
 
-  /* Shadows & Elevation */
-  --muxaro-shadow-sm: 0 1px 3px rgba(23, 27, 43, 0.04);
-  --muxaro-shadow-md: 0 4px 14px rgba(23, 27, 43, 0.06), 0 1px 3px rgba(23, 27, 43, 0.04);
-  --muxaro-shadow-lg: 0 12px 32px rgba(23, 27, 43, 0.08), 0 2px 6px rgba(23, 27, 43, 0.04);
-  --muxaro-shadow-focus: 0 0 0 3px rgba(105, 91, 255, 0.25);
-  --muxaro-shadow-btn: 0 2px 8px rgba(105, 91, 255, 0.25);
-  --muxaro-shadow-btn-hover: 0 4px 14px rgba(105, 91, 255, 0.35);
+  /* Shadows & Elevation (Clean Alex Reji / Untitled UI Depth) */
+  --muxaro-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(16, 24, 40, 0.02);
+  --muxaro-shadow-md: 0 4px 14px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --muxaro-shadow-lg: 0 20px 40px -15px rgba(16, 24, 40, 0.07), 0 1px 3px rgba(16, 24, 40, 0.03);
+  --muxaro-shadow-focus: 0 0 0 3px rgba(101, 88, 245, 0.14);
+  --muxaro-shadow-btn: 0 2px 8px rgba(101, 88, 245, 0.22);
+  --muxaro-shadow-btn-hover: 0 4px 14px rgba(101, 88, 245, 0.32);
 
   /* Button and Control Foreground */
   --muxaro-btn-fg: #ffffff;
-  --muxaro-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(105, 91, 255, 0.11) 0%, rgba(70, 119, 255, 0.05) 45%, rgba(54, 214, 209, 0.03) 72%, rgba(247, 248, 252, 0) 100%);
-  --dark-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(105, 91, 255, 0.2) 0%, rgba(70, 119, 255, 0.09) 45%, rgba(54, 214, 209, 0.04) 72%, rgba(10, 13, 20, 0) 100%);
+  --muxaro-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(101, 88, 245, 0.07) 0%, rgba(70, 119, 255, 0.03) 45%, rgba(248, 249, 252, 0) 100%);
+  --dark-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(101, 88, 245, 0.15) 0%, rgba(70, 119, 255, 0.06) 45%, rgba(10, 13, 20, 0) 100%);
 
   /* MUXARO Aurora Flow Tokens (Light Theme) */
   --muxaro-aurora-static: linear-gradient(180deg, rgba(105, 91, 255, 0.08) 0%, rgba(70, 119, 255, 0.04) 48%, rgba(247, 248, 252, 0) 100%);
@@ -372,10 +372,46 @@ h2 {
   letter-spacing: -0.015em;
 }
 
-/* Instant focus-visible on every interactive element */
+/* Refined, non-conflicting focus-visible */
 :focus-visible {
   outline: 2px solid var(--muxaro-border-focus);
   outline-offset: 2px;
+}
+
+/* Crisp single focus ring on text and search inputs (no browser outline, subtle 3px shadow) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="url"],
+input[type="number"],
+input[type="search"],
+textarea,
+select,
+.muxaro-input {
+  outline: none !important;
+}
+
+input[type="text"]:focus,
+input[type="text"]:focus-visible,
+input[type="email"]:focus,
+input[type="email"]:focus-visible,
+input[type="password"]:focus,
+input[type="password"]:focus-visible,
+input[type="url"]:focus,
+input[type="url"]:focus-visible,
+input[type="number"]:focus,
+input[type="number"]:focus-visible,
+input[type="search"]:focus,
+input[type="search"]:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible,
+.muxaro-input:focus,
+.muxaro-input:focus-visible {
+  outline: none !important;
+  border-color: var(--muxaro-indigo) !important;
+  box-shadow: 0 0 0 3px rgba(101, 88, 245, 0.14) !important;
 }
 
 button:active,
@@ -448,61 +484,178 @@ a:active {
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-/* DeepSeek-inspired Floating Squircle Input Card */
+/* Alex Reji & Untitled UI Signature Media Card Surface */
+.muxaro-media-card,
 .deepseek-input-card {
   background-color: var(--muxaro-bg-surface);
   color: var(--muxaro-text-primary);
   border: 1px solid var(--muxaro-border);
   border-radius: 24px;
-  box-shadow: 0 12px 36px -8px rgba(23, 27, 43, 0.08), 0 2px 6px rgba(23, 27, 43, 0.03);
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 20px 40px -15px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.03);
+  transition: box-shadow 180ms ease, transform 180ms ease;
+  position: relative;
 }
 
+.dark .muxaro-media-card,
 .dark .deepseek-input-card {
-  background-color: rgba(17, 21, 32, 0.88);
-  border-color: rgba(255, 255, 255, 0.09);
-  box-shadow: 0 16px 44px -10px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  background-color: rgba(17, 21, 32, 0.95);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
+/* Non-waivable fix: The outer card NEVER applies focus-within borders or rings,
+   preventing the oversized double-purple outline bug. Only the inner input gets a single ring. */
+.muxaro-media-card:focus-within,
 .deepseek-input-card:focus-within {
-  border-color: var(--muxaro-indigo);
-  box-shadow: 0 16px 48px -8px rgba(105, 91, 255, 0.18), 0 0 0 1px var(--muxaro-indigo);
+  /* Retain clean neutral border and elevation */
+  border-color: var(--muxaro-border);
 }
 
-/* DeepSeek Signature Circular Action Button (Upward Arrow) */
-.deepseek-action-circle {
+.dark .muxaro-media-card:focus-within,
+.dark .deepseek-input-card:focus-within {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Alex Reji Segmented Group & Tabs */
+.muxaro-segmented-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background-color: var(--muxaro-bg-elevated);
+  border: 1px solid var(--muxaro-border);
+}
+
+.muxaro-segmented-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muxaro-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.muxaro-segmented-tab:hover {
+  color: var(--muxaro-text-primary);
+}
+
+.muxaro-segmented-tab[aria-selected="true"],
+.muxaro-segmented-tab.active {
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-primary);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+
+.dark .muxaro-segmented-tab[aria-selected="true"],
+.dark .muxaro-segmented-tab.active {
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Alex Reji Lilac Filter Tag Pill with Dismiss Action */
+.muxaro-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #F5F3FF;
+  border: 1px solid #DDD6FE;
+  color: #6558F5;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.dark .muxaro-tag-pill {
+  background-color: rgba(101, 88, 245, 0.15);
+  border-color: rgba(101, 88, 245, 0.35);
+  color: #C4B5FD;
+}
+
+.muxaro-tag-pill:hover {
+  background-color: #EDE9FE;
+}
+
+/* Violet Top Announcement Banner Pill */
+.violet-announcement-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 9999px;
+  background-color: #F5F3FF;
+  border: 1px solid #DDD6FE;
+  color: #6558F5;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.dark .violet-announcement-pill {
+  background-color: rgba(101, 88, 245, 0.14);
+  border-color: rgba(101, 88, 245, 0.32);
+  color: #C4B5FD;
+}
+
+.violet-announcement-pill:hover {
+  background-color: #EDE9FE;
+  border-color: #C4B5FD;
+  transform: translateY(-1px);
+}
+
+/* Action Circle Button (Solid Brand) */
+.deepseek-action-circle,
+.muxaro-action-circle {
   width: 44px;
   height: 44px;
   border-radius: 9999px;
-  background-image: var(--muxaro-gradient-primary);
-  color: var(--muxaro-btn-fg);
+  background-color: var(--muxaro-indigo);
+  color: #ffffff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   box-shadow: var(--muxaro-shadow-btn);
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, opacity 160ms ease;
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, background-color 160ms ease;
   flex-shrink: 0;
+  border: none;
+  cursor: pointer;
 }
 
-.deepseek-action-circle:hover {
-  transform: scale(1.05);
+.deepseek-action-circle:hover,
+.muxaro-action-circle:hover {
+  background-color: #5345E7;
+  transform: scale(1.04);
   box-shadow: var(--muxaro-shadow-btn-hover);
 }
 
-.deepseek-action-circle:active {
+.deepseek-action-circle:active,
+.muxaro-action-circle:active {
   transform: scale(0.96);
 }
 
-.deepseek-action-circle:disabled {
-  opacity: 0.6;
+.deepseek-action-circle:disabled,
+.muxaro-action-circle:disabled {
+  opacity: 0.55;
   cursor: not-allowed;
   transform: none;
 }
 
-/* Ethereal Quick Action Pills */
-.deepseek-pill-btn {
+/* Quick Action Pills */
+.deepseek-pill-btn,
+.muxaro-pill-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -513,25 +666,28 @@ a:active {
   border: 1px solid var(--muxaro-border);
   background-color: var(--muxaro-bg-surface);
   color: var(--muxaro-text-secondary);
-  box-shadow: 0 1px 3px rgba(23, 27, 43, 0.03);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.03);
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
   white-space: nowrap;
 }
 
-.dark .deepseek-pill-btn {
-  background-color: rgba(17, 21, 32, 0.7);
+.dark .deepseek-pill-btn,
+.dark .muxaro-pill-btn {
+  background-color: rgba(17, 21, 32, 0.85);
   border-color: rgba(255, 255, 255, 0.08);
 }
 
-.deepseek-pill-btn:hover {
+.deepseek-pill-btn:hover,
+.muxaro-pill-btn:hover {
   color: var(--muxaro-text-primary);
   border-color: var(--muxaro-indigo);
   background-color: var(--muxaro-bg-interactive);
-  box-shadow: 0 4px 12px rgba(105, 91, 255, 0.12);
+  box-shadow: 0 4px 12px rgba(101, 88, 245, 0.12);
   transform: translateY(-1px);
 }
 
-.deepseek-pill-btn:active {
+.deepseek-pill-btn:active,
+.muxaro-pill-btn:active {
   transform: translateY(0);
 }
 

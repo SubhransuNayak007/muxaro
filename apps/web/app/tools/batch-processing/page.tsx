@@ -142,7 +142,7 @@ export default function BatchProcessingPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 deepseek-input-card p-6 sm:p-8">
+          <div className="lg:col-span-2 muxaro-media-card p-6 sm:p-8">
             <form
               onSubmit={handleAddItem}
               className="space-y-4 pb-6 mb-6 border-b border-line"
@@ -155,7 +155,7 @@ export default function BatchProcessingPage() {
                   Add a media link to your batch queue
                 </label>
                 {normalizedInputPreview && (
-                  <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                  <span className="text-xs text-brand font-medium flex items-center gap-1">
                     <Sparkles className="w-3 h-3" aria-hidden="true" />
                     Valid address
                   </span>
@@ -175,7 +175,7 @@ export default function BatchProcessingPage() {
                     if (errorMsg) setErrorMsg(null);
                   }}
                   placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                 />
                 <button
                   type="submit"
@@ -309,9 +309,9 @@ export default function BatchProcessingPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="deepseek-input-card p-6 space-y-4">
+            <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <Layers className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <Layers className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Batch processing specs</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
@@ -339,9 +339,9 @@ export default function BatchProcessingPage() {
               </ul>
             </div>
 
-            <div className="deepseek-input-card p-6 space-y-2">
+            <div className="muxaro-media-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <ShieldCheck className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Isolated sandboxing</span>
               </div>
               <p className="text-xs text-content-secondary leading-relaxed">

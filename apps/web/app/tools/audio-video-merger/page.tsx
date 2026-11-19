@@ -113,7 +113,7 @@ export default function AudioVideoMergerPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 deepseek-input-card p-6 sm:p-8">
+          <div className="lg:col-span-2 muxaro-media-card p-6 sm:p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -124,7 +124,7 @@ export default function AudioVideoMergerPage() {
                     Video track link
                   </label>
                   {normalizedVideoPreview && (
-                    <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                    <span className="text-xs text-brand font-medium flex items-center gap-1">
                       <Sparkles className="w-3 h-3" aria-hidden="true" />
                       Video link verified
                     </span>
@@ -143,7 +143,7 @@ export default function AudioVideoMergerPage() {
                     if (errorMsg) setErrorMsg(null);
                   }}
                   placeholder="Paste video source link (e.g. youtube.com/watch?v=... or direct MP4/WebM)"
-                  className="w-full px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                 />
 
                 {normalizedVideoPreview && (
@@ -165,7 +165,7 @@ export default function AudioVideoMergerPage() {
                     Audio track link
                   </label>
                   {normalizedAudioPreview && (
-                    <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                    <span className="text-xs text-brand font-medium flex items-center gap-1">
                       <Sparkles className="w-3 h-3" aria-hidden="true" />
                       Audio link verified
                     </span>
@@ -184,7 +184,7 @@ export default function AudioVideoMergerPage() {
                     if (errorMsg) setErrorMsg(null);
                   }}
                   placeholder="Paste audio track link (e.g. soundcloud, direct MP3/M4A/WAV)"
-                  className="w-full px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                 />
 
                 {normalizedAudioPreview && (
@@ -301,9 +301,9 @@ export default function AudioVideoMergerPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="deepseek-input-card p-6 space-y-4">
+            <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <Combine className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <Combine className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Muxing standards</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
@@ -331,9 +331,9 @@ export default function AudioVideoMergerPage() {
               </ul>
             </div>
 
-            <div className="deepseek-input-card p-6 space-y-2">
+            <div className="muxaro-media-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <ShieldCheck className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Private processing</span>
               </div>
               <p className="text-xs text-content-secondary leading-relaxed">

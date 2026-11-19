@@ -239,12 +239,15 @@ export class AdapterService {
         '--dump-single-json',
         '--no-warnings',
         '--no-playlist',
+        '--no-write-subs',
+        '--no-write-auto-subs',
+        '--no-cache-dir',
         '--skip-download',
         rawUrl,
       ],
       {
-        timeout: 20000,
-        maxBuffer: 16 * 1024 * 1024,
+        timeout: 60000,
+        maxBuffer: 64 * 1024 * 1024,
         windowsHide: true,
       }
     );

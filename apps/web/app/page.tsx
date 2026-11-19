@@ -24,8 +24,8 @@ import {
   ArrowUp,
   ExternalLink,
 } from 'lucide-react';
-import AntigravityOrbitalField from '@/components/AntigravityOrbitalField';
-import CursorSpotlight from '@/components/CursorSpotlight';
+import HeroWaveLines from '@/components/HeroWaveLines';
+import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 import { api } from '@/lib/api-client';
 import { useDeviceMode } from '@/lib/device-mode';
 import { useAuth } from '@/lib/auth-context';
@@ -377,31 +377,28 @@ export default function HomePage() {
 
   return (
     <div className="w-full relative">
-      <CursorSpotlight />
-
-      {/* Hero Section with Google Antigravity 3D Particle Swarm + Aurora Mesh */}
+      {/* Hero Section with Minimalist Violet-Style Vector Wave Lines */}
       <section
         className={`muxaro-aurora-shell w-full pt-8 pb-14 sm:pt-12 sm:pb-20 relative overflow-hidden${
           inputFocused ? ' muxaro-aurora-focused' : ''
         }${inspecting || uploading ? ' muxaro-aurora-analyzing' : ''}`}
         data-aurora-paused={!shouldAnimateAurora ? 'true' : undefined}
       >
-        <AntigravityOrbitalField />
+        <HeroWaveLines />
         <div className="muxaro-aurora-ribbon" aria-hidden="true" />
         <div className="muxaro-aurora-glow" aria-hidden="true" />
 
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Antigravity Announcement Pill Bar */}
+          {/* Violet-Style Top Announcement Banner */}
           <div className="flex justify-center mb-6">
             <Link
               href="/docs"
-              className="antigravity-announcement inline-flex items-center gap-2 group"
+              className="violet-announcement-pill group"
             >
-              <Sparkles className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
-              <span className="font-semibold text-brand-violet">✦ NEW</span>
-              <span className="text-content">MUXARO v0.1.0 — High-performance media conversion & stream remuxing</span>
-              <span className="text-content-muted hidden sm:inline group-hover:text-brand-violet transition-colors">
-                Explore features →
+              <span className="font-bold text-brand">✦ V0.1.0</span>
+              <span className="text-content">MUXARO — High-performance media conversion & stream remuxing</span>
+              <span className="text-content-secondary hidden sm:inline group-hover:text-brand transition-colors">
+                Read docs →
               </span>
             </Link>
           </div>
@@ -451,40 +448,29 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* DeepSeek-Style Floating Workspace Input Card */}
+          {/* Alex Reji & Untitled UI Clean Media Workspace Card */}
           <div className="max-w-3xl mx-auto">
-            <div className="deepseek-input-card p-4 sm:p-6 relative overflow-hidden">
+            <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
               {/* Active Link Pill Indicator (if link entered or pasted) */}
               {url.trim().length > 0 && activeTab === 'link' && (
-                <div className="mb-3 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-surface-elevated border border-line text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Link2 className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
-                    <span className="font-mono text-content truncate max-w-[220px] sm:max-w-md">
-                      {url}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
+                <div className="mb-3.5">
+                  <ActiveLinkIndicator
+                    url={url.trim()}
+                    onClear={() => {
                       setUrl('');
                       setManifest(null);
                       setErrorMessage(null);
                       urlInputRef.current?.focus();
                     }}
-                    className="text-content-muted hover:text-content p-1 rounded-md transition-colors"
-                    title="Clear link"
-                    aria-label="Clear link"
-                  >
-                    <X className="w-3.5 h-3.5" aria-hidden="true" />
-                  </button>
+                  />
                 </div>
               )}
 
-              {/* Segmented Input Mode Tabs */}
+              {/* Alex Reji Segmented Input Mode Tabs */}
               <div
                 role="tablist"
                 aria-label="Choose how to add media"
-                className="inline-flex items-center gap-1 p-1 rounded-xl bg-elevated mb-4"
+                className="muxaro-segmented-group mb-4"
               >
                 <button
                   type="button"
@@ -493,13 +479,9 @@ export default function HomePage() {
                   aria-selected={activeTab === 'link'}
                   aria-controls="panel-link"
                   onClick={() => setActiveTab('link')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium active:translate-y-px transition-colors duration-150 whitespace-nowrap ${
-                    activeTab === 'link'
-                      ? 'bg-surface text-content shadow-sm font-semibold'
-                      : 'text-content-secondary hover:text-content'
-                  }`}
+                  className={`muxaro-segmented-tab ${activeTab === 'link' ? 'active' : ''}`}
                 >
-                  <Link2 className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                  <Link2 className="w-3.5 h-3.5 text-brand shrink-0" aria-hidden="true" />
                   <span>Paste a link</span>
                 </button>
 
@@ -510,13 +492,9 @@ export default function HomePage() {
                   aria-selected={activeTab === 'upload'}
                   aria-controls="panel-upload"
                   onClick={() => setActiveTab('upload')}
-                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium active:translate-y-px transition-colors duration-150 whitespace-nowrap ${
-                    activeTab === 'upload'
-                      ? 'bg-surface text-content shadow-sm font-semibold'
-                      : 'text-content-secondary hover:text-content'
-                  }`}
+                  className={`muxaro-segmented-tab ${activeTab === 'upload' ? 'active' : ''}`}
                 >
-                  <UploadCloud className="w-4 h-4 text-brand-blue shrink-0" aria-hidden="true" />
+                  <UploadCloud className="w-3.5 h-3.5 text-info shrink-0" aria-hidden="true" />
                   <span>Upload a file</span>
                 </button>
               </div>
@@ -540,13 +518,13 @@ export default function HomePage() {
                         onChange={(e) => setUrl(e.target.value)}
                         placeholder="Paste a video or audio link (YouTube, Vimeo, direct media URL)…"
                         aria-label="Media link"
-                        className="w-full pl-10 pr-24 py-3.5 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans focus:border-brand-violet transition-colors duration-150"
+                        className="w-full pl-10 pr-24 py-3.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans transition-colors duration-150"
                       />
                       <button
                         type="button"
                         onClick={handleClipboardPaste}
                         aria-label="Paste link from clipboard"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand-violet dark:text-content bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                       >
                         {pastedFeedback ? (
                           <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
@@ -557,11 +535,11 @@ export default function HomePage() {
                       </button>
                     </div>
 
-                    {/* Bottom Action Strip with DeepSeek-style circular action button */}
+                    {/* Bottom Action Strip with clean circular action button */}
                     <div className="flex items-center justify-between gap-3 pt-1">
                       <div className="flex items-center gap-2 text-xs text-content-secondary">
                         <span className="inline-flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                          <ShieldCheck className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
                           <span className="hidden sm:inline">Permission-verified media</span>
                           <span className="sm:hidden">Verified media</span>
                         </span>
@@ -573,7 +551,7 @@ export default function HomePage() {
                         <button
                           type="submit"
                           disabled={inspecting || !url.trim()}
-                          className="deepseek-action-circle"
+                          className="muxaro-action-circle"
                           title={inspecting ? 'Analysing link...' : 'Analyse media'}
                           aria-label={inspecting ? 'Analysing media link' : 'Analyse media link'}
                         >
@@ -687,7 +665,7 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Quick Action Tool Pills (DeepSeek style) */}
+            {/* Quick Action Tool Pills (Alex Reji style) */}
             <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-5">
               {CAPABILITIES.map((cap) => {
                 const Icon = cap.icon;
@@ -695,9 +673,9 @@ export default function HomePage() {
                   <Link
                     key={cap.href}
                     href={cap.href}
-                    className="deepseek-pill-btn"
+                    className="muxaro-pill-btn"
                   >
-                    <Icon className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                    <Icon className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
                     <span>{cap.title}</span>
                   </Link>
                 );

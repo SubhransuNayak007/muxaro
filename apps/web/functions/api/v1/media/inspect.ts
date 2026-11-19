@@ -216,6 +216,10 @@ export const onRequestPost: PagesFunction = async (context) => {
           },
         ],
         adapterId: 'youtube-permitted-adapter',
+        availableFormats: {
+          videoResolutions: ['1080p', '720p', '480p', '360p'],
+          audioFormats: ['mp3', 'm4a', 'aac', 'opus', 'wav', 'flac'],
+        },
         extractedAt: new Date().toISOString(),
       };
 

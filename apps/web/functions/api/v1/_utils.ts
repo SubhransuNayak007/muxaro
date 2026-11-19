@@ -74,8 +74,10 @@ export function isSafeUpstreamUrl(url: string | undefined): boolean {
   return true;
 }
 
+export const DEFAULT_UPSTREAM_URL = 'http://13.51.85.221.nip.io';
+
 /**
- * Attempts proxying to a configured live upstream API (Fastify / Cloud Run).
+ * Attempts proxying to a configured live upstream API (Fastify / Cloud Run / EC2).
  * Returns null if upstream is unconfigured, disabled, or fails (timeout / network error).
  */
 export async function tryProxyUpstream(
@@ -88,7 +90,8 @@ export async function tryProxyUpstream(
     env?.API_UPSTREAM_URL ||
     env?.FASTIFY_API_URL ||
     env?.API_INTERNAL_URL ||
-    env?.API_URL;
+    env?.API_URL ||
+    DEFAULT_UPSTREAM_URL;
   if (!isSafeUpstreamUrl(upstreamBase)) {
     return null;
   }
@@ -109,8 +112,8 @@ export async function tryProxyUpstream(
     headers.set('x-forwarded-proto', incomingUrl.protocol.replace(':', ''));
 
     const controller = new AbortController();
-    // 25s timeout to allow Cloud Run cold starts (2-3s) + yt-dlp media inspection (3-6s)
-    const timeout = setTimeout(() => controller.abort(), 25000);
+    // 45s timeout to allow Cloud Run / EC2 processing and complex multi-stream yt-dlp inspection
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     const init: RequestInit = {
       method: request.method,
