@@ -311,7 +311,7 @@ export function formatPoToken(token: string, visitorData?: string): string {
  * Constructs the YouTube extractor argument containing player client chain and optional PO Token.
  * Example outputs:
  *   "youtube:player_client=ios,android,tv,mweb,web"
- *   "youtube:player_client=ios,android,tv,mweb,web;po_token=web+ABC123XYZ"
+ *   "youtube:player_client=ios,android,tv,mweb,web;po_token=web+sample_token"
  */
 export function buildYouTubeExtractorArg(options?: {
   playerClient?: string;

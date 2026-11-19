@@ -256,11 +256,11 @@ export class RightsValidator {
           status: 'permitted',
           policyCode: 'USER_OWNED_VERIFIED',
           reason: 'User ownership attestation accepted for media processing.',
-          canExtractStreams: true,
+          canExtractStreams: false,
           canPreview: true,
           attributionRequired: false,
           rightsDeclaration: declaration,
-          warnings: [],
+          warnings: [...warnings],
           checkedAt,
         };
       }

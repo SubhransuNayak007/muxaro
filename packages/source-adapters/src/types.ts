@@ -116,6 +116,8 @@ export interface MediaStream {
   codec?: string;
   /** Standard resolution label if video (e.g. '1920x1080', '3840x2160') */
   resolution?: string;
+  /** Human-readable resolution label (e.g. '1080p (Full HD)', '720p (HD)') */
+  resolutionLabel?: string;
   /** Video frame width in pixels */
   width?: number;
   /** Video frame height in pixels */

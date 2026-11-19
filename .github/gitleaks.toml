@@ -34,3 +34,15 @@ regexes = [
   '''Argon2id/Scrypt''',
   '''eyJhbGciOiJIUzI1NiJ9\.abc\.def''',
 ]
+
+[[allowlists]]
+description = "Synthetic test vectors and sample comments for PO token tests"
+condition = "AND"
+paths = [
+  '''^apps/api/tests/po-token-cookie\.test\.ts$''',
+  '''^apps/api/src/services/po-token-cookie\.service\.ts$''',
+]
+regexes = [
+  '''ABC123XYZ''',
+  '''sample_token''',
+]
