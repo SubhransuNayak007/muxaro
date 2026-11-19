@@ -22,7 +22,7 @@ import {
   hasPermission,
   isRoleAtLeast,
   getDefaultTierForRole,
-} from '../../packages/entitlements/dist/index.js';
+} from '../../packages/entitlements/src/index.ts';
 
 describe('Entitlements - Tier Rules and Bucket Mapping', () => {
   it('should enforce exact Free tier allowances as defined in PRD §17', () => {
