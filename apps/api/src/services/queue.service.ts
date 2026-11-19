@@ -1510,6 +1510,27 @@ export class QueueService extends EventEmitter {
     return candidates[0].filePath;
   }
 
+  private getYtDlpBaseArgs(): string[] {
+    const args = [
+      '--no-playlist',
+      '--no-cache-dir',
+      '--no-warnings',
+      '--progress',
+      '--newline',
+      '--js-runtimes',
+      'node',
+      '--user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    ];
+
+    const cookiesPath = process.env.YTDLP_COOKIES_PATH || '/tmp/muxaro-data/cookies.txt';
+    if (fs.existsSync(cookiesPath)) {
+      args.push('--cookies', cookiesPath);
+    }
+
+    return args;
+  }
+
   private async convertWithFfmpeg(
     job: JobRecord,
     inputPath: string,
@@ -1859,7 +1880,7 @@ export class QueueService extends EventEmitter {
         await this.runTrackedProcess(
           job,
           'yt-dlp',
-          ['--no-playlist', '--no-warnings', '--progress', '--newline', '-o', videoTpl, remoteMediaUrl],
+          [...this.getYtDlpBaseArgs(), '-o', videoTpl, remoteMediaUrl],
           onYtDlpLine
         );
         if (this.isCancelled(job)) return;
@@ -1868,7 +1889,7 @@ export class QueueService extends EventEmitter {
         await this.runTrackedProcess(
           job,
           'yt-dlp',
-          ['--no-playlist', '--no-warnings', '--progress', '--newline', '-o', audioTpl, job.audioUrl],
+          [...this.getYtDlpBaseArgs(), '-o', audioTpl, job.audioUrl],
           onYtDlpLine
         );
         if (this.isCancelled(job)) return;
@@ -1914,11 +1935,7 @@ export class QueueService extends EventEmitter {
         const remoteMediaUrl = job.mediaUrl as string;
         const outputTemplate = path.join(jobDir, 'output.%(ext)s');
         const ytArgs = [
-          '--no-playlist',
-          '--no-cache-dir',
-          '--no-warnings',
-          '--progress',
-          '--newline',
+          ...this.getYtDlpBaseArgs(),
           '-x',
           '--audio-format',
           targetExt,
@@ -1970,11 +1987,7 @@ export class QueueService extends EventEmitter {
         }
 
         const ytArgs = [
-          '--no-playlist',
-          '--no-cache-dir',
-          '--no-warnings',
-          '--progress',
-          '--newline',
+          ...this.getYtDlpBaseArgs(),
           '-f',
           formatSelector,
           '--merge-output-format',

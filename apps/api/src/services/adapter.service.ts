@@ -233,18 +233,27 @@ export class AdapterService {
    * Inspects a validated URL using yt-dlp --dump-single-json (safe execFile, no shell)
    */
   private async inspectWithYtDlp(rawUrl: string): Promise<RealInspectionResult> {
+    const ytArgs = [
+      '--dump-single-json',
+      '--no-warnings',
+      '--no-playlist',
+      '--no-write-subs',
+      '--no-write-auto-subs',
+      '--no-cache-dir',
+      '--skip-download',
+      '--user-agent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    ];
+
+    const cookiesPath = process.env.YTDLP_COOKIES_PATH || '/tmp/muxaro-data/cookies.txt';
+    if (fs.existsSync(cookiesPath)) {
+      ytArgs.push('--cookies', cookiesPath);
+    }
+    ytArgs.push(rawUrl);
+
     const { stdout } = await execFileAsync(
       'yt-dlp',
-      [
-        '--dump-single-json',
-        '--no-warnings',
-        '--no-playlist',
-        '--no-write-subs',
-        '--no-write-auto-subs',
-        '--no-cache-dir',
-        '--skip-download',
-        rawUrl,
-      ],
+      ytArgs,
       {
         timeout: 60000,
         maxBuffer: 64 * 1024 * 1024,
