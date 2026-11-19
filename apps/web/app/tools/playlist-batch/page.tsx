@@ -372,25 +372,21 @@ export default function PlaylistBatchPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 muxaro-card p-6 sm:p-8">
+          <div className="lg:col-span-2 muxaro-media-card p-6 sm:p-8">
             {/* Mode Switcher Tabs */}
             <div
               role="tablist"
               aria-label="Processing mode"
-              className="inline-flex p-1 rounded-md bg-surface-elevated border border-line mb-6"
+              className="muxaro-segmented-group mb-6"
             >
               <button
                 type="button"
                 role="tab"
                 aria-selected={mode === 'batch'}
                 onClick={() => setMode('batch')}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-semibold transition-colors active:opacity-90 ${
-                  mode === 'batch'
-                    ? 'bg-surface text-brand shadow-sm'
-                    : 'text-content-secondary hover:text-content'
-                }`}
+                className={`muxaro-segmented-tab ${mode === 'batch' ? 'active' : ''}`}
               >
-                <Layers className="w-4 h-4" aria-hidden="true" />
+                <Layers className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Batch links</span>
               </button>
               <button
@@ -398,13 +394,9 @@ export default function PlaylistBatchPage() {
                 role="tab"
                 aria-selected={mode === 'playlist'}
                 onClick={() => setMode('playlist')}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-semibold transition-colors active:opacity-90 ${
-                  mode === 'playlist'
-                    ? 'bg-surface text-brand shadow-sm'
-                    : 'text-content-secondary hover:text-content'
-                }`}
+                className={`muxaro-segmented-tab ${mode === 'playlist' ? 'active' : ''}`}
               >
-                <ListVideo className="w-4 h-4" aria-hidden="true" />
+                <ListVideo className="w-4 h-4 text-info" aria-hidden="true" />
                 <span>Playlist archive</span>
               </button>
             </div>
@@ -423,7 +415,7 @@ export default function PlaylistBatchPage() {
                       Add link to batch queue
                     </label>
                     {normalizeMediaUrl(newUrl) && (
-                      <span className="text-xs text-brand-violet font-medium">Valid link</span>
+                      <span className="text-xs text-brand font-medium">Valid link</span>
                     )}
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2.5">
@@ -440,7 +432,7 @@ export default function PlaylistBatchPage() {
                         if (batchError) setBatchError(null);
                       }}
                       placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                     />
                     <button
                       type="submit"
@@ -859,7 +851,7 @@ export default function PlaylistBatchPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="muxaro-card p-6 space-y-4">
+            <div className="muxaro-media-card p-6 space-y-4">
               <div className="text-sm font-bold text-content">
                 Daily allowance overview
               </div>
@@ -888,7 +880,7 @@ export default function PlaylistBatchPage() {
               </ul>
             </div>
 
-            <div className="muxaro-card p-6 space-y-2">
+            <div className="muxaro-media-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
                 <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Dedicated pages</span>

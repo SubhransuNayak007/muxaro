@@ -295,7 +295,7 @@ export default function PlaylistProcessingPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 muxaro-card p-6 sm:p-8 space-y-6">
+          <div className="lg:col-span-2 muxaro-media-card p-6 sm:p-8 space-y-6">
             {/* Step 1: Inspect Playlist URL */}
             <form
               onSubmit={(e) => {
@@ -312,7 +312,7 @@ export default function PlaylistProcessingPage() {
                   Authorised playlist link
                 </label>
                 {normalizeMediaUrl(playlistUrl) && (
-                  <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                  <span className="text-xs text-brand font-medium flex items-center gap-1">
                     Valid playlist link
                   </span>
                 )}
@@ -331,7 +331,7 @@ export default function PlaylistProcessingPage() {
                     if (inspectError) setInspectError(null);
                   }}
                   placeholder="Paste playlist link (e.g. youtube.com/playlist?list=...)"
-                  className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
                 />
                 <button
                   type="submit"
@@ -617,7 +617,7 @@ export default function PlaylistProcessingPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="muxaro-card p-6 space-y-4">
+            <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
                 <Package className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Separate playlist quota</span>
@@ -647,7 +647,7 @@ export default function PlaylistProcessingPage() {
               </ul>
             </div>
 
-            <div className="muxaro-card p-6 space-y-2">
+            <div className="muxaro-media-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
                 <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Authorised sources only</span>

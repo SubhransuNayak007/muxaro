@@ -138,12 +138,12 @@ function RegisterFormContent() {
 
           {/* Registration Card */}
           <div className="lg:col-span-7">
-            <div className="rounded-2xl shadow-lg bg-surface border border-line p-6 sm:p-8 space-y-6">
+            <div className="muxaro-media-card p-6 sm:p-8 space-y-6">
               {googleAuthConfigured ? (
                 <a
                   href={googleHref}
                   onClick={() => trackEvent('auth_google_started', { source: 'register' })}
-                  className="w-full px-4 py-3 rounded-xl border border-line bg-base text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                  className="w-full px-4 py-3 rounded-xl border border-line bg-surface text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                 >
                   <GoogleGlyph />
                   <span>Continue with Google</span>
@@ -182,7 +182,7 @@ function RegisterFormContent() {
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
                       placeholder="Alex Morgan"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                     />
                   </div>
                 </div>
@@ -204,7 +204,7 @@ function RegisterFormContent() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                     />
                   </div>
                 </div>
@@ -227,7 +227,7 @@ function RegisterFormContent() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="At least 8 characters"
-                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                     />
                   </div>
                   <p className="mt-1.5 text-xs text-content-secondary">

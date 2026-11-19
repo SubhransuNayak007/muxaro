@@ -947,40 +947,28 @@ export default function CreditsPage() {
         {/* Filter & Search Bar */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-5">
           <div
-            className="inline-flex rounded-md p-1 bg-elevated border border-line-subtle text-xs"
+            className="muxaro-segmented-group"
             role="group"
             aria-label="Filter activity history"
           >
             <button
               type="button"
               onClick={() => setFilterType('all')}
-              className={`px-3 py-1 rounded-sm font-medium transition-colors active:opacity-90 whitespace-nowrap ${
-                filterType === 'all'
-                  ? 'bg-surface text-content shadow-sm'
-                  : 'text-content-secondary hover:text-content'
-              }`}
+              className={`muxaro-segmented-tab ${filterType === 'all' ? 'active' : ''}`}
             >
               All ({safeLedger.length})
             </button>
             <button
               type="button"
               onClick={() => setFilterType('deductions')}
-              className={`px-3 py-1 rounded-sm font-medium transition-colors active:opacity-90 whitespace-nowrap ${
-                filterType === 'deductions'
-                  ? 'bg-surface text-content shadow-sm'
-                  : 'text-content-secondary hover:text-content'
-              }`}
+              className={`muxaro-segmented-tab ${filterType === 'deductions' ? 'active' : ''}`}
             >
               Used
             </button>
             <button
               type="button"
               onClick={() => setFilterType('restorations')}
-              className={`px-3 py-1 rounded-sm font-medium transition-colors active:opacity-90 whitespace-nowrap ${
-                filterType === 'restorations'
-                  ? 'bg-surface text-content shadow-sm'
-                  : 'text-content-secondary hover:text-content'
-              }`}
+              className={`muxaro-segmented-tab ${filterType === 'restorations' ? 'active' : ''}`}
             >
               Added
             </button>
@@ -997,7 +985,7 @@ export default function CreditsPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search by ID, event, or reference..."
               aria-label="Search activity history"
-              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-line bg-surface text-content placeholder:text-content-muted focus-visible:outline-2 focus-visible:outline-brand-indigo"
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-line bg-surface text-content placeholder:text-content-muted transition-colors"
             />
           </div>
         </div>

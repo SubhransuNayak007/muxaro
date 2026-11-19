@@ -74,7 +74,7 @@ export function isSafeUpstreamUrl(url: string | undefined): boolean {
   return true;
 }
 
-export const DEFAULT_UPSTREAM_URL = 'http://13.51.85.221.nip.io';
+export const DEFAULT_UPSTREAM_URL = 'http://13.62.158.211.nip.io';
 
 /**
  * Attempts proxying to a configured live upstream API (Fastify / Cloud Run / EC2).

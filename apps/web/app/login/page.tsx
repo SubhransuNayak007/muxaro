@@ -117,7 +117,7 @@ function LoginFormContent() {
           </p>
         </div>
 
-        <div className="rounded-2xl shadow-lg bg-surface border border-line p-6 sm:p-8 space-y-6">
+        <div className="muxaro-media-card p-6 sm:p-8 space-y-6">
           {verifiedParam && (
             <div
               role="status"
@@ -143,7 +143,7 @@ function LoginFormContent() {
             <a
               href={googleHref}
               onClick={() => trackEvent('auth_google_started', { source: 'login' })}
-              className="w-full px-4 py-3 rounded-xl border border-line bg-base text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+              className="w-full px-4 py-3 rounded-xl border border-line bg-surface text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand active:translate-y-px transition-colors duration-150 whitespace-nowrap"
             >
               <GoogleGlyph />
               <span>Continue with Google</span>
@@ -182,7 +182,7 @@ function LoginFormContent() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                 />
               </div>
             </div>
@@ -194,7 +194,7 @@ function LoginFormContent() {
                 </label>
                 <Link
                   href="/reset-password"
-                  className="text-xs font-medium text-brand-violet dark:text-content hover:underline whitespace-nowrap"
+                  className="text-xs font-medium text-brand hover:underline whitespace-nowrap"
                 >
                   Forgot password?
                 </Link>
@@ -212,7 +212,7 @@ function LoginFormContent() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                 />
               </div>
             </div>
@@ -236,7 +236,7 @@ function LoginFormContent() {
                     value={mfaCode}
                     onChange={(e) => setMfaCode(e.target.value)}
                     placeholder="Enter 6-digit code"
-                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand-violet transition-colors duration-150"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors duration-150"
                   />
                 </div>
               </div>
