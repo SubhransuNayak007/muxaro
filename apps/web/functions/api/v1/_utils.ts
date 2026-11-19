@@ -5,30 +5,62 @@
 export const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id',
   'Access-Control-Max-Age': '86400',
 };
+
+/**
+ * Returns origin-aware CORS headers.
+ * When an Origin header is present, reflects that origin and enables credentials and Vary: Origin.
+ */
+export function getCorsHeaders(requestOrOrigin?: Request | string | null): Record<string, string> {
+  let origin = '*';
+  if (typeof requestOrOrigin === 'string') {
+    origin = requestOrOrigin;
+  } else if (requestOrOrigin && typeof requestOrOrigin === 'object' && 'headers' in requestOrOrigin) {
+    origin = requestOrOrigin.headers.get('origin') || '*';
+  }
+
+  const allowOrigin = origin && origin !== 'null' ? origin : '*';
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id',
+    'Access-Control-Max-Age': '86400',
+  };
+
+  if (allowOrigin !== '*') {
+    headers['Access-Control-Allow-Credentials'] = 'true';
+    headers['Vary'] = 'Origin';
+  }
+
+  return headers;
+}
 
 export function jsonResponse(
   data: unknown,
   status = 200,
-  extraHeaders: Record<string, string> = {}
+  extraHeaders: Record<string, string> = {},
+  request?: Request
 ): Response {
+  const dynamicCors = request ? getCorsHeaders(request) : corsHeaders;
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store, no-cache, must-revalidate',
-      ...corsHeaders,
+      ...dynamicCors,
       ...extraHeaders,
     },
   });
 }
 
-export function optionsResponse(): Response {
+export function optionsResponse(request?: Request): Response {
+  const dynamicCors = request ? getCorsHeaders(request) : corsHeaders;
   return new Response(null, {
     status: 204,
-    headers: corsHeaders,
+    headers: dynamicCors,
   });
 }
 
@@ -135,7 +167,16 @@ export async function tryProxyUpstream(
 
     // Merge CORS headers into upstream response
     const respHeaders = new Headers(response.headers);
-    Object.entries(corsHeaders).forEach(([k, v]) => {
+    const dynamicCors = getCorsHeaders(request);
+    Object.entries(dynamicCors).forEach(([k, v]) => {
+      // If upstream already set an explicit Access-Control-Allow-Origin, don't overwrite with wildcard
+      if (
+        k.toLowerCase() === 'access-control-allow-origin' &&
+        respHeaders.has('access-control-allow-origin') &&
+        respHeaders.get('access-control-allow-origin') !== '*'
+      ) {
+        return;
+      }
       respHeaders.set(k, v);
     });
 

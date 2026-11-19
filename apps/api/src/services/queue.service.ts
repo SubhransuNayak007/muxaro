@@ -42,6 +42,8 @@ import {
   mapHumanFriendlyError,
   parseResolutionHeight,
   selectTurboFlowStrategy,
+  getYtDlpBaseArgs as getTurboYtDlpBaseArgs,
+  isBotVerificationError,
 } from './turboflow.service.js';
 
 const execFileAsync = promisify(execFile);
@@ -1514,29 +1516,43 @@ export class QueueService extends EventEmitter {
     return candidates[0].filePath;
   }
 
-  private getYtDlpBaseArgs(): string[] {
-    const args = [
-      '--no-playlist',
-      '--no-cache-dir',
-      '--no-warnings',
-      '--progress',
-      '--newline',
-      '--js-runtimes',
-      'deno,node',
-      '--extractor-args',
-      'youtube:player_client=ios,android,web;po_token=web',
-      '--extractor-args',
-      'youtubepot-bgutilhttp:base_url=http://172.17.0.1:4416',
-      '--user-agent',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    ];
+  private getYtDlpBaseArgs(playerClient?: string): string[] {
+    return getTurboYtDlpBaseArgs({ playerClient });
+  }
 
-    const cookiesPath = process.env.YTDLP_COOKIES_PATH || '/tmp/muxaro-data/cookies.txt';
-    if (fs.existsSync(cookiesPath)) {
-      args.push('--cookies', cookiesPath);
+  /**
+   * Executes yt-dlp with an automatic player client retry cascade.
+   * If primary client triggers YouTube bot verification / datacenter challenge,
+   * automatically retries with 'tv,mweb' and 'android' before failing.
+   */
+  private async runTrackedYtDlpWithFallback(
+    job: JobRecord,
+    buildArgs: (baseArgs: string[]) => string[],
+    onLine?: (line: string) => void
+  ): Promise<void> {
+    const clientChains = ['ios,android,tv,mweb,web', 'tv,mweb', 'android'];
+    let lastError: any = null;
+
+    for (let i = 0; i < clientChains.length; i++) {
+      const client = clientChains[i];
+      const base = this.getYtDlpBaseArgs(client);
+      const args = buildArgs(base);
+
+      try {
+        await this.runTrackedProcess(job, 'yt-dlp', args, onLine);
+        return;
+      } catch (err: any) {
+        lastError = err;
+        if (this.isCancelled(job)) return;
+        if (i < clientChains.length - 1 && isBotVerificationError(err)) {
+          // Log and retry with next client in fallback chain
+          continue;
+        }
+        throw err;
+      }
     }
 
-    return args;
+    if (lastError) throw lastError;
   }
 
   private async convertWithFfmpeg(
@@ -1885,19 +1901,17 @@ export class QueueService extends EventEmitter {
         const videoTpl = path.join(jobDir, 'video_src.%(ext)s');
         const audioTpl = path.join(jobDir, 'audio_src.%(ext)s');
 
-        await this.runTrackedProcess(
+        await this.runTrackedYtDlpWithFallback(
           job,
-          'yt-dlp',
-          [...this.getYtDlpBaseArgs(), '-o', videoTpl, remoteMediaUrl],
+          (base) => [...base, '-o', videoTpl, remoteMediaUrl],
           onYtDlpLine
         );
         if (this.isCancelled(job)) return;
 
         reportProgress(55, 'FETCHING', 'Downloading external audio track');
-        await this.runTrackedProcess(
+        await this.runTrackedYtDlpWithFallback(
           job,
-          'yt-dlp',
-          [...this.getYtDlpBaseArgs(), '-o', audioTpl, job.audioUrl],
+          (base) => [...base, '-o', audioTpl, job.audioUrl as string],
           onYtDlpLine
         );
         if (this.isCancelled(job)) return;
@@ -1942,19 +1956,22 @@ export class QueueService extends EventEmitter {
       } else if (isAudio) {
         const remoteMediaUrl = job.mediaUrl as string;
         const outputTemplate = path.join(jobDir, 'output.%(ext)s');
-        const ytArgs = [
-          ...this.getYtDlpBaseArgs(),
-          '-x',
-          '--audio-format',
-          targetExt,
-          '--audio-quality',
-          '0',
-          '-o',
-          outputTemplate,
-          remoteMediaUrl,
-        ];
 
-        await this.runTrackedProcess(job, 'yt-dlp', ytArgs, onYtDlpLine);
+        await this.runTrackedYtDlpWithFallback(
+          job,
+          (base) => [
+            ...base,
+            '-x',
+            '--audio-format',
+            targetExt,
+            '--audio-quality',
+            '0',
+            '-o',
+            outputTemplate,
+            remoteMediaUrl,
+          ],
+          onYtDlpLine
+        );
         if (this.isCancelled(job)) return;
 
         const downloaded = await this.findGeneratedMediaFile(jobDir, 'output', targetExt);
@@ -1994,18 +2011,20 @@ export class QueueService extends EventEmitter {
               : 'bestvideo+bestaudio/best';
         }
 
-        const ytArgs = [
-          ...this.getYtDlpBaseArgs(),
-          '-f',
-          formatSelector,
-          '--merge-output-format',
-          targetExt,
-          '-o',
-          outputTemplate,
-          remoteMediaUrl,
-        ];
-
-        await this.runTrackedProcess(job, 'yt-dlp', ytArgs, onYtDlpLine);
+        await this.runTrackedYtDlpWithFallback(
+          job,
+          (base) => [
+            ...base,
+            '-f',
+            formatSelector,
+            '--merge-output-format',
+            targetExt,
+            '-o',
+            outputTemplate,
+            remoteMediaUrl,
+          ],
+          onYtDlpLine
+        );
         if (this.isCancelled(job)) return;
 
         const downloaded = await this.findGeneratedMediaFile(jobDir, 'output', targetExt);
@@ -2201,8 +2220,11 @@ export class QueueService extends EventEmitter {
 
       if (this.isCancelled(job)) return;
 
-      const errorCode = err?.code || 'ERR_PROCESSING_FAILED';
-      const errorMessage = err?.message || 'Media worker encountered an unrecoverable error';
+      const isBot = isBotVerificationError(err);
+      const errorCode = isBot ? 'ERR_BOT_VERIFICATION_REQUIRED' : (err?.code || 'ERR_PROCESSING_FAILED');
+      const errorMessage = isBot
+        ? 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.'
+        : (err?.message || 'Media worker encountered an unrecoverable error');
       const userMessage = mapHumanFriendlyError(errorCode, errorMessage);
 
       job.status = 'FAILED';

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "test": "tsx --test tests/api.test.ts"
+    "test": "tsx --test tests/api.test.ts tests/po-token-cookie.test.ts tests/turboflow.test.ts"
   },
   "keywords": [],
   "author": "",

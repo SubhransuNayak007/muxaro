@@ -39,6 +39,7 @@ export interface JobProgressProps {
   initialJob: ProcessingJob;
   onJobUpdate?: (updated: ProcessingJob) => void;
   onDismiss?: () => void;
+  sourceUrl?: string;
 }
 
 const MAX_POLL_RETRIES = 15;
@@ -114,10 +115,35 @@ function mergeBackendPayload(
     ? Math.max(0, Math.min(100, raw.progress))
     : prev.progress;
 
+  const errCode =
+    raw.errorCode ||
+    (typeof raw.error === 'object' && raw.error !== null
+      ? (raw.error as any).code
+      : undefined) ||
+    prev.errorCode;
+
+  const errMsg =
+    raw.errorMessage ||
+    (typeof raw.error === 'object' && raw.error !== null
+      ? (raw.error as any).message
+      : typeof raw.error === 'string'
+      ? raw.error
+      : undefined) ||
+    prev.errorMessage ||
+    (typeof prev.error === 'string' ? prev.error : undefined);
+
+  const uMsg =
+    raw.userMessage ||
+    (typeof raw.error === 'object' && raw.error !== null
+      ? (raw.error as any).userMessage
+      : undefined) ||
+    prev.userMessage;
+
   return {
     ...prev,
     ...raw,
     id: raw.id || raw.jobId || prev.id,
+    sourceUrl: raw.sourceUrl || (raw as any).mediaUrl || prev.sourceUrl,
     inputTitle: raw.inputTitle || prev.inputTitle,
     operation: raw.operation || prev.operation,
     targetFormat: raw.targetFormat || prev.targetFormat,
@@ -135,10 +161,10 @@ function mergeBackendPayload(
       prev.checksumSha256,
     downloadUrl:
       raw.downloadUrl || raw.artifact?.downloadUrl || prev.downloadUrl,
-    error: raw.error || raw.errorMessage || prev.error,
-    errorMessage: raw.errorMessage || prev.errorMessage,
-    errorCode: raw.errorCode || prev.errorCode,
-    userMessage: raw.userMessage || prev.userMessage,
+    error: errMsg || raw.error || prev.error,
+    errorMessage: errMsg,
+    errorCode: errCode,
+    userMessage: uMsg,
     processingLane: raw.processingLane || prev.processingLane,
     strategyLabel: raw.strategyLabel || prev.strategyLabel,
     losslessPreserved:
@@ -156,6 +182,7 @@ export default function JobProgress({
   initialJob,
   onJobUpdate,
   onDismiss,
+  sourceUrl: propSourceUrl,
 }: JobProgressProps) {
   const [job, setJob] = useState<ExtendedProcessingJob>(
     initialJob as ExtendedProcessingJob
@@ -171,6 +198,7 @@ export default function JobProgress({
   const [showDetails, setShowDetails] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
+  const [isDirectActive, setIsDirectActive] = useState<boolean>(false);
   const [bgStatusMessage, setBgStatusMessage] = useState<string | null>(null);
   const [bgCapabilities, setBgCapabilities] =
     useState<BackgroundDownloadCapabilities>({
@@ -204,6 +232,22 @@ export default function JobProgress({
     return () => {
       mounted = false;
     };
+  }, []);
+
+  // Detect MUXARO Direct companion bridge status
+  useEffect(() => {
+    function checkDirect() {
+      if (
+        typeof window !== 'undefined' &&
+        ((window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
+          document.documentElement.getAttribute('data-muxaro-direct') === 'active')
+      ) {
+        setIsDirectActive(true);
+      }
+    }
+    checkDirect();
+    window.addEventListener('muxaro:direct-ready', checkDirect);
+    return () => window.removeEventListener('muxaro:direct-ready', checkDirect);
   }, []);
 
   useEffect(() => {
@@ -546,18 +590,48 @@ export default function JobProgress({
   const checksumPreview = checksumValue
     ? `${checksumValue.slice(0, 12)}…${checksumValue.slice(-8)}`
     : '';
+  const rawErrorText =
+    typeof job.errorMessage === 'string' && job.errorMessage.trim()
+      ? job.errorMessage
+      : typeof job.error === 'string' && job.error.trim()
+      ? job.error
+      : typeof job.error === 'object' && job.error !== null
+      ? (job.error as any).userMessage || (job.error as any).message
+      : undefined;
   const friendlyErrorMessage =
-    job.userMessage || mapFriendlyError(job.error || job.errorMessage, job.errorCode);
+    job.userMessage || mapFriendlyError(rawErrorText, job.errorCode);
   const laneDisplay = formatLaneLabel(job.processingLane);
 
+  const directTargetUrl =
+    job.sourceUrl ||
+    (job as any).mediaUrl ||
+    propSourceUrl ||
+    '';
+
+  const directHelperHref = directTargetUrl
+    ? `/tools/direct-helper?url=${encodeURIComponent(directTargetUrl)}`
+    : '/tools/direct-helper';
+
   const isBotBlocked = useMemo(() => {
-    const raw = `${job.error || ''} ${job.errorMessage || ''} ${job.userMessage || ''} ${job.errorCode || ''}`.toLowerCase();
+    const errorStr =
+      typeof job.error === 'string'
+        ? job.error
+        : typeof job.error === 'object' && job.error !== null
+        ? JSON.stringify(job.error)
+        : '';
+    const raw = `${errorStr} ${job.errorMessage || ''} ${job.userMessage || ''} ${job.errorCode || ''}`.toLowerCase();
     return (
       raw.includes('bot') ||
       raw.includes('sign in') ||
+      raw.includes('signin') ||
       raw.includes('login_required') ||
       raw.includes('restricted') ||
       raw.includes('verification') ||
+      raw.includes('cloud servers') ||
+      raw.includes('confirm you') ||
+      raw.includes('captcha') ||
+      raw.includes('po_token') ||
+      raw.includes('player_client') ||
       raw.includes('private') ||
       raw.includes('403') ||
       raw.includes('muxaro direct')
@@ -675,7 +749,7 @@ export default function JobProgress({
               type="button"
               disabled={cancelling}
               onClick={handleCancel}
-              className="whitespace-nowrap self-start sm:self-center inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg border border-line bg-surface text-content-secondary hover:text-error hover:border-error active:opacity-90 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60"
+              className="whitespace-nowrap self-start sm:self-center inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[38px] sm:min-h-[34px] rounded-lg border border-line bg-surface text-content-secondary hover:text-error hover:border-error active:opacity-90 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60"
             >
               <XCircle className="w-3.5 h-3.5" aria-hidden="true" />
               <span>{cancelling ? 'Cancelling...' : 'Cancel'}</span>
@@ -965,83 +1039,151 @@ export default function JobProgress({
         </div>
       )}
 
-      {/* Failed / Rejected View with Real Retry */}
+      {/* Failed / Rejected View with Real Retry & Resilient Fallbacks */}
       {(job.status === 'FAILED' || job.status === 'REJECTED') && (
         <div className="space-y-4">
-          <div className="p-4 rounded-xl bg-error-bg text-xs text-content flex items-start gap-3">
-            <AlertCircle
-              className="w-5 h-5 flex-shrink-0 text-error mt-0.5"
-              aria-hidden="true"
-            />
-            <div className="space-y-1">
-              <div className="font-semibold text-sm text-content">
-                Something went wrong
-              </div>
-              <p className="text-content-secondary">{friendlyErrorMessage}</p>
-            </div>
-          </div>
-
-          {isBotBlocked && (
-            <div className="p-4 rounded-xl border border-brand/30 bg-surface-elevated space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-brand-light text-brand flex-shrink-0">
-                  <Zap className="w-4 h-4" aria-hidden="true" />
+          {isBotBlocked ? (
+            /* Dedicated High-Contrast YouTube Bot Check / MUXARO Direct Callout */
+            <div className="rounded-xl border border-brand/30 bg-surface-elevated p-5 sm:p-6 space-y-4 shadow-sm">
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 text-brand flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Zap className="w-5 h-5" aria-hidden="true" />
                 </div>
-                <div className="space-y-1">
-                  <h4 className="text-xs font-bold text-content uppercase tracking-wider">
-                    Bypass YouTube Bot Check with MUXARO Direct
-                  </h4>
-                  <p className="text-xs text-content-secondary leading-relaxed">
-                    YouTube flags requests from cloud datacenter IPs (like AWS). With <strong>MUXARO Direct</strong>, the video streams directly through your residential connection with zero restrictions, maximum ISP speed, and zero cost.
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand/10 text-brand border border-brand/20">
+                      Residential Bypass Available
+                    </span>
+                    {isDirectActive && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success-bg text-success border border-success/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-success motion-safe:animate-pulse" />
+                        Direct Active
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-content pt-0.5">
+                    YouTube Bot Check Blocked Cloud Processing
+                  </h3>
+                  <p className="text-xs sm:text-sm text-content-secondary leading-relaxed">
+                    YouTube blocks datacenter IPs from streaming this media. With{' '}
+                    <strong className="text-content font-semibold">MUXARO Direct</strong>,
+                    the video streams directly through your residential connection with zero cloud restrictions and maximum speed.
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
+
+              {directTargetUrl && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-line-subtle text-xs text-content-secondary font-mono truncate">
+                  <span className="text-content-muted font-sans font-medium flex-shrink-0">Target:</span>
+                  <span className="truncate">{directTargetUrl}</span>
+                </div>
+              )}
+
+              {/* Primary 1-Click Action */}
+              <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <Link
-                  href="/tools/direct-helper"
-                  className="muxaro-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold"
+                  href={directHelperHref}
+                  className="muxaro-btn-primary flex-1 inline-flex items-center justify-center gap-2 px-6 py-3.5 min-h-[44px] text-sm sm:text-base font-semibold shadow-sm active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer text-center"
                 >
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  <Zap className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
                   <span>Download with MUXARO Direct</span>
                 </Link>
+
                 <Link
-                  href="/tools/direct-helper"
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  href={directHelperHref}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-3.5 min-h-[44px] rounded-xl border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand text-center"
                 >
                   <span>How MUXARO Direct works</span>
-                  <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
+                  <ExternalLink className="w-3.5 h-3.5 text-content-muted flex-shrink-0" aria-hidden="true" />
                 </Link>
+              </div>
+
+              {retryError && (
+                <div className="p-3 rounded-lg bg-error-bg text-error text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                  <span>{retryError}</span>
+                </div>
+              )}
+
+              {/* Clean Bottom Navigation Strip */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line-subtle">
+                {onDismiss && (
+                  <button
+                    type="button"
+                    onClick={onDismiss}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
+                    <span>{directTargetUrl ? 'Paste another link' : 'Choose another file'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={retrying}
+                  onClick={handleRetry}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-medium text-content-muted hover:text-content hover:bg-surface-muted active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-60 cursor-pointer"
+                  title="Retry processing on cloud server"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${retrying ? 'motion-safe:animate-spin' : ''}`}
+                    aria-hidden="true"
+                  />
+                  <span>{retrying ? 'Retrying cloud...' : 'Retry cloud server'}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Standard Non-Bot Failure State */
+            <div className="space-y-4">
+              <div className="p-4 sm:p-5 rounded-xl bg-surface-elevated border border-line flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-error-bg text-error flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <AlertCircle className="w-5 h-5" aria-hidden="true" />
+                </div>
+                <div className="space-y-1 min-w-0 flex-1">
+                  <h3 className="text-sm sm:text-base font-semibold text-content">
+                    Processing could not be completed
+                  </h3>
+                  <p className="text-xs sm:text-sm text-content-secondary leading-relaxed">
+                    {friendlyErrorMessage}
+                  </p>
+                </div>
+              </div>
+
+              {retryError && (
+                <div className="p-3 rounded-lg bg-error-bg text-error text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                  <span>{retryError}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-line-subtle">
+                {onDismiss && (
+                  <button
+                    type="button"
+                    onClick={onDismiss}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
+                    <span>{directTargetUrl ? 'Paste another link' : 'Choose another file'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={retrying}
+                  onClick={handleRetry}
+                  className="muxaro-btn-primary whitespace-nowrap inline-flex items-center justify-center gap-1.5 px-5 py-2.5 min-h-[40px] text-xs font-semibold active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${retrying ? 'motion-safe:animate-spin' : ''}`}
+                    aria-hidden="true"
+                  />
+                  <span>{retryButtonLabel}</span>
+                </button>
               </div>
             </div>
           )}
-
-          {retryError && (
-            <p className="text-xs text-error">{retryError}</p>
-          )}
-
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            {onDismiss && (
-              <button
-                type="button"
-                onClick={onDismiss}
-                className="whitespace-nowrap px-3.5 py-2 rounded-lg border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-              >
-                Choose another file
-              </button>
-            )}
-            <button
-              type="button"
-              disabled={retrying}
-              onClick={handleRetry}
-              className="muxaro-btn-primary whitespace-nowrap inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:opacity-60"
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${retrying ? 'motion-safe:animate-spin' : ''}`}
-                aria-hidden="true"
-              />
-              <span>{retryButtonLabel}</span>
-            </button>
-          </div>
         </div>
       )}
     </section>

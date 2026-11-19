@@ -5,8 +5,12 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import { buildApp } from '../src/app.js';
 import { tokenService } from '../src/services/token.service.js';
+import { queueService, ARTIFACTS_ROOT } from '../src/services/queue.service.js';
+import { adapterService, UPLOADS_ROOT } from '../src/services/adapter.service.js';
 
 describe('MUXARO API Test Suite', async () => {
   const app = await buildApp();
@@ -94,8 +98,12 @@ describe('MUXARO API Test Suite', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/media/inspect',
+      headers: {
+        'x-forwarded-for': '198.51.100.55',
+      },
       payload: {
         url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        rightsDeclared: false,
       },
     });
 
@@ -155,13 +163,44 @@ describe('MUXARO API Test Suite', async () => {
 
   // Test 7: Job Polling & Lifecycle Progression
   test('GET /api/v1/jobs/:id returns progress and eventually READY artifact', async () => {
+    // Setup verified local sample file for pipeline testing
+    const sampleDir = path.join(UPLOADS_ROOT, 'test_sample_poll');
+    await fsp.mkdir(sampleDir, { recursive: true });
+    const sampleFile = path.join(sampleDir, 'sample.mp4');
+
+    const findSample = async (dir: string): Promise<string | null> => {
+      const entries = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory() && e.name !== 'test_sample_poll') {
+          const nested = await findSample(full);
+          if (nested) return nested;
+        } else if (e.isFile() && e.name.endsWith('.mp4')) {
+          return full;
+        }
+      }
+      return null;
+    };
+    const existingSample = (await findSample(UPLOADS_ROOT)) || (await findSample(path.resolve(process.cwd(), '..', '..', '.muxaro-uploads')));
+    if (existingSample) {
+      await fsp.copyFile(existingSample, sampleFile);
+    } else {
+      await fsp.writeFile(sampleFile, Buffer.from('mock_data'));
+    }
+
+    const asset = await adapterService.registerLocalUpload({
+      assetId: 'test_sample_poll',
+      localFilePath: sampleFile,
+      originalName: 'sample.mp4',
+    });
+
     const createResp = await app.inject({
       method: 'POST',
       url: '/api/v1/jobs',
       payload: {
         operation: 'REMUX_STREAM_COPY',
         targetFormat: 'mp4',
-        mediaUrl: 'https://example.com/sample.mp4',
+        mediaAssetId: asset.assetId,
         idempotencyKey: `idem_poll_${Date.now()}`,
       },
     });
@@ -180,14 +219,19 @@ describe('MUXARO API Test Suite', async () => {
     assert.ok(['QUEUED', 'PROCESSING', 'VERIFYING', 'READY'].includes(pollJson.data.status));
 
     // Wait for worker pipeline to complete
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    let finalJson: any = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/v1/jobs/${jobId}`,
+      });
+      finalJson = res.json();
+      if (finalJson.data?.status === 'READY') {
+        break;
+      }
+    }
 
-    const finalResp = await app.inject({
-      method: 'GET',
-      url: `/api/v1/jobs/${jobId}`,
-    });
-
-    const finalJson = finalResp.json();
     assert.equal(finalJson.data.status, 'READY');
     assert.equal(finalJson.data.progress, 100);
     assert.ok(finalJson.data.downloadUrl);
@@ -302,12 +346,36 @@ describe('MUXARO API Test Suite', async () => {
 
   // Test 13: Secure Signed Download Delivery
   test('GET /api/v1/download/:token delivers file for valid HMAC token and rejects tampered token', async () => {
+    const testJobId = 'job_test_dl_123';
+    const testArtId = 'art_test_dl_456';
+    const testFilename = 'sample_video.mp4';
+    const testUserId = 'user_test_789';
+
+    // Register a standalone artifact so queueService can resolve it
+    const testArtifactDir = path.join(ARTIFACTS_ROOT, testJobId);
+    await fsp.mkdir(testArtifactDir, { recursive: true });
+    const testFilePath = path.join(testArtifactDir, testFilename);
+    await fsp.writeFile(testFilePath, Buffer.from('TEST_MEDIA_BINARY_CONTENT'));
+
+    queueService.registerStandaloneArtifact(testJobId, {
+      artifactId: testArtId,
+      ownerUserId: testUserId,
+      filePath: testFilePath,
+      filename: testFilename,
+      mimeType: 'video/mp4',
+      sizeBytes: 25,
+      container: 'mp4',
+      checksumSha256: 'mocksha256',
+      downloadUrl: `/api/v1/download/mocktoken`,
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+
     // Generate valid signed token
     const validToken = tokenService.generateDownloadToken({
-      jobId: 'job_test_123',
-      artifactId: 'art_test_456',
-      filename: 'sample_video.mp4',
-      userId: 'user_test_789',
+      jobId: testJobId,
+      artifactId: testArtId,
+      filename: testFilename,
+      userId: testUserId,
       ttlSeconds: 300,
     });
 
@@ -318,7 +386,7 @@ describe('MUXARO API Test Suite', async () => {
 
     assert.equal(validResp.statusCode, 200);
     assert.equal(validResp.headers['content-type'], 'video/mp4');
-    assert.ok(validResp.headers['content-disposition'].includes('attachment; filename="sample_video.mp4"'));
+    assert.ok(String(validResp.headers['content-disposition'] || '').includes('attachment; filename="sample_video.mp4"'));
     assert.equal(validResp.headers['x-content-type-options'], 'nosniff');
 
     // Tampered token test (modify signature)

@@ -40,12 +40,12 @@ export default function ActiveLinkIndicator({
     <div
       role="region"
       aria-label="Active source link"
-      className={`inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-[#F5F3FF] dark:bg-brand/10 border border-[#DDD6FE] dark:border-brand/30 shadow-xs max-w-full ${className}`}
+      className={`inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-interactive border border-line shadow-xs max-w-full ${className}`}
     >
       <div className="flex items-center gap-1.5 min-w-0">
         <Link2 className="w-3.5 h-3.5 text-brand shrink-0" aria-hidden="true" />
         {showPlatformBadge && (
-          <span className="text-[11px] font-bold text-brand shrink-0 uppercase tracking-wider">
+          <span className="text-[11px] font-semibold text-brand shrink-0">
             {platform.name}
           </span>
         )}
@@ -74,7 +74,7 @@ export default function ActiveLinkIndicator({
           type="button"
           onClick={handleCopy}
           aria-label="Copy source link to clipboard"
-          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-surface border border-[#DDD6FE] dark:border-line hover:bg-surface-muted text-content text-[11px] font-medium transition-colors"
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-surface border border-line hover:bg-surface-muted text-content text-[11px] font-medium transition-colors"
         >
           {copied ? (
             <>

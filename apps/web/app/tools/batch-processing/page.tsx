@@ -207,7 +207,7 @@ export default function BatchProcessingPage() {
             ) : (
               <div className="space-y-3 mb-6">
                 <div className="flex items-center justify-between text-xs text-content-secondary px-1">
-                  <span className="font-semibold uppercase tracking-wider">
+                  <span className="font-semibold text-content">
                     Queued items ({items.length})
                   </span>
                   <button

@@ -268,3 +268,37 @@ export function mapFriendlyError(
 
   return 'We could not finish processing this file. Please try again.';
 }
+
+/**
+ * Detects whether the MUXARO Direct companion userscript or bridge is active in the current browser window.
+ */
+export function isMuxaroDirectActive(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    (window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
+    (typeof document !== 'undefined' &&
+      document.documentElement.getAttribute('data-muxaro-direct') === 'active')
+  );
+}
+
+/**
+ * Dispatches a client-side streaming download event to the MUXARO Direct bridge,
+ * triggering direct residential downloading through the browser sandbox.
+ */
+export function triggerMuxaroDirectDownload(streamUrl: string, filename?: string): boolean {
+  if (typeof window === 'undefined' || !streamUrl) return false;
+  try {
+    window.dispatchEvent(
+      new CustomEvent('muxaro:direct-download', {
+        detail: {
+          streamUrl,
+          filename: filename || 'media_download.mp4',
+        },
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+

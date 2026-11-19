@@ -25,6 +25,9 @@ import {
   DEFAULT_RETENTION_MINUTES,
   mapHumanFriendlyError,
   parseResolutionHeight,
+  getYtDlpBaseArgs,
+  runWithYtDlpClientChain,
+  isBotVerificationError,
 } from '../services/turboflow.service.js';
 import {
   validateUrlForSsrf,
@@ -180,35 +183,36 @@ async function inspectPlaylistWithYtDlp(
   maxItems: number
 ): Promise<{ title: string; items: PlaylistInspectItem[] }> {
   const capped = Math.max(1, Math.min(50, maxItems));
-  const { stdout } = await execFileAsync(
-    'yt-dlp',
-    [
-      '--flat-playlist',
-      '--dump-single-json',
-      '--no-warnings',
-      '--playlist-end',
-      String(capped),
-      url,
-    ],
-    {
-      timeout: 25000,
-      maxBuffer: 16 * 1024 * 1024,
-      windowsHide: true,
-    }
-  );
-
-  const info = JSON.parse(stdout.trim()) as {
-    title?: string;
-    webpage_url?: string;
-    duration?: number;
-    entries?: Array<{
-      id?: string;
+  const info = await runWithYtDlpClientChain(async (_clientChain, baseArgs) => {
+    const { stdout } = await execFileAsync(
+      'yt-dlp',
+      [
+        '--flat-playlist',
+        '--dump-single-json',
+        '--playlist-end',
+        String(capped),
+        ...baseArgs,
+        url,
+      ],
+      {
+        timeout: 30000,
+        maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
+      }
+    );
+    return JSON.parse(stdout.trim()) as {
       title?: string;
-      url?: string;
       webpage_url?: string;
       duration?: number;
-    }>;
-  };
+      entries?: Array<{
+        id?: string;
+        title?: string;
+        url?: string;
+        webpage_url?: string;
+        duration?: number;
+      }>;
+    };
+  });
 
   const title = info.title || 'Media Playlist';
   const rawEntries = Array.isArray(info.entries) ? info.entries.filter(Boolean) : [];
@@ -523,10 +527,10 @@ export const playlistRoutes: FastifyPluginAsync = async (fastify) => {
 
                   const itemPrefix = `item_${String(item.position).padStart(2, '0')}`;
                   const outTpl = path.join(jobDir, `${itemPrefix}.%(ext)s`);
+                  const baseArgs = getYtDlpBaseArgs();
                   const args = isAudio
                     ? [
-                        '--no-playlist',
-                        '--no-warnings',
+                        ...baseArgs,
                         '-x',
                         '--audio-format',
                         targetExt,
@@ -537,8 +541,7 @@ export const playlistRoutes: FastifyPluginAsync = async (fastify) => {
                         item.url,
                       ]
                     : [
-                        '--no-playlist',
-                        '--no-warnings',
+                        ...baseArgs,
                         '-f',
                         targetHeight
                           ? `bestvideo[height<=${targetHeight}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${targetHeight}]+bestaudio/best[height<=${targetHeight}]/best`

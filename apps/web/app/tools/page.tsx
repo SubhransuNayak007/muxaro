@@ -163,7 +163,7 @@ export default function ToolsIndexPage() {
           </div>
           <Link
             href="/tools/playlist-batch"
-            className="px-6 py-3 rounded-xl bg-brand text-white text-sm font-semibold hover:opacity-95 active:translate-y-px transition-all shadow-sm inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+            className="px-6 py-3 rounded-xl bg-brand text-white text-sm font-semibold hover:opacity-95 active:translate-y-px transition-opacity duration-150 shadow-sm inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
           >
             <span>Open batch hub</span>
             <ArrowRight className="w-4 h-4" aria-hidden="true" />

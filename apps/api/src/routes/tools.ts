@@ -59,7 +59,7 @@ export const toolsRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       validateMergeJobRequest(body);
     } catch (valErr: any) {
-      return reply.code(400).send({
+      return (reply as any).code(400).send({
         success: false,
         error: {
           code: 'ERR_INVALID_REQUEST',

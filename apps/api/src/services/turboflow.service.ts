@@ -8,14 +8,196 @@
  *   Bounded FFmpeg transcoding/compression ONLY when genuinely required.
  */
 
+import fs from 'node:fs';
 import type {
   JobOperation,
   MediaAssetInfo,
   ProcessingLane,
   QueueClass,
 } from '../types/index.js';
+import {
+  resolveCookiesArg,
+  materializeCookieContent,
+  formatPoToken,
+  buildYouTubeExtractorArg,
+  resolveBgUtilBaseUrl,
+  buildResilientYtDlpArgs,
+  poTokenCookieService,
+  type CookieResolutionResult,
+  type PoTokenResolutionResult,
+  type YtDlpResilientOptions,
+  DEFAULT_PLAYER_CLIENTS,
+} from './po-token-cookie.service.js';
+
+export {
+  resolveCookiesArg,
+  materializeCookieContent,
+  formatPoToken,
+  buildYouTubeExtractorArg,
+  resolveBgUtilBaseUrl,
+  buildResilientYtDlpArgs,
+  poTokenCookieService,
+  type CookieResolutionResult,
+  type PoTokenResolutionResult,
+  type YtDlpResilientOptions,
+};
 
 export const DEFAULT_RETENTION_MINUTES = 60;
+
+/**
+ * Standard YouTube player client chains for yt-dlp to bypass datacenter IP bot gates.
+ *
+ * Primary: 'ios,android,tv,mweb,web' - iOS and Android clients bypass Web BotGuard challenges
+ * and do not require Web Proof-of-Origin (PO) tokens on datacenter IPs.
+ * Fallback 1: 'tv,mweb' - TV / living room client skips WebVM browser solver.
+ * Fallback 2: 'android' - Pure mobile Android client.
+ * Fallback 3: 'ios' - Native iOS client for standard H.264/AAC.
+ */
+export const YTDLP_DEFAULT_PLAYER_CLIENTS = DEFAULT_PLAYER_CLIENTS;
+
+export const YTDLP_FALLBACK_CLIENT_CHAINS = [
+  'ios,android,tv,mweb,web',
+  'android,web',
+  'tv,mweb',
+  'mweb,ios',
+  'android',
+  'ios',
+] as const;
+
+export interface YtDlpBaseArgsOptions {
+  playerClient?: string;
+  cookiesPath?: string;
+  cookiesContent?: string;
+  poToken?: string;
+  visitorData?: string;
+  poTokenBaseUrl?: string;
+  additionalArgs?: string[];
+  includeProgress?: boolean;
+  isPlaylist?: boolean;
+  userAgent?: string;
+  proxy?: string;
+}
+
+/**
+ * Builds hardened, resilient base arguments for yt-dlp execution.
+ * - Enforces JavaScript runtimes (deno, node) for signature deciphering.
+ * - Injects player_client extractor arguments (ios, android, tv, mweb) to evade cloud server datacenter IP blocks.
+ * - Formats and injects Proof of Origin (PO Token) and visitorData when provided via options or env.
+ * - Materializes cookies from file or raw environment variable (YTDLP_COOKIES_CONTENT / BASE64) with 0o600 permissions.
+ * - Only mounts bgutil PO provider if explicitly configured via environment variable (never hardcoded dead IPs).
+ * - Avoids static desktop User-Agent mismatch when emulating mobile/TV clients.
+ */
+export function getYtDlpBaseArgs(options: YtDlpBaseArgsOptions = {}): string[] {
+  return buildResilientYtDlpArgs(options);
+}
+
+/**
+ * Determines whether an error, stderr output, or message corresponds to YouTube bot / IP verification blocks.
+ */
+export function isBotVerificationError(errOrMessage: unknown): boolean {
+  if (!errOrMessage) return false;
+  const code = ((errOrMessage as any)?.code || '').toString().toUpperCase();
+  if (
+    code === 'ERR_BOT_VERIFICATION_REQUIRED' ||
+    code === 'BOT_DETECTED' ||
+    code === 'YOUTUBE_BOT_BLOCK' ||
+    code === 'LOGIN_REQUIRED'
+  ) {
+    return true;
+  }
+
+  const msg = (
+    typeof errOrMessage === 'string'
+      ? errOrMessage
+      : `${(errOrMessage as any)?.message || ''} ${(errOrMessage as any)?.stderr || ''}`
+  ).toLowerCase();
+
+  return (
+    msg.includes('confirm you’re not a bot') ||
+    msg.includes("confirm you're not a bot") ||
+    msg.includes('sign in to confirm') ||
+    msg.includes('login_required') ||
+    msg.includes('bot verification') ||
+    msg.includes('automated queries') ||
+    msg.includes('botguard') ||
+    msg.includes('po_token') ||
+    msg.includes('requires verification for this stream on cloud servers') ||
+    msg.includes('use muxaro direct') ||
+    msg.includes('unplayable') ||
+    msg.includes('http error 429') ||
+    msg.includes('too many requests')
+  );
+}
+
+export class BotVerificationError extends Error {
+  public readonly code = 'ERR_BOT_VERIFICATION_REQUIRED';
+  public readonly userMessage: string;
+  public readonly botBlocked = true;
+  public readonly muxaroDirectUrl = '/tools/direct-helper';
+
+  constructor(originalMessage?: string) {
+    super(
+      originalMessage ||
+        'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.'
+    );
+    this.name = 'BotVerificationError';
+    this.userMessage =
+      'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.';
+  }
+}
+
+export interface ClientChainRunOptions {
+  clientChains?: readonly string[];
+  onFallback?: (fromClient: string, toClient: string, error: Error) => void;
+}
+
+/**
+ * Executes a yt-dlp task through a fallback chain of player_clients.
+ * If the primary client hits bot verification or datacenter challenge,
+ * it retries automatically with subsequent clients (e.g. 'tv,mweb', 'android')
+ * before failing cleanly with a BotVerificationError.
+ */
+export async function runWithYtDlpClientChain<T>(
+  runFn: (clientChain: string, baseArgs: string[]) => Promise<T>,
+  options: ClientChainRunOptions = {}
+): Promise<T> {
+  const chains =
+    options.clientChains && options.clientChains.length > 0
+      ? options.clientChains
+      : ['ios,android,tv,mweb,web', 'tv,mweb', 'android'];
+
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < chains.length; i++) {
+    const currentChain = chains[i];
+    const baseArgs = getYtDlpBaseArgs({ playerClient: currentChain });
+
+    try {
+      return await runFn(currentChain, baseArgs);
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      const isBot = isBotVerificationError(err);
+
+      if (i < chains.length - 1 && isBot) {
+        const nextChain = chains[i + 1];
+        if (options.onFallback) {
+          options.onFallback(currentChain, nextChain, lastError);
+        }
+        continue;
+      }
+
+      if (isBot) {
+        throw new BotVerificationError(lastError.message);
+      }
+      throw lastError;
+    }
+  }
+
+  if (lastError && isBotVerificationError(lastError)) {
+    throw new BotVerificationError(lastError.message);
+  }
+  throw lastError || new Error('yt-dlp execution failed across all client chains');
+}
 
 export interface TurboFlowDecision {
   processingLane: ProcessingLane;
@@ -264,6 +446,11 @@ export function mapHumanFriendlyError(code?: string, rawMessage?: string): strin
   const msg = (rawMessage || '').toLowerCase();
 
   switch (c) {
+    case 'ERR_BOT_VERIFICATION_REQUIRED':
+    case 'BOT_DETECTED':
+    case 'YOUTUBE_BOT_BLOCK':
+    case 'LOGIN_REQUIRED':
+      return 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.';
     case 'SSRF_BLOCKED':
       return 'That link points to a private or restricted network address and cannot be accessed.';
     case 'ERR_QUOTA_EXCEEDED':
@@ -307,8 +494,16 @@ export function mapHumanFriendlyError(code?: string, rawMessage?: string): strin
   if (
     msg.includes('confirm you’re not a bot') ||
     msg.includes('confirm you\'re not a bot') ||
-    msg.includes('bot') ||
+    msg.includes('sign in to confirm') ||
     msg.includes('login_required') ||
+    msg.includes('bot verification') ||
+    msg.includes('botguard') ||
+    msg.includes('po_token') ||
+    msg.includes('automated queries') ||
+    msg.includes('youtube requires verification') ||
+    msg.includes('cloud servers') ||
+    msg.includes('muxaro direct') ||
+    msg.includes('bot') ||
     msg.includes('sign in')
   ) {
     return 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.';

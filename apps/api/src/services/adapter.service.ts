@@ -18,6 +18,12 @@ import {
 } from '@vyro/source-adapters';
 import { validateUrlForSsrf, validateSafePath } from '@vyro/security';
 import type { MediaAssetInfo, MediaStreamItem } from '../types/index.js';
+import {
+  getYtDlpBaseArgs,
+  runWithYtDlpClientChain,
+  isBotVerificationError,
+  mapHumanFriendlyError,
+} from './turboflow.service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -230,53 +236,47 @@ export class AdapterService {
   private readonly assetCache = new Map<string, MediaAssetInfo>();
 
   /**
-   * Inspects a validated URL using yt-dlp --dump-single-json (safe execFile, no shell)
+   * Inspects a validated URL using yt-dlp --dump-single-json with fallback player client chain (safe execFile, no shell)
    */
   private async inspectWithYtDlp(rawUrl: string): Promise<RealInspectionResult> {
-    const ytArgs = [
-      '--dump-single-json',
-      '--no-warnings',
-      '--no-playlist',
-      '--no-write-subs',
-      '--no-write-auto-subs',
-      '--no-cache-dir',
-      '--skip-download',
-      '--js-runtimes',
-      'deno,node',
-      '--extractor-args',
-      'youtube:player_client=ios,android,web;po_token=web',
-      '--extractor-args',
-      'youtubepot-bgutilhttp:base_url=http://172.17.0.1:4416',
-      '--user-agent',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    ];
-
-    const cookiesPath = process.env.YTDLP_COOKIES_PATH || '/tmp/muxaro-data/cookies.txt';
-    if (fs.existsSync(cookiesPath)) {
-      ytArgs.push('--cookies', cookiesPath);
-    }
-    ytArgs.push(rawUrl);
-
     const cleanEnv = { ...process.env };
     delete cleanEnv.TRUST_PROXY;
 
-    const { stdout } = await execFileAsync(
-      'yt-dlp',
-      ytArgs,
-      {
-        timeout: 60000,
-        maxBuffer: 64 * 1024 * 1024,
-        windowsHide: true,
-        env: cleanEnv,
+    const info = await runWithYtDlpClientChain(async (_clientChain, baseArgs) => {
+      const ytArgs = [
+        '--dump-single-json',
+        '--no-write-subs',
+        '--no-write-auto-subs',
+        '--skip-download',
+        ...baseArgs,
+        rawUrl,
+      ];
+
+      try {
+        const { stdout } = await execFileAsync('yt-dlp', ytArgs, {
+          timeout: 45000,
+          maxBuffer: 64 * 1024 * 1024,
+          windowsHide: true,
+          env: cleanEnv,
+        });
+
+        const trimmed = (stdout || '').trim();
+        if (!trimmed || trimmed === 'null') {
+          throw new Error('yt-dlp returned empty inspection output');
+        }
+
+        const parsed = JSON.parse(trimmed) as YtDlpInfoJson;
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('yt-dlp returned invalid JSON object');
+        }
+        return parsed;
+      } catch (execErr: any) {
+        if (execErr.stderr) {
+          execErr.message = `${execErr.message}\n${execErr.stderr}`;
+        }
+        throw execErr;
       }
-    );
-
-    const trimmed = stdout.trim();
-    if (!trimmed) {
-      throw new Error('yt-dlp returned empty inspection output');
-    }
-
-    const info = JSON.parse(trimmed) as YtDlpInfoJson;
+    });
     const title = info.title || info.fulltitle || deriveTitleFromUrl(rawUrl) || 'Media Stream';
     const author = info.uploader || info.channel || info.artist || info.creator || undefined;
     const thumbnailUrl =
@@ -671,9 +671,15 @@ export class AdapterService {
             (lastInspectError instanceof Error ? lastInspectError.message : undefined) ||
             adapterErr?.message ||
             'Failed to inspect media URL';
-          const wrapped = new Error(message);
-          (wrapped as any).statusCode = 422;
-          (wrapped as any).code = 'ERR_INSPECTION_FAILED';
+          const isBot = isBotVerificationError(lastInspectError) || isBotVerificationError(adapterErr);
+          const wrapped = new Error(
+            isBot
+              ? 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.'
+              : message
+          );
+          (wrapped as any).statusCode = isBot ? 403 : 422;
+          (wrapped as any).code = isBot ? 'ERR_BOT_VERIFICATION_REQUIRED' : 'ERR_INSPECTION_FAILED';
+          (wrapped as any).userMessage = mapHumanFriendlyError((wrapped as any).code, wrapped.message);
           throw wrapped;
         }
       }

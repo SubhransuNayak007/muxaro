@@ -187,7 +187,7 @@ export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
         required: ['url'],
         properties: {
           url: { type: 'string' },
-          rightsDeclared: { type: 'boolean', default: true },
+          rightsDeclared: { type: 'boolean' },
           ownershipType: { type: 'string' },
           attestation: { type: 'boolean' },
           licenseType: { type: 'string' },
@@ -235,9 +235,11 @@ export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
           }
         : undefined;
 
+      const rightsDeclared = body.rightsDeclared === true;
+
       const assetInfo = await adapterService.inspect(
         body.url,
-        body.rightsDeclared ?? true,
+        rightsDeclared,
         userDeclaration
       );
 

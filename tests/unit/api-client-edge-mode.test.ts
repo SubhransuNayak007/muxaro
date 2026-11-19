@@ -85,6 +85,30 @@ describe('MUXARO API Client — getApiBaseUrl & Dead Host Elimination', () => {
     const base = getApiBaseUrl();
     assert.strictEqual(base, 'http://127.0.0.1:4000/api/v1');
   });
+
+  it('robustly resolves NEXT_PUBLIC_API_BASE_URL and filters dead hosts and mixed content', () => {
+    delete (globalThis as any).window;
+    delete process.env.API_INTERNAL_URL;
+
+    // 1. Server-side valid NEXT_PUBLIC_API_BASE_URL
+    process.env.NEXT_PUBLIC_API_BASE_URL = 'https://custom-cloud.muxaro.net';
+    assert.strictEqual(getApiBaseUrl(), 'https://custom-cloud.muxaro.net/api/v1');
+
+    // 2. Server-side dead host fallback
+    process.env.NEXT_PUBLIC_API_BASE_URL = 'https://api.muxaro.app';
+    assert.strictEqual(getApiBaseUrl(), '/api/v1');
+
+    // 3. Browser environment with valid HTTPS NEXT_PUBLIC_API_BASE_URL
+    (globalThis as any).window = {
+      location: { protocol: 'https:' },
+    };
+    process.env.NEXT_PUBLIC_API_BASE_URL = 'https://custom-cloud.muxaro.net';
+    assert.strictEqual(getApiBaseUrl(), 'https://custom-cloud.muxaro.net/api/v1');
+
+    // 4. Browser environment with HTTP under HTTPS (Mixed Content protection) -> falls back to same-origin /api/v1
+    process.env.NEXT_PUBLIC_API_BASE_URL = 'http://13.62.158.211.nip.io';
+    assert.strictEqual(getApiBaseUrl(), '/api/v1', 'Should prevent mixed content on https page');
+  });
 });
 
 describe('MUXARO API Client — Graceful Degradation in Edge/Guest/Offline Mode', () => {

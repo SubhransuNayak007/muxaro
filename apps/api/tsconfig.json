@@ -9,7 +9,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "baseUrl": ".",
     "paths": {
       "@muxaro/security": ["../../security/src/index.ts"],
       "@muxaro/entitlements": ["../../packages/entitlements/src/index.ts"],

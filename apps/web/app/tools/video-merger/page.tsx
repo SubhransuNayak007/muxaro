@@ -271,7 +271,7 @@ export default function VideoMergerPage() {
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Seamless PTS timestamp stitching prevents video playback stutter.</span>
+                  <span>Accurate PTS timestamp stitching prevents video playback stutter.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2

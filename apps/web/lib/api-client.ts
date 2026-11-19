@@ -56,7 +56,7 @@ function normalizeApiBase(raw: string): string {
 }
 
 export function getApiBaseUrl(): string {
-  // 1. In browser, ALWAYS default to same-origin '/api/v1' unless an explicitly verified reachable URL is configured
+  // 1. In browser, default to same-origin '/api/v1' unless an explicitly verified or configured reachable URL is provided
   if (typeof window !== 'undefined') {
     const explicitlyVerified = (
       (window as any).__MUXARO_VERIFIED_API_URL__ ||
@@ -65,7 +65,31 @@ export function getApiBaseUrl(): string {
     ).trim();
 
     if (explicitlyVerified && !isDeadOrUnresolvableHost(explicitlyVerified)) {
+      // Guard against browser Mixed Content (cannot fetch http:// API from https:// origin)
+      if (
+        typeof window.location !== 'undefined' &&
+        window.location.protocol === 'https:' &&
+        explicitlyVerified.toLowerCase().startsWith('http://')
+      ) {
+        return '/api/v1';
+      }
       return normalizeApiBase(explicitlyVerified);
+    }
+
+    const publicBaseUrl = (
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      ''
+    ).trim();
+
+    if (publicBaseUrl && !isDeadOrUnresolvableHost(publicBaseUrl)) {
+      if (
+        typeof window.location !== 'undefined' &&
+        window.location.protocol === 'https:' &&
+        publicBaseUrl.toLowerCase().startsWith('http://')
+      ) {
+        return '/api/v1';
+      }
+      return normalizeApiBase(publicBaseUrl);
     }
 
     return '/api/v1';
@@ -77,7 +101,11 @@ export function getApiBaseUrl(): string {
     return normalizeApiBase(internalApiUrl);
   }
 
-  const publicApiUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+  const publicApiUrl = (
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    ''
+  ).trim();
   if (publicApiUrl && !isDeadOrUnresolvableHost(publicApiUrl)) {
     return normalizeApiBase(publicApiUrl);
   }
@@ -276,6 +304,7 @@ function normalizeJob(
     targetAudioCodec?: string;
     streamCopy?: boolean;
     title?: string;
+    sourceUrl?: string;
   }
 ): ProcessingJob {
   const artifact = raw?.artifact && typeof raw.artifact === 'object' ? raw.artifact : null;
@@ -359,6 +388,14 @@ function normalizeJob(
       fallbackContext?.title ||
       artifact?.filename ||
       '',
+    sourceUrl:
+      typeof raw?.sourceUrl === 'string' && raw.sourceUrl
+        ? raw.sourceUrl
+        : typeof raw?.mediaUrl === 'string' && raw.mediaUrl
+        ? raw.mediaUrl
+        : typeof raw?.url === 'string' && raw.url
+        ? raw.url
+        : fallbackContext?.sourceUrl || undefined,
     outputFilename: raw?.outputFilename || artifact?.filename || undefined,
     outputSizeBytes,
     downloadUrl: raw?.downloadUrl || artifact?.downloadUrl || undefined,
@@ -574,8 +611,47 @@ class ApiClient {
       if (networkErr instanceof DOMException && networkErr.name === 'AbortError') {
         throw new Error('Request cancelled.');
       }
-      const classified = circuitBreaker.classifyError(networkErr, endpoint);
-      throw new ApiClientError(classified, networkErr);
+      // If external baseUrl failed (e.g. CORS block, network error, or cloud API unreachable),
+      // cleanly fall back to same-origin /api/v1 before failing
+      if (baseUrl !== '/api/v1' && typeof window !== 'undefined') {
+        try {
+          const fallbackUrl = `/api/v1${endpoint}`;
+          response = await fetch(fallbackUrl, {
+            ...options,
+            credentials: 'include',
+            headers,
+          });
+        } catch {
+          const classified = circuitBreaker.classifyError(networkErr, endpoint);
+          throw new ApiClientError(classified, networkErr);
+        }
+      } else {
+        const classified = circuitBreaker.classifyError(networkErr, endpoint);
+        throw new ApiClientError(classified, networkErr);
+      }
+    }
+
+    // If external cloud API returned 502/503/504 gateway failure,
+    // attempt fallback to same-origin /api/v1 before surfacing error
+    if (
+      !response.ok &&
+      baseUrl !== '/api/v1' &&
+      typeof window !== 'undefined' &&
+      (response.status === 502 || response.status === 503 || response.status === 504)
+    ) {
+      try {
+        const fallbackUrl = `/api/v1${endpoint}`;
+        const fallbackRes = await fetch(fallbackUrl, {
+          ...options,
+          credentials: 'include',
+          headers,
+        });
+        if (fallbackRes.ok) {
+          response = fallbackRes;
+        }
+      } catch {
+        // Keep original response for error processing
+      }
     }
 
     const text = await response.text();
@@ -1148,6 +1224,7 @@ class ApiClient {
           ? false
           : params.streamCopy ?? fastifyOperation === 'REMUX_STREAM_COPY',
       title: params.title,
+      sourceUrl: resolvedUrl || params.sourceUrl,
     });
   }
 

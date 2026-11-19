@@ -1604,7 +1604,11 @@ export default function DashboardPage() {
                 <span>Dismiss</span>
               </button>
             </div>
-            <JobProgress initialJob={selectedJob} onJobUpdate={handleJobUpdate} />
+            <JobProgress
+              initialJob={selectedJob}
+              sourceUrl={selectedJob.sourceUrl}
+              onJobUpdate={handleJobUpdate}
+            />
           </section>
         )}
 
