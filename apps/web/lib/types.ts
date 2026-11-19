@@ -73,6 +73,7 @@ export interface ProcessingJob {
   progress: number;
   progressStage: string;
   inputTitle: string;
+  sourceUrl?: string;
   outputFilename?: string;
   outputSizeBytes?: number;
   downloadUrl?: string;

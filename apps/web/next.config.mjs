@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const isCloudflarePages = process.env.CLOUDFLARE_PAGES === '1';
 
-const rawApiOrigin = (
+const candidateOrigin = (
   process.env.API_INTERNAL_URL ||
   process.env.NEXT_PUBLIC_API_URL ||
   'http://127.0.0.1:4000'
@@ -9,6 +9,9 @@ const rawApiOrigin = (
   .trim()
   .replace(/\/+$/, '')
   .replace(/\/api\/v1$/i, '');
+
+const isDeadHost = /api\.muxaro\.app|muxaro-api\.internal/i.test(candidateOrigin);
+const rawApiOrigin = isDeadHost ? 'http://127.0.0.1:4000' : candidateOrigin;
 
 const nextConfig = {
   reactStrictMode: true,

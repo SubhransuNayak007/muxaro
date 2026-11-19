@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
+import { normalizeMediaUrl } from '@/lib/url-utils';
+import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
   ssr: false,
@@ -97,13 +99,16 @@ export default function PlaylistBatchPage() {
 
   const handleAddBatchItem = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = newUrl.trim();
-    if (!trimmed) return;
+    const normalized = normalizeMediaUrl(newUrl);
+    if (!normalized) {
+      setBatchError('Please paste a valid media link (e.g. youtube.com/watch?v=... or direct MP4).');
+      return;
+    }
     setItems((prev) => [
       ...prev,
       {
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        url: trimmed,
+        url: normalized,
         format: batchFormat,
         operation: batchOp,
       },
@@ -146,9 +151,9 @@ export default function PlaylistBatchPage() {
   };
 
   const inspectPlaylist = useCallback(async () => {
-    const trimmed = playlistUrl.trim();
+    const trimmed = normalizeMediaUrl(playlistUrl);
     if (!trimmed) {
-      setInspectError('Please paste an authorised playlist link first.');
+      setInspectError('Please paste a valid authorised playlist link (e.g. youtube.com/playlist?list=...).');
       return;
     }
 
@@ -195,9 +200,9 @@ export default function PlaylistBatchPage() {
   }, [playlistUrl]);
 
   const submitPlaylist = useCallback(async () => {
-    const trimmed = playlistUrl.trim();
+    const trimmed = normalizeMediaUrl(playlistUrl);
     if (!trimmed) {
-      setPlaylistError('Please paste an authorised playlist link first.');
+      setPlaylistError('Please paste a valid authorised playlist link (e.g. youtube.com/playlist?list=...).');
       return;
     }
 
@@ -410,30 +415,50 @@ export default function PlaylistBatchPage() {
                   onSubmit={handleAddBatchItem}
                   className="space-y-4 pb-6 border-b border-line"
                 >
-                  <label
-                    htmlFor="pb-batch-url"
-                    className="block text-sm font-medium text-content"
-                  >
-                    Add link to batch queue
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="pb-batch-url"
+                      className="block text-sm font-semibold text-content"
+                    >
+                      Add link to batch queue
+                    </label>
+                    {normalizeMediaUrl(newUrl) && (
+                      <span className="text-xs text-brand-violet font-medium">Valid link</span>
+                    )}
+                  </div>
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <input
                       id="pb-batch-url"
-                      type="url"
-                      required
+                      type="text"
+                      inputMode="url"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
                       value={newUrl}
-                      onChange={(e) => setNewUrl(e.target.value)}
-                      placeholder="Paste an authorised video or audio link (https://…)"
-                      className="flex-1 px-4 py-2.5 rounded-sm bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand transition-colors"
+                      onChange={(e) => {
+                        setNewUrl(e.target.value);
+                        if (batchError) setBatchError(null);
+                      }}
+                      placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                     />
                     <button
                       type="submit"
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-sm border border-line bg-surface-elevated text-content text-sm font-semibold hover:border-brand transition-colors active:opacity-90 whitespace-nowrap"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full border border-brand-violet/40 bg-surface-elevated text-brand-violet text-sm font-semibold hover:bg-brand-violet hover:text-white transition-colors active:scale-[0.98] shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
                     >
                       <Plus className="w-4 h-4" aria-hidden="true" />
                       <span>Add link</span>
                     </button>
                   </div>
+
+                  {normalizeMediaUrl(newUrl) && (
+                    <div className="pt-1">
+                      <ActiveLinkIndicator
+                        url={normalizeMediaUrl(newUrl)}
+                        onClear={() => setNewUrl('')}
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -581,34 +606,51 @@ export default function PlaylistBatchPage() {
                   }}
                   className="space-y-3"
                 >
-                  <label
-                    htmlFor="pb-playlist-url"
-                    className="block text-sm font-medium text-content"
-                  >
-                    Authorised playlist link
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="pb-playlist-url"
+                      className="block text-sm font-semibold text-content"
+                    >
+                      Authorised playlist link
+                    </label>
+                    {normalizeMediaUrl(playlistUrl) && (
+                      <span className="text-xs text-brand-violet font-medium">Valid playlist link</span>
+                    )}
+                  </div>
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <input
                       id="pb-playlist-url"
-                      type="url"
-                      required
+                      type="text"
+                      inputMode="url"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck="false"
                       value={playlistUrl}
                       onChange={(e) => {
                         setPlaylistUrl(e.target.value);
                         if (inspectError) setInspectError(null);
                       }}
-                      placeholder="Paste an authorised playlist link (https://…)"
-                      className="flex-1 px-4 py-3 rounded-sm bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand transition-colors"
+                      placeholder="Paste playlist link (e.g. youtube.com/playlist?list=...)"
+                      className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                     />
                     <button
                       type="submit"
                       disabled={isInspecting || !playlistUrl.trim()}
-                      className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-sm border border-line bg-surface-elevated text-content text-sm font-semibold hover:border-brand transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                      className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-brand-violet text-white text-sm font-semibold hover:bg-brand-violet/90 active:scale-[0.98] transition-transform shadow-xs disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
                     >
                       <Search className="w-4 h-4" aria-hidden="true" />
                       <span>{isInspecting ? 'Inspecting…' : 'Inspect playlist'}</span>
                     </button>
                   </div>
+
+                  {normalizeMediaUrl(playlistUrl) && (
+                    <div className="pt-1">
+                      <ActiveLinkIndicator
+                        url={normalizeMediaUrl(playlistUrl)}
+                        onClear={() => setPlaylistUrl('')}
+                      />
+                    </div>
+                  )}
                 </form>
 
                 {inspectError && (

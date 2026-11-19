@@ -9,12 +9,13 @@ import {
   ShieldCheck,
   Sparkles,
   CheckCircle2,
-  Info,
   AlertCircle,
   RotateCcw,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
+import { normalizeMediaUrl } from '@/lib/url-utils';
+import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
   ssr: false,
@@ -61,15 +62,16 @@ const FORMAT_OPTIONS = [
 export default function AudioExtractorPage() {
   const [url, setUrl] = useState<string>('');
   const [format, setFormat] = useState<string>('native');
-  const [sampleRate, setSampleRate] = useState<string>('source');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [activeJob, setActiveJob] = useState<ProcessingJob | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const normalizedPreview = normalizeMediaUrl(url);
+
   const startExtraction = async () => {
-    const trimmed = url.trim();
+    const trimmed = normalizeMediaUrl(url);
     if (!trimmed) {
-      setErrorMsg('Please paste a valid authorised media link first.');
+      setErrorMsg('Please paste a valid media link (e.g. youtube.com/watch?v=... or direct video link).');
       return;
     }
 
@@ -125,7 +127,7 @@ export default function AudioExtractorPage() {
           </div>
 
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-line text-xs font-medium text-brand mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-elevated border border-brand-violet/30 text-xs font-semibold text-brand-violet mb-4 shadow-xs">
               <Music className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Audio extractor</span>
             </div>
@@ -133,7 +135,7 @@ export default function AudioExtractorPage() {
               Extract clean audio from any video
             </h1>
             <p className="text-base text-content-secondary mt-3 leading-relaxed">
-              Save original audio with zero loss, or export FLAC, WAV, and MP3.
+              Save original audio streams with zero re-encoding loss, or export to pristine FLAC, WAV, and MP3.
             </p>
           </div>
         </div>
@@ -141,31 +143,51 @@ export default function AudioExtractorPage() {
 
       <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 muxaro-card p-6 sm:p-8">
+          <div className="lg:col-span-2 deepseek-input-card p-6 sm:p-8">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
-                <label
-                  htmlFor="audio-source-url"
-                  className="block text-sm font-medium text-content mb-2"
-                >
-                  Authorised media link
-                </label>
+                <div className="flex items-center justify-between mb-2">
+                  <label
+                    htmlFor="audio-source-url"
+                    className="block text-sm font-semibold text-content"
+                  >
+                    Authorised media link
+                  </label>
+                  {normalizedPreview && (
+                    <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                      <Sparkles className="w-3 h-3" aria-hidden="true" />
+                      Protocol verified
+                    </span>
+                  )}
+                </div>
                 <input
                   id="audio-source-url"
-                  type="url"
-                  required
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={url}
                   onChange={(e) => {
                     setUrl(e.target.value);
                     if (errorMsg) setErrorMsg(null);
                   }}
-                  placeholder="Paste an authorised video or audio link (https://…)"
-                  className="w-full px-4 py-3 rounded-sm bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand transition-colors"
+                  placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
+                  className="w-full px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
+
+                {normalizedPreview && (
+                  <div className="mt-3">
+                    <ActiveLinkIndicator
+                      url={normalizedPreview}
+                      onClear={() => setUrl('')}
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
-                <span className="block text-sm font-medium text-content mb-3">
+                <span className="block text-sm font-semibold text-content mb-3">
                   Choose output format
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -176,9 +198,9 @@ export default function AudioExtractorPage() {
                         key={option.value}
                         type="button"
                         onClick={() => setFormat(option.value)}
-                        className={`p-3.5 rounded-md border text-left transition-colors active:opacity-90 ${
+                        className={`p-3.5 rounded-xl border text-left transition-colors active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet ${
                           selected
-                            ? 'border-brand bg-surface-muted'
+                            ? 'border-brand-violet bg-surface-elevated shadow-xs ring-1 ring-brand-violet/20'
                             : 'border-line bg-surface hover:bg-surface-elevated'
                         }`}
                       >
@@ -194,39 +216,11 @@ export default function AudioExtractorPage() {
                 </div>
               </div>
 
-              <div className="max-w-sm">
-                <label
-                  htmlFor="audio-sample-rate"
-                  className="block text-sm font-medium text-content mb-2"
-                >
-                  Sample rate
-                </label>
-                <select
-                  id="audio-sample-rate"
-                  value={sampleRate}
-                  onChange={(e) => setSampleRate(e.target.value)}
-                  disabled={format === 'native'}
-                  className="w-full px-4 py-2.5 rounded-sm bg-base border border-line text-content text-sm focus:border-brand transition-colors disabled:opacity-50"
-                >
-                  <option value="source">Match original source (recommended)</option>
-                  <option value="44100">44.1 kHz (CD standard)</option>
-                  <option value="48000">48.0 kHz (Video and broadcast)</option>
-                  <option value="96000">96.0 kHz (High-resolution master)</option>
-                </select>
-              </div>
-
-              <div className="p-4 rounded-md bg-surface-elevated border border-line-subtle flex items-start gap-3">
-                <Info
-                  className="w-4 h-4 text-brand shrink-0 mt-0.5"
-                  aria-hidden="true"
-                />
-                <p className="text-xs text-content-secondary leading-relaxed">
-                  Honest audio note: converting a compressed source (such as 128 kbps AAC) into FLAC or 320 kbps MP3 cannot restore audio detail that was already discarded. Choose Original audio to keep 100% of the source quality without re-encoding.
-                </p>
-              </div>
-
               {errorMsg && (
-                <div className="p-4 rounded-md bg-error-bg border border-error text-sm text-error flex flex-wrap items-center justify-between gap-3">
+                <div
+                  role="alert"
+                  className="p-4 rounded-xl bg-error-bg border border-error text-sm text-error flex flex-wrap items-center justify-between gap-3"
+                >
                   <div className="flex items-center gap-2 min-w-0">
                     <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                     <span>{errorMsg}</span>
@@ -235,7 +229,7 @@ export default function AudioExtractorPage() {
                     type="button"
                     onClick={startExtraction}
                     disabled={isSubmitting || !url.trim()}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
                   >
                     <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Retry</span>
@@ -247,9 +241,9 @@ export default function AudioExtractorPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting || !url.trim()}
-                  className="muxaro-btn-primary px-6 py-3 text-sm whitespace-nowrap active:opacity-90 disabled:opacity-50"
+                  className="px-6 py-3 rounded-full bg-brand-violet text-white text-sm font-semibold hover:bg-brand-violet/90 active:scale-[0.98] transition-transform shadow-xs disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2"
                 >
-                  {isSubmitting ? 'Starting extraction…' : 'Extract audio'}
+                  {isSubmitting ? 'Extracting audio…' : 'Extract audio track'}
                 </button>
                 <span className="text-xs text-content-secondary">
                   Uses 1 of your 10 daily free media jobs
@@ -265,10 +259,10 @@ export default function AudioExtractorPage() {
           </div>
 
           <aside className="space-y-4">
-            <div className="muxaro-card p-6 space-y-4">
+            <div className="deepseek-input-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <Sparkles className="w-4 h-4 text-brand" aria-hidden="true" />
-                <span>Why keep original audio?</span>
+                <Sparkles className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <span>Audio extraction specs</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
                 <li className="flex items-start gap-2">
@@ -276,32 +270,32 @@ export default function AudioExtractorPage() {
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Preserves exact source quality with zero re-encoding loss.</span>
+                  <span>Original audio stream copy mode avoids quality degradation.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Completes in seconds instead of waiting for full conversion.</span>
+                  <span>Supports multi-channel 5.1 and stereo downmixing automatically.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Output playback integrity is verified before download delivery.</span>
+                  <span>Full ID3 and Vorbis metadata preservation where available.</span>
                 </li>
               </ul>
             </div>
 
-            <div className="muxaro-card p-6 space-y-2">
+            <div className="deepseek-input-card p-6 space-y-2">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <ShieldCheck className="w-4 h-4 text-brand" aria-hidden="true" />
-                <span>Automatic privacy cleanup</span>
+                <ShieldCheck className="w-4 h-4 text-brand-violet" aria-hidden="true" />
+                <span>Zero storage retention</span>
               </div>
               <p className="text-xs text-content-secondary leading-relaxed">
-                Extracted audio files stay available for download temporarily, then are automatically deleted for your privacy.
+                Processed audio files are stored only for your temporary download session and purged automatically.
               </p>
             </div>
           </aside>

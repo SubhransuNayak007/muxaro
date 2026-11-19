@@ -25,14 +25,16 @@ You do **not** need to install `gcloud` or `docker` on your Windows PC. Google C
 Paste and run the following command in the Cloud Shell terminal:
 
 ```bash
-# 1. Clone your MUXARO repository
+# 1. Clone your MUXARO repository (or cd into it)
 git clone https://github.com/SubhransuNayak007/muxaro.git
 cd muxaro
 
-# 2. Deploy directly to Cloud Run using the production Dockerfile
+# 2. Copy Dockerfile to root so gcloud automatically uses it
+cp infra/Dockerfile.api Dockerfile
+
+# 3. Deploy directly to Cloud Run
 gcloud run deploy muxaro-api \
   --source . \
-  --dockerfile infra/Dockerfile.api \
   --region us-central1 \
   --allow-unauthenticated \
   --min-instances 0 \

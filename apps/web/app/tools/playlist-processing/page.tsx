@@ -16,6 +16,9 @@ import {
   Search,
 } from 'lucide-react';
 
+import { normalizeMediaUrl } from '@/lib/url-utils';
+import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
+
 interface InspectedPlaylistItem {
   position: number;
   title: string;
@@ -70,9 +73,9 @@ export default function PlaylistProcessingPage() {
   const [playlistJob, setPlaylistJob] = useState<PlaylistJobStatus | null>(null);
 
   const inspectPlaylist = useCallback(async () => {
-    const trimmed = playlistUrl.trim();
+    const trimmed = normalizeMediaUrl(playlistUrl);
     if (!trimmed) {
-      setInspectError('Please paste an authorised playlist link first.');
+      setInspectError('Please paste a valid authorised playlist link (e.g. youtube.com/playlist?list=...).');
       return;
     }
 
@@ -301,38 +304,60 @@ export default function PlaylistProcessingPage() {
               }}
               className="space-y-4"
             >
-              <label
-                htmlFor="playlist-url"
-                className="block text-sm font-medium text-content"
-              >
-                Authorised playlist link
-              </label>
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="playlist-url"
+                  className="block text-sm font-semibold text-content"
+                >
+                  Authorised playlist link
+                </label>
+                {normalizeMediaUrl(playlistUrl) && (
+                  <span className="text-xs text-brand-violet font-medium flex items-center gap-1">
+                    Valid playlist link
+                  </span>
+                )}
+              </div>
               <div className="flex flex-col sm:flex-row gap-2.5">
                 <input
                   id="playlist-url"
-                  type="url"
-                  required
+                  type="text"
+                  inputMode="url"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={playlistUrl}
                   onChange={(e) => {
                     setPlaylistUrl(e.target.value);
                     if (inspectError) setInspectError(null);
                   }}
-                  placeholder="Paste an authorised playlist link (https://…)"
-                  className="flex-1 px-4 py-3 rounded-sm bg-base border border-line text-content placeholder:text-content-muted text-sm focus:border-brand transition-colors"
+                  placeholder="Paste playlist link (e.g. youtube.com/playlist?list=...)"
+                  className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
                 <button
                   type="submit"
                   disabled={isInspecting || !playlistUrl.trim()}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-sm border border-line bg-surface-elevated text-content text-sm font-semibold hover:border-brand transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-brand-violet text-white text-sm font-semibold hover:bg-brand-violet/90 active:scale-[0.98] transition-transform shadow-xs disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
                 >
                   <Search className="w-4 h-4" aria-hidden="true" />
                   <span>{isInspecting ? 'Inspecting…' : 'Inspect playlist'}</span>
                 </button>
               </div>
+
+              {normalizeMediaUrl(playlistUrl) && (
+                <div className="pt-1">
+                  <ActiveLinkIndicator
+                    url={normalizeMediaUrl(playlistUrl)}
+                    onClear={() => setPlaylistUrl('')}
+                  />
+                </div>
+              )}
             </form>
 
             {inspectError && (
-              <div className="p-4 rounded-md bg-error-bg border border-error text-sm text-error flex flex-wrap items-center justify-between gap-3">
+              <div
+                role="alert"
+                className="p-4 rounded-xl bg-error-bg border border-error text-sm text-error flex flex-wrap items-center justify-between gap-3"
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{inspectError}</span>
@@ -341,7 +366,7 @@ export default function PlaylistProcessingPage() {
                   type="button"
                   onClick={inspectPlaylist}
                   disabled={isInspecting || !playlistUrl.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
                 >
                   <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                   <span>Retry</span>

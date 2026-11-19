@@ -246,7 +246,7 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-40 w-full border-b border-line bg-surface shadow-sm transition-colors"
+      className="sticky top-0 z-40 w-full border-b border-line/70 bg-surface/85 backdrop-blur-md shadow-sm transition-colors"
     >
       <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
         {/* Left: Brand Identity */}
@@ -269,8 +269,11 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* Center: Customer-First Navigation Links (Desktop) */}
-        <nav className="hidden lg:flex items-center gap-1" aria-label="Main navigation">
+        {/* Center: Google Antigravity Floating Pill Navigation (Desktop) */}
+        <nav
+          className="hidden lg:flex items-center gap-1 px-1.5 py-1 rounded-full bg-surface-elevated/80 border border-line/60 shadow-xs"
+          aria-label="Main navigation"
+        >
           {navLinks.map((item) => {
             const active = isLinkActive(item.href);
             return (
@@ -278,10 +281,10 @@ export default function Navbar() {
                 key={item.href}
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                className={`px-3.5 py-1 text-xs font-medium rounded-full whitespace-nowrap transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
                   active
-                    ? 'text-brand-violet dark:text-content bg-info-bg font-semibold'
-                    : 'text-content-secondary hover:text-content hover:bg-surface-muted'
+                    ? 'text-brand-violet dark:text-content bg-surface shadow-xs font-semibold'
+                    : 'text-content-secondary hover:text-content hover:bg-surface/50'
                 }`}
               >
                 {item.label}

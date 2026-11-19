@@ -16,6 +16,10 @@ import {
   Upload,
   Info,
   SlidersHorizontal,
+  RotateCcw,
+  Link2,
+  ExternalLink,
+  Copy,
 } from 'lucide-react';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
@@ -91,6 +95,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [thumbnailError, setThumbnailError] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
   useEffect(() => {
     setSavedPref(getSavedQualityPreference());
@@ -182,6 +187,19 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
     setCompressEnabled(false);
     if (option.height > 0) {
       saveQualityPreference(option.height);
+    }
+  };
+
+  const handleCopySourceUrl = async () => {
+    if (!manifest?.sourceUrl) return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(manifest.sourceUrl);
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2000);
+      }
+    } catch {
+      // Ignore clipboard write error
     }
   };
 
@@ -388,6 +406,42 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
               </p>
             )}
 
+            {/* Prominent Verified Source Link */}
+            {manifest.sourceUrl && /^https?:\/\//i.test(manifest.sourceUrl) && (
+              <div className="mt-2.5 flex items-center gap-2 max-w-full">
+                <a
+                  href={manifest.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-elevated border border-line text-xs font-mono text-content-secondary hover:text-brand-violet hover:border-brand-violet transition-colors truncate max-w-[280px] sm:max-w-md group"
+                  title={manifest.sourceUrl}
+                >
+                  <Link2 className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
+                  <span className="truncate">{manifest.sourceUrl}</span>
+                  <ExternalLink className="w-3 h-3 text-content-muted group-hover:text-brand-violet shrink-0" aria-hidden="true" />
+                </a>
+                <button
+                  type="button"
+                  onClick={handleCopySourceUrl}
+                  className="p-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-content-secondary hover:text-content text-xs transition-colors shrink-0 flex items-center gap-1"
+                  aria-label="Copy source link"
+                  title="Copy link"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-success" aria-hidden="true" />
+                      <span className="text-[11px] font-semibold text-success">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span className="text-[11px] font-medium text-content-muted">Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {(durationText || sizeText) && (
               <div className="flex flex-wrap items-center gap-4 mt-3 text-xs text-content-secondary">
                 {durationText && (
@@ -408,23 +462,39 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
         </div>
       </div>
 
-      {/* Friendly Error Banner */}
+      {/* Friendly Error Banner with Retry */}
       {errorMsg && (
         <div
           role="alert"
-          className="mx-5 sm:mx-6 mt-5 p-3.5 rounded-xl bg-error-bg border border-line text-error text-sm flex items-center justify-between gap-3"
+          className="mx-5 sm:mx-6 mt-5 p-3.5 rounded-xl bg-error-bg border border-error text-error text-sm flex flex-wrap items-center justify-between gap-3"
         >
           <div className="flex items-center gap-2 min-w-0">
             <AlertCircle aria-hidden="true" className="w-4 h-4 flex-shrink-0" />
             <span className="break-words">{errorMsg}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setErrorMsg(null)}
-            className="text-xs font-semibold hover:underline flex-shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:opacity-80"
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => {
+                setErrorMsg(null);
+                if (mode === 'video') handleStartVideoJob();
+                else if (mode === 'audio') handleStartAudioJob();
+                else handleStartMergeJob();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-error text-error text-xs font-semibold hover:bg-surface-elevated active:translate-y-px transition-colors duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+            >
+              <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>Retry</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setErrorMsg(null)}
+              className="text-xs font-semibold hover:underline flex-shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:opacity-80"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 

@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Sparkles,
+  ArrowUpRight,
 } from 'lucide-react';
 import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
 
@@ -104,7 +105,7 @@ export default function ToolsIndexPage() {
           </div>
 
           <div className="max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface border border-line text-xs font-medium text-brand mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-elevated border border-brand-violet/30 text-xs font-semibold text-brand-violet mb-4 shadow-xs">
               <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
               <span>All media tools in one place</span>
             </div>
@@ -112,7 +113,7 @@ export default function ToolsIndexPage() {
               Standalone media tools
             </h1>
             <p className="text-base text-content-secondary mt-3 leading-relaxed">
-              Convert formats, extract audio, merge tracks, or process multiple files at once.
+              Convert formats, extract audio, merge tracks, or process multiple files at once with zero artificial degradation.
             </p>
           </div>
         </div>
@@ -124,32 +125,34 @@ export default function ToolsIndexPage() {
             <Link
               key={href}
               href={href}
-              className="muxaro-card-interactive p-6 flex flex-col justify-between group"
+              className="deepseek-input-card p-6 flex flex-col justify-between group hover:border-brand-violet/50 hover:shadow-md transition-shadow"
             >
               <div>
                 <div className="flex items-center justify-between gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-md bg-surface-muted border border-line-subtle flex items-center justify-center text-brand">
+                  <div className="w-10 h-10 rounded-xl bg-surface border border-line flex items-center justify-center text-brand-violet shadow-xs group-hover:scale-105 transition-transform">
                     <Icon className="w-5 h-5" aria-hidden="true" />
                   </div>
-                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-surface-elevated text-content-secondary border border-line-subtle">
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-surface border border-line text-content-secondary">
                     {tag}
                   </span>
                 </div>
-                <h2 className="text-lg font-bold text-content mb-2">{title}</h2>
+                <h2 className="text-lg font-bold text-content mb-2 group-hover:text-brand-violet transition-colors">
+                  {title}
+                </h2>
                 <p className="text-sm text-content-secondary leading-relaxed mb-6">
                   {description}
                 </p>
               </div>
 
-              <div className="pt-4 border-t border-line-subtle flex items-center justify-between text-sm font-semibold text-brand">
+              <div className="pt-4 border-t border-line flex items-center justify-between text-sm font-semibold text-brand-violet">
                 <span>Open tool</span>
-                <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                <ArrowUpRight className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" aria-hidden="true" />
               </div>
             </Link>
           ))}
         </div>
 
-        <div className="mt-10 muxaro-card p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="mt-10 deepseek-input-card p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-6 shadow-sm">
           <div className="max-w-xl">
             <h2 className="text-lg font-bold text-content mb-1.5">
               Working with playlists and batches together?
@@ -160,7 +163,7 @@ export default function ToolsIndexPage() {
           </div>
           <Link
             href="/tools/playlist-batch"
-            className="muxaro-btn-primary px-5 py-2.5 text-sm inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+            className="px-6 py-3 rounded-full bg-brand-violet text-white text-sm font-semibold hover:bg-brand-violet/90 active:scale-[0.98] transition-transform shadow-xs inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
           >
             <span>Open batch hub</span>
             <ArrowRight className="w-4 h-4" aria-hidden="true" />

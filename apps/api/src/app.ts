@@ -270,6 +270,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     reply.header('x-request-id', request.id);
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    reply.header('X-Permitted-Cross-Domain-Policies', 'none');
     if (!(request.url || '').startsWith('/docs')) {
       reply.header('X-Frame-Options', 'DENY');
     }

@@ -13,6 +13,9 @@
 A full-stack, self-hostable media processing workspace for inspecting, converting, compressing, extracting audio from, merging, and packaging permitted media — built with Next.js 14, Fastify 5, Node.js 24, and FFmpeg.
 
 <p>
+  <a href="https://muxaro.pages.dev/">
+    <img src="https://img.shields.io/badge/Live_Frontend-muxaro.pages.dev-36D6D1?logo=cloudflarepages&logoColor=white" alt="Live Frontend: muxaro.pages.dev" />
+  </a>
   <a href="https://github.com/SubhransuNayak007/muxaro/actions/workflows/ci.yml">
     <img src="https://github.com/SubhransuNayak007/muxaro/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
@@ -33,6 +36,7 @@ A full-stack, self-hostable media processing workspace for inspecting, convertin
 </p>
 
 <p>
+  <a href="https://muxaro.pages.dev/"><strong>Live App</strong></a> ·
   <a href="#overview">Overview</a> ·
   <a href="#features">Features</a> ·
   <a href="#product-screenshots">Screenshots</a> ·
@@ -98,6 +102,8 @@ All screenshots below were captured directly from the live MUXARO application ru
 ---
 
 ## Live Demonstration
+
+- **Live Deployed Frontend:** [https://muxaro.pages.dev/](https://muxaro.pages.dev/) — hosted on Cloudflare Pages over verified **TLS 1.3** (`TLS_AES_256_GCM_SHA384`, Let's Encrypt certificate, `HTTP 301 -> HTTPS 200`, security headers enabled, zero mixed content; see [docs/deployment/SSL_TLS.md](docs/deployment/SSL_TLS.md)). *(Note: `muxaro.pages.dev` serves the live Next.js static frontend; full API & FFmpeg job execution requires running the local stack below or provisioning the backend API service.)*
 
 ### Full End-to-End Workflow
 Upload → FFprobe stream inspection → resolution & container selection → live FFmpeg compression → SHA-256 verified download → My Downloads dashboard:
@@ -451,14 +457,12 @@ npm --prefix apps/web run build
 
 ## Deployment
 
-MUXARO includes containerized and cloud-native deployment templates ready for operator provisioning:
-
-- **Docker Compose (Local / Staging):** `docker compose -f infra/docker-compose.yml up --build` (orchestrates Next.js Web, Fastify API, FFmpeg Media Worker, PostgreSQL 16, Redis 7, and MinIO).
-- **Cloudflare Pages (Static Frontend):** Build the zero-server frontend bundle with:
+- **Live Cloudflare Pages Frontend:** Deployed at **[https://muxaro.pages.dev/](https://muxaro.pages.dev/)** with verified **TLS 1.3** (`Let's Encrypt`), automatic `HTTP -> HTTPS` `301` redirect, security response headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`), and zero mixed content (verified in [docs/deployment/SSL_TLS.md](docs/deployment/SSL_TLS.md)). Build the static frontend export locally with:
   ```bash
-  CLOUDFLARE_PAGES=1 NEXT_PUBLIC_SITE_URL=https://your-domain.example NEXT_PUBLIC_API_URL=https://api.your-domain.example npm --prefix apps/web run build
+  CLOUDFLARE_PAGES=1 NEXT_PUBLIC_SITE_URL=https://muxaro.pages.dev NEXT_PUBLIC_API_URL=https://api.your-domain.example npm --prefix apps/web run build
   ```
-- **Google Cloud Run & Terraform:** Service manifests in `infra/cloudrun/` (`api-service.yaml`, `worker-service.yaml`) and modular IaC in `infra/terraform/`.
+- **Docker Compose (Local / Staging):** `docker compose -f infra/docker-compose.yml up --build` (orchestrates Next.js Web, Fastify API, FFmpeg Media Worker, PostgreSQL 16, Redis 7, and MinIO).
+- **Google Cloud Run & Terraform (Ready for Provisioning):** Service manifests in `infra/cloudrun/` (`api-service.yaml`, `worker-service.yaml`) and modular IaC in `infra/terraform/` for provisioning the backend API, Media Worker, PostgreSQL, Cloudflare R2, and custom domains (`muxaro.app` / `api.muxaro.app`).
 
 Deployment guides: [Production Deployment](docs/deployment/PRODUCTION_DEPLOYMENT.md) · [Cloudflare Setup](docs/deployment/CLOUDFLARE_SETUP.md) · [Worker Setup](docs/deployment/WORKER_SETUP.md) · [Storage Setup](docs/deployment/STORAGE_SETUP.md) · [SSL/TLS](docs/deployment/SSL_TLS.md) · [Rollback](docs/deployment/ROLLBACK.md) · [Troubleshooting](docs/deployment/TROUBLESHOOTING.md)
 
@@ -483,7 +487,7 @@ Engineering progress is tracked transparently across 124 concrete work items in 
 - **Distributed Media Worker RPC:** Connect `apps/api` `queue.service.ts` to external `apps/media-worker` instances over `MEDIA_WORKER_URL` for horizontal worker autoscaling.
 - **Outbound Transactional Email:** Add SMTP/API email transport for verification and password-reset messages (replacing local `dev-outbox.jsonl` in production).
 - **Distributed Rate Limiting & Queue Broker:** Integrate `REDIS_URL` for multi-replica shared rate-limit counters and job coordination.
-- **Production Cloud Provisioning:** Provision live DNS, TLS certificates, Cloud Run services, and Cloudflare R2 buckets using the existing `infra/` blueprints.
+- **Production Backend & Custom Domain Provisioning:** Attach custom domains (`muxaro.app` / `api.muxaro.app`) alongside the live Cloudflare Pages frontend (`https://muxaro.pages.dev/`) and provision Cloud Run API/worker services, managed PostgreSQL, and Cloudflare R2 buckets using the existing `infra/` blueprints.
 
 ---
 

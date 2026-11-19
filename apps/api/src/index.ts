@@ -5,6 +5,23 @@
 import { buildApp } from './app.js';
 import { config } from './config.js';
 
+// Operational process guard: prevent unhandled rejections or uncaught errors from crashing the daemon
+process.on('uncaughtException', (err: Error) => {
+  console.error('[MUXARO API] [UNCAUGHT_EXCEPTION]', {
+    name: err?.name || 'Error',
+    message: err?.message || String(err),
+    stack: config.env === 'development' ? err?.stack : undefined,
+  });
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error('[MUXARO API] [UNHANDLED_REJECTION]', {
+    reason: msg,
+    stack: reason instanceof Error && config.env === 'development' ? reason.stack : undefined,
+  });
+});
+
 async function start() {
   const app = await buildApp();
 

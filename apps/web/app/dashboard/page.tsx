@@ -35,6 +35,7 @@ import {
 } from '@/lib/types';
 import { formatBytes, formatUtcTimestamp } from '@/lib/formatters';
 import JobProgress from '@/components/JobProgress';
+import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const ACTIVE_STATES: ReadonlyArray<JobState> = [
   'CREATED',
@@ -513,6 +514,12 @@ function FileCard({
                 </span>
               )}
           </div>
+
+          {job.sourceUrl && (
+            <div className="mt-2">
+              <ActiveLinkIndicator url={job.sourceUrl} />
+            </div>
+          )}
         </div>
       </div>
 
