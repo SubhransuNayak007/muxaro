@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Film,
   Music,
@@ -20,6 +21,7 @@ import {
   Link2,
   ExternalLink,
   Copy,
+  Zap,
 } from 'lucide-react';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
@@ -96,9 +98,23 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
   const [thumbnailError, setThumbnailError] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [isDirectActive, setIsDirectActive] = useState<boolean>(false);
 
   useEffect(() => {
     setSavedPref(getSavedQualityPreference());
+
+    function checkDirect() {
+      if (
+        typeof window !== 'undefined' &&
+        ((window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
+          document.documentElement.getAttribute('data-muxaro-direct') === 'active')
+      ) {
+        setIsDirectActive(true);
+      }
+    }
+    checkDirect();
+    window.addEventListener('muxaro:direct-ready', checkDirect);
+    return () => window.removeEventListener('muxaro:direct-ready', checkDirect);
   }, []);
 
   const videoOptions: NormalizedVideoOption[] = useMemo(
@@ -458,6 +474,24 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
                 )}
               </div>
             )}
+
+            {/* MUXARO Direct Hybrid Mode Badge */}
+            <div className="mt-3.5 flex items-center gap-2">
+              {isDirectActive ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
+                  MUXARO Direct Active (Residential Mode)
+                </span>
+              ) : (
+                <Link
+                  href="/tools/direct-helper"
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-light border border-brand/20 text-brand text-xs font-medium hover:bg-brand/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  <Zap className="w-3 h-3 text-brand" />
+                  <span>Enable MUXARO Direct (Bypass Cloud Bot Checks)</span>
+                </Link>
+              )}
+            </div>
           </div>
         </div>
       </div>

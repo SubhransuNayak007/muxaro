@@ -228,6 +228,15 @@ export function mapFriendlyError(
     return 'Too many requests in a short time. Wait a few seconds and try again.';
   }
   if (
+    upper.includes('BOT') ||
+    upper.includes('SIGN IN') ||
+    upper.includes('LOGIN_REQUIRED') ||
+    upper.includes('VERIFICATION') ||
+    upper.includes('MUXARO DIRECT')
+  ) {
+    return 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download directly from your browser with zero limits.';
+  }
+  if (
     upper.includes('TIMEOUT') ||
     upper.includes('ETIMEDOUT') ||
     upper.includes('ECONNREFUSED') ||

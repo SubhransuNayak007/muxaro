@@ -304,8 +304,23 @@ export function mapHumanFriendlyError(code?: string, rawMessage?: string): strin
   if (msg.includes('http error 404') || msg.includes('not found') || msg.includes('unavailable')) {
     return 'That media link could not be found or is no longer publicly available.';
   }
-  if (msg.includes('http error 403') || msg.includes('private') || msg.includes('sign in')) {
-    return 'This video or audio appears to be private or restricted and cannot be accessed.';
+  if (
+    msg.includes('confirm you’re not a bot') ||
+    msg.includes('confirm you\'re not a bot') ||
+    msg.includes('bot') ||
+    msg.includes('login_required') ||
+    msg.includes('sign in')
+  ) {
+    return 'YouTube requires verification for this stream on cloud servers. Use MUXARO Direct to download seamlessly from your browser.';
+  }
+  if (msg.includes('confirm your age') || msg.includes('age-restricted') || msg.includes('age restricted')) {
+    return 'This video is age-restricted on YouTube and requires signed-in verification.';
+  }
+  if (msg.includes('private') || msg.includes('this video is private')) {
+    return 'This video or audio is marked private by the creator and cannot be accessed.';
+  }
+  if (msg.includes('http error 403')) {
+    return 'Stream access was rejected by the content host (HTTP 403 Forbidden).';
   }
   if (msg.includes('timed out') || msg.includes('timeout')) {
     return 'Processing took too long and timed out. Try a lower resolution or try again shortly.';

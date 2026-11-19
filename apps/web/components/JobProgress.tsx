@@ -31,6 +31,8 @@ import {
   EyeOff,
   CloudDownload,
   RefreshCw,
+  Zap,
+  ExternalLink,
 } from 'lucide-react';
 
 export interface JobProgressProps {
@@ -548,6 +550,20 @@ export default function JobProgress({
     job.userMessage || mapFriendlyError(job.error || job.errorMessage, job.errorCode);
   const laneDisplay = formatLaneLabel(job.processingLane);
 
+  const isBotBlocked = useMemo(() => {
+    const raw = `${job.error || ''} ${job.errorMessage || ''} ${job.userMessage || ''} ${job.errorCode || ''}`.toLowerCase();
+    return (
+      raw.includes('bot') ||
+      raw.includes('sign in') ||
+      raw.includes('login_required') ||
+      raw.includes('restricted') ||
+      raw.includes('verification') ||
+      raw.includes('private') ||
+      raw.includes('403') ||
+      raw.includes('muxaro direct')
+    );
+  }, [job]);
+
   return (
     <section
       aria-label="Media progress"
@@ -964,6 +980,40 @@ export default function JobProgress({
               <p className="text-content-secondary">{friendlyErrorMessage}</p>
             </div>
           </div>
+
+          {isBotBlocked && (
+            <div className="p-4 rounded-xl border border-brand/30 bg-surface-elevated space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-brand-light text-brand flex-shrink-0">
+                  <Zap className="w-4 h-4" aria-hidden="true" />
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-content uppercase tracking-wider">
+                    Bypass YouTube Bot Check with MUXARO Direct
+                  </h4>
+                  <p className="text-xs text-content-secondary leading-relaxed">
+                    YouTube flags requests from cloud datacenter IPs (like AWS). With <strong>MUXARO Direct</strong>, the video streams directly through your residential connection with zero restrictions, maximum ISP speed, and zero cost.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Link
+                  href="/tools/direct-helper"
+                  className="muxaro-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold"
+                >
+                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Download with MUXARO Direct</span>
+                </Link>
+                <Link
+                  href="/tools/direct-helper"
+                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  <span>How MUXARO Direct works</span>
+                  <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
+                </Link>
+              </div>
+            </div>
+          )}
 
           {retryError && (
             <p className="text-xs text-error">{retryError}</p>
