@@ -259,12 +259,20 @@ export default function HomePage() {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
         const text = await navigator.clipboard.readText();
-        if (text.trim()) {
-          setUrl(text.trim());
+        const trimmed = text.trim();
+        if (trimmed) {
+          setUrl(trimmed);
           setErrorMessage(null);
           setLastFailedAction(null);
           setPastedFeedback(true);
           window.setTimeout(() => setPastedFeedback(false), 1800);
+          if (
+            /^https?:\/\//i.test(trimmed) ||
+            /^(www\.|youtu\.be|youtube\.com|vimeo\.com|tiktok\.com|twitter\.com|x\.com|instagram\.com|twitch\.tv|soundcloud\.com)/i.test(trimmed)
+          ) {
+            void inspectTargetUrl(trimmed);
+            return;
+          }
           urlInputRef.current?.focus();
           return;
         }
@@ -273,6 +281,23 @@ export default function HomePage() {
       // Clipboard access unavailable or denied; focus input for manual paste
     }
     urlInputRef.current?.focus();
+  };
+
+  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text').trim();
+    if (text) {
+      if (
+        /^https?:\/\//i.test(text) ||
+        /^(www\.|youtu\.be|youtube\.com|vimeo\.com|tiktok\.com|twitter\.com|x\.com|instagram\.com|twitch\.tv|soundcloud\.com)/i.test(text)
+      ) {
+        setUrl(text);
+        setErrorMessage(null);
+        setLastFailedAction(null);
+        window.setTimeout(() => {
+          void inspectTargetUrl(text);
+        }, 50);
+      }
+    }
   };
 
   const handleFileUpload = useCallback(async (file: File) => {
@@ -436,123 +461,198 @@ export default function HomePage() {
 
           {/* Alex Reji & Untitled UI Clean Media Workspace Card */}
           <div className="max-w-3xl mx-auto">
-            <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
-              {/* Active Link Pill Indicator (if link entered or pasted) */}
-              {url.trim().length > 0 && activeTab === 'link' && (
-                <div className="mb-3.5">
-                  <ActiveLinkIndicator
-                    url={url.trim()}
-                    onClear={() => {
-                      setUrl('');
+            {manifest && !activeJob ? (
+              /* Step 2: Next Step - Media Inspector & Options */
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-bg text-success text-xs font-semibold shrink-0">
+                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Link ready</span>
+                    </span>
+                    <span className="text-xs text-content-secondary truncate max-w-[220px] sm:max-w-md font-mono">
+                      {manifest.sourceUrl || url}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
                       setManifest(null);
+                      setUrl('');
                       setErrorMessage(null);
-                      urlInputRef.current?.focus();
+                      setLastFailedAction(null);
+                      window.setTimeout(() => urlInputRef.current?.focus(), 50);
                     }}
-                  />
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-content-secondary hover:text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Paste another link</span>
+                  </button>
                 </div>
-              )}
 
-              {/* Alex Reji Segmented Input Mode Tabs */}
-              <div
-                role="tablist"
-                aria-label="Choose how to add media"
-                className="muxaro-segmented-group mb-4"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id="tab-link"
-                  aria-selected={activeTab === 'link'}
-                  aria-controls="panel-link"
-                  onClick={() => setActiveTab('link')}
-                  className={`muxaro-segmented-tab ${activeTab === 'link' ? 'active' : ''}`}
-                >
-                  <Link2 className="w-3.5 h-3.5 text-brand shrink-0" aria-hidden="true" />
-                  <span>Paste a link</span>
-                </button>
-
-                <button
-                  type="button"
-                  role="tab"
-                  id="tab-upload"
-                  aria-selected={activeTab === 'upload'}
-                  aria-controls="panel-upload"
-                  onClick={() => setActiveTab('upload')}
-                  className={`muxaro-segmented-tab ${activeTab === 'upload' ? 'active' : ''}`}
-                >
-                  <UploadCloud className="w-3.5 h-3.5 text-info shrink-0" aria-hidden="true" />
-                  <span>Upload a file</span>
-                </button>
+                <MediaInspector
+                  manifest={manifest}
+                  onJobStarted={(job) => {
+                    setActiveJob(job);
+                  }}
+                />
               </div>
-
-              {/* Panel 1: Paste a Link */}
-              {activeTab === 'link' ? (
-                <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
-                  <form onSubmit={handleSubmit} className="space-y-3">
-                    <div className="relative">
-                      <Link2
-                        className="w-4 h-4 text-content-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                        aria-hidden="true"
-                      />
-                      <input
-                        ref={urlInputRef}
-                        type="text"
-                        inputMode="url"
-                        value={url}
-                        onFocus={() => setInputFocused(true)}
-                        onBlur={() => setInputFocused(false)}
-                        onChange={(e) => setUrl(e.target.value)}
-                        placeholder="Paste a video or audio link (YouTube, Vimeo, direct media URL)…"
-                        aria-label="Media link"
-                        className="w-full pl-10 pr-24 py-3.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans transition-colors duration-150"
-                      />
+            ) : (
+              /* Step 1: Input Media Card (or Analyzing Progress) */
+              <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
+                {inspecting ? (
+                  /* Animated Analyzing Progress State */
+                  <div className="py-10 px-4 text-center space-y-4">
+                    <div className="w-14 h-14 rounded-2xl bg-interactive text-brand-violet dark:text-content mx-auto flex items-center justify-center shadow-xs">
+                      <Loader2 className="w-7 h-7 motion-safe:animate-spin text-brand" aria-hidden="true" />
+                    </div>
+                    <div className="space-y-1.5 max-w-md mx-auto">
+                      <h3 className="text-base sm:text-lg font-bold text-content">
+                        Analyzing media link…
+                      </h3>
+                      <p className="text-xs sm:text-sm font-mono text-content-secondary truncate px-3 py-1.5 rounded-lg bg-surface border border-line">
+                        {url}
+                      </p>
+                      <p className="text-xs text-content-muted pt-1">
+                        Extracting video resolutions, audio streams, and available formats…
+                      </p>
+                    </div>
+                    <div>
                       <button
                         type="button"
-                        onClick={handleClipboardPaste}
-                        aria-label="Paste link from clipboard"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                        onClick={() => {
+                          setInspecting(false);
+                          setErrorMessage(null);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-content-secondary hover:text-content border border-line hover:bg-surface-muted transition-colors"
                       >
-                        {pastedFeedback ? (
-                          <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                        ) : (
-                          <ClipboardPaste className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                        )}
-                        <span className="whitespace-nowrap">{pasteLabel}</span>
+                        <X className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Cancel</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Alex Reji Segmented Input Mode Tabs */}
+                    <div
+                      role="tablist"
+                      aria-label="Choose how to add media"
+                      className="muxaro-segmented-group mb-4"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-link"
+                        aria-selected={activeTab === 'link'}
+                        aria-controls="panel-link"
+                        onClick={() => setActiveTab('link')}
+                        className={`muxaro-segmented-tab ${activeTab === 'link' ? 'active' : ''}`}
+                      >
+                        <Link2 className="w-3.5 h-3.5 text-brand shrink-0" aria-hidden="true" />
+                        <span>Paste a link</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        role="tab"
+                        id="tab-upload"
+                        aria-selected={activeTab === 'upload'}
+                        aria-controls="panel-upload"
+                        onClick={() => setActiveTab('upload')}
+                        className={`muxaro-segmented-tab ${activeTab === 'upload' ? 'active' : ''}`}
+                      >
+                        <UploadCloud className="w-3.5 h-3.5 text-info shrink-0" aria-hidden="true" />
+                        <span>Upload a file</span>
                       </button>
                     </div>
 
-                    {/* Bottom Action Strip with clean circular action button */}
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                      <div className="flex items-center gap-2 text-xs text-content-secondary">
-                        <span className="inline-flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
-                          <span className="hidden sm:inline">Permission-verified media</span>
-                          <span className="sm:hidden">Verified media</span>
-                        </span>
-                        <span className="text-content-muted">•</span>
-                        <span>Auto-deletes in 60m</span>
-                      </div>
+                    {/* Panel 1: Paste a Link */}
+                    {activeTab === 'link' ? (
+                      <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
+                        <form onSubmit={handleSubmit} className="space-y-3">
+                          <div className="relative">
+                            <Link2
+                              className="w-4 h-4 text-content-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                              aria-hidden="true"
+                            />
+                            <input
+                              ref={urlInputRef}
+                              type="text"
+                              inputMode="url"
+                              value={url}
+                              onFocus={() => setInputFocused(true)}
+                              onBlur={() => setInputFocused(false)}
+                              onChange={(e) => setUrl(e.target.value)}
+                              onPaste={handleInputPaste}
+                              placeholder="Paste a video or audio link (YouTube, Vimeo, direct media URL)…"
+                              aria-label="Media link"
+                              className="w-full pl-10 pr-28 py-3.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans transition-colors duration-150"
+                            />
+                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                              {url.trim().length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUrl('');
+                                    setErrorMessage(null);
+                                    urlInputRef.current?.focus();
+                                  }}
+                                  aria-label="Clear link input"
+                                  className="p-1.5 rounded-lg text-content-muted hover:text-content hover:bg-interactive transition-colors"
+                                  title="Clear"
+                                >
+                                  <X className="w-3.5 h-3.5" aria-hidden="true" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleClipboardPaste}
+                                aria-label="Paste link from clipboard"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                              >
+                                {pastedFeedback ? (
+                                  <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                                ) : (
+                                  <ClipboardPaste className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                                )}
+                                <span className="whitespace-nowrap">{pasteLabel}</span>
+                              </button>
+                            </div>
+                          </div>
 
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="submit"
-                          disabled={inspecting || !url.trim()}
-                          className="muxaro-action-circle"
-                          title={inspecting ? 'Analysing link...' : 'Analyse media'}
-                          aria-label={inspecting ? 'Analysing media link' : 'Analyse media link'}
-                        >
-                          {inspecting ? (
-                            <Loader2 className="w-5 h-5 motion-safe:animate-spin" aria-hidden="true" />
-                          ) : (
-                            <ArrowUp className="w-5 h-5" aria-hidden="true" />
-                          )}
-                        </button>
+                          {/* Bottom Action Strip with clean circular action button */}
+                          <div className="flex items-center justify-between gap-3 pt-1">
+                            <div className="flex items-center gap-2 text-xs text-content-secondary">
+                              <span className="inline-flex items-center gap-1.5">
+                                <ShieldCheck className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
+                                <span className="hidden sm:inline">Permission-verified media</span>
+                                <span className="sm:hidden">Verified media</span>
+                              </span>
+                              <span className="text-content-muted">•</span>
+                              <span>Auto-deletes in 60m</span>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="submit"
+                                disabled={inspecting || !url.trim()}
+                                className="muxaro-action-circle"
+                                title={inspecting ? 'Analysing link...' : 'Analyse media'}
+                                aria-label={inspecting ? 'Analysing media link' : 'Analyse media link'}
+                              >
+                                {inspecting ? (
+                                  <Loader2 className="w-5 h-5 motion-safe:animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <ArrowUp className="w-5 h-5" aria-hidden="true" />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        </form>
                       </div>
-                    </div>
-                  </form>
-                </div>
-              ) : (
-                /* Panel 2: Upload a File */
+                    ) : (
+                      /* Panel 2: Upload a File */
                 <div id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
                   <div
                     onDragOver={(e) => {
@@ -649,24 +749,29 @@ export default function HomePage() {
                   </div>
                 </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
+      )}
 
-            {/* Quick Action Tool Pills (Alex Reji style) */}
-            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-5">
-              {CAPABILITIES.map((cap) => {
-                const Icon = cap.icon;
-                return (
-                  <Link
-                    key={cap.href}
-                    href={cap.href}
-                    className="muxaro-pill-btn"
-                  >
-                    <Icon className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-                    <span>{cap.title}</span>
-                  </Link>
-                );
-              })}
-            </div>
+      {/* Quick Action Tool Pills (Alex Reji style) */}
+      {!manifest && !activeJob && (
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-5">
+          {CAPABILITIES.map((cap) => {
+            const Icon = cap.icon;
+            return (
+              <Link
+                key={cap.href}
+                href={cap.href}
+                className="muxaro-pill-btn"
+              >
+                <Icon className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
+                <span>{cap.title}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
             {/* Calm Cancellation Notice */}
             {uploadNotice && !errorMessage && (
@@ -768,19 +873,6 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Media Inspection Manifest Island */}
-        {manifest && !activeJob && (
-          <div className="max-w-3xl mx-auto mb-14">
-            <MediaInspector
-              manifest={manifest}
-              onJobStarted={(job) => {
-                setActiveJob(job);
-                window.scrollTo({ top: 340, behavior: 'smooth' });
-              }}
-            />
           </div>
         )}
 
