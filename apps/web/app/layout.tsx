@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import './motion.css';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import { AuthProvider } from '@/lib/auth-context';
@@ -97,7 +98,7 @@ export default function RootLayout({
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var d=document.documentElement;var t=localStorage.getItem('theme');if(t==='dark'){d.classList.add('dark');d.setAttribute('data-theme','dark');}else{d.classList.remove('dark');d.setAttribute('data-theme','light');}if(localStorage.getItem('muxaro-lightweight')==='true'){d.setAttribute('data-lightweight','true');}}catch(e){}})();`,
+            __html: `(function(){try{if(window.location.hostname==='muxaro.pages.dev'||window.location.hostname.endsWith('.muxaro.pages.dev')){window.location.replace('https://muxaro.vercel.app'+window.location.pathname+window.location.search);return;}var d=document.documentElement;var t=localStorage.getItem('theme');if(t==='dark'){d.classList.add('dark');d.setAttribute('data-theme','dark');}else{d.classList.remove('dark');d.setAttribute('data-theme','light');}if(localStorage.getItem('muxaro-lightweight')==='true'){d.setAttribute('data-lightweight','true');}}catch(e){}})();`,
           }}
         />
       </head>

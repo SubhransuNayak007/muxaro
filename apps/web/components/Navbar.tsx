@@ -222,7 +222,7 @@ export default function Navbar() {
     { href: '/', label: 'Downloader' },
     { href: '/tools', label: 'Tools' },
     { href: '/downloads', label: 'Downloads' },
-    { href: '/status', label: 'Status' },
+    { href: '/dock', label: 'Dock' },
   ];
 
   const isLinkActive = useCallback(
@@ -318,13 +318,14 @@ export default function Navbar() {
             aria-label="MUXARO Home"
           >
             <img
-              src="/brand/muxaro-mark.svg"
+              src="/brand/muxaro-mark-mono.svg"
               alt=""
               width={28}
               height={28}
-              className="w-7 h-7 object-contain"
+              className="w-7 h-7 object-contain text-content"
+              style={{ color: 'currentColor', filter: 'none' }}
             />
-            <span className="font-sans font-extrabold text-xl tracking-tight text-content">
+            <span className="font-sans font-extrabold text-xl tracking-[-0.03em] text-content">
               MUXARO
             </span>
           </Link>
@@ -549,7 +550,7 @@ export default function Navbar() {
             </div>
           )}
 
-          {/* Eco Mode / Reduced Motion Toggle with Tooltip */}
+          {/* Eco Mode — Studio Utility Control */}
           <div className="relative inline-flex items-center">
             <button
               type="button"
@@ -560,25 +561,25 @@ export default function Navbar() {
               onBlur={() => setEcoTooltipVisible(false)}
               title={
                 isLightweightActive
-                  ? 'Eco mode active (reduced motion and battery saving). Click to turn off.'
-                  : 'Eco mode (reduced motion): limits background animations and conserves CPU & battery.'
+                  ? 'Eco Mode active — low-power battery & performance mode. Click to disable.'
+                  : 'Enable Eco Mode — low-power battery & performance mode.'
               }
               aria-label={
                 isLightweightActive
-                  ? 'Eco mode active. Click to turn off.'
-                  : 'Enable Eco mode for reduced motion and battery saving'
+                  ? 'Eco Mode on. Click to disable.'
+                  : 'Enable Eco Mode for reduced battery and GPU load'
               }
               aria-pressed={mounted ? isLightweightActive : undefined}
-              className={`h-9 min-w-[36px] sm:min-w-[104px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+              className={`h-9 min-w-[36px] sm:min-w-[108px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
                 isLightweightActive
                   ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
                   : 'border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content'
               }`}
             >
               <Feather className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Eco mode</span>
+              <span className="hidden sm:inline">Eco Mode</span>
               <span
-                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded font-mono ${
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded font-mono leading-none ${
                   isLightweightActive
                     ? 'bg-brand-violet text-white'
                     : 'bg-surface-elevated text-content-secondary'
@@ -594,11 +595,20 @@ export default function Navbar() {
                 className="absolute right-0 top-full mt-2 w-64 p-3 rounded-xl border border-line bg-surface shadow-xl text-xs z-50 pointer-events-none"
               >
                 <div className="flex items-center gap-1.5 font-semibold text-content mb-1">
-                  <Feather className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                  <span>Eco Mode ({isLightweightActive ? 'Active' : 'Off'})</span>
+                  <Feather className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
+                  <span>Eco Mode</span>
+                  <span
+                    className={`ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                      isLightweightActive
+                        ? 'bg-brand-violet text-white'
+                        : 'bg-surface-elevated text-content-secondary'
+                    }`}
+                  >
+                    {isLightweightActive ? 'On' : 'Off'}
+                  </span>
                 </div>
                 <p className="text-content-secondary text-[11px] leading-relaxed">
-                  Conserves laptop battery and reduces GPU load by turning off ambient animated gradients and reducing motion.
+                  Low-power battery &amp; performance mode. Disables ambient animations and reduces GPU load to extend battery life.
                 </p>
               </div>
             )}

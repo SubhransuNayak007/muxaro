@@ -258,12 +258,43 @@ export async function resolveCobaltStream(
   return null;
 }
 
+function isForbiddenStreamUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      /^169\.254\./.test(host)
+    ) {
+      return true;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+
 export async function pipeRemoteStreamToReply(
   remoteUrl: string,
   reply: FastifyReply,
   filename: string,
   contentType = 'video/mp4'
 ): Promise<void> {
+  if (isForbiddenStreamUrl(remoteUrl)) {
+    throw new Error('Access to restricted or private destination is blocked for security reasons');
+  }
+
   const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
   const cleanEncoded = encodeURIComponent(safeFilename);
 
@@ -468,6 +499,7 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
           '--js-runtimes', 'deno,node',
           '-f', rawBody.formatId || (targetExt === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best'),
           '-o', '-',
+          '--',
           sourceUrl,
         ];
 
@@ -934,6 +966,7 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       '--js-runtimes', 'deno,node',
       '-f', targetFormat === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best',
       '-o', '-',
+      '--',
       targetUrl,
     ];
 

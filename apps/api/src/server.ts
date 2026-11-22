@@ -66,7 +66,7 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   // 1. CORS Configuration
   const corsOrigins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://muxaro.pages.dev'];
+    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://muxaro.pages.dev', 'https://muxaro.vercel.app'];
 
   await fastify.register(cors, {
     origin: (origin, cb) => {
@@ -79,12 +79,14 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
         corsOrigins.includes('*') ||
         corsOrigins.includes(origin) ||
         origin.endsWith('.muxaro.pages.dev') ||
-        origin.endsWith('.muxaro.app')
+        origin.endsWith('.muxaro.app') ||
+        origin.endsWith('.vercel.app')
       ) {
         cb(null, true);
         return;
       }
-      cb(null, true); // Permissive in dev/staging to prevent CORS breakage
+      // Strict origin defense: disallow untrusted third-party origins
+      cb(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],

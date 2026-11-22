@@ -128,18 +128,18 @@ export default function DocsIndexPage() {
               </div>
               <div>
                 <h2 className="text-base font-semibold text-content">
-                  Service status
+                  Studio Dock
                 </h2>
                 <p className="text-sm text-content-secondary mt-1">
-                  Check live availability and processing speed across Muxaro servers.
+                  Access core studio tools, format specifications, and keyboard shortcuts.
                 </p>
               </div>
             </div>
             <Link
-              href="/status"
+              href="/dock"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-sm bg-surface-elevated border border-line text-sm font-medium text-content hover:border-brand hover:text-brand transition-colors shrink-0"
             >
-              <span>View status</span>
+              <span>Open Dock</span>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </Link>
           </div>

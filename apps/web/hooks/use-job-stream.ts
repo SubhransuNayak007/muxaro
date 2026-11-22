@@ -49,9 +49,11 @@ const MAX_BACKOFF_MS = 12000;
 
 export function useJobStream(initialJobId?: string | null): UseJobStreamState & UseJobStreamActions {
   const [jobId, setJobId] = useState<string | null>(initialJobId || null);
-  const [status, setStatus] = useState<string>('QUEUED');
-  const [stage, setStage] = useState<string>('QUEUED');
-  const [stageMessage, setStageMessage] = useState<string>('Job queued for processing…');
+  const [status, setStatus] = useState<string>(initialJobId ? 'QUEUED' : 'IDLE');
+  const [stage, setStage] = useState<string>(initialJobId ? 'QUEUED' : 'IDLE');
+  const [stageMessage, setStageMessage] = useState<string>(
+    initialJobId ? 'Job queued for processing…' : ''
+  );
   const [progress, setProgress] = useState<number>(0);
   const [speed, setSpeed] = useState<string>('1.0x');
   const [etaSeconds, setEtaSeconds] = useState<number>(0);
@@ -73,12 +75,22 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
       setJobId(initialJobId);
       setStatus('QUEUED');
       setStage('QUEUED');
+      setStageMessage('Job queued for processing…');
       setProgress(0);
       setIsTerminal(false);
       setError(null);
       setDownloadUrl(null);
       startTimeRef.current = Date.now();
       lastProgressRef.current = { time: Date.now(), pct: 0 };
+    } else if (!initialJobId) {
+      setJobId(null);
+      setStatus('IDLE');
+      setStage('IDLE');
+      setStageMessage('');
+      setProgress(0);
+      setIsTerminal(false);
+      setError(null);
+      setDownloadUrl(null);
     }
   }, [initialJobId, jobId]);
 
@@ -368,8 +380,9 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
   const reset = useCallback(() => {
     cleanupStream();
     setJobId(null);
-    setStatus('QUEUED');
-    setStage('QUEUED');
+    setStatus('IDLE');
+    setStage('IDLE');
+    setStageMessage('');
     setProgress(0);
     setError(null);
     setDownloadUrl(null);

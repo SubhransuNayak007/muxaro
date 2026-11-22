@@ -251,25 +251,32 @@ export const downloadsRoutes: FastifyPluginAsync = async (fastify) => {
     const query = (request.query as Record<string, string>) || {};
     const requestedFilename = query.fn || path.basename(cleanKey) || 'download.mp4';
 
-    // Candidate disk paths: project root /storage/{cleanKey}
-    const candidatePaths = [
-      path.resolve(process.cwd(), 'storage', cleanKey),
-      path.resolve(process.cwd(), 'storage/artifacts', cleanKey),
-      path.resolve(process.cwd(), '../../storage', cleanKey),
-      path.resolve(process.cwd(), '../worker-media/storage', cleanKey),
-      path.resolve(process.cwd(), '../worker-media/storage/artifacts', cleanKey),
-      path.resolve(process.cwd(), '../../apps/worker-media/storage', cleanKey),
-      path.resolve(process.cwd(), '../../apps/worker-media/storage/artifacts', cleanKey),
-      path.resolve('D:/yt doenlord/apps/worker-media/storage', cleanKey),
-      path.resolve('D:/yt doenlord/apps/worker-media/storage/artifacts', cleanKey),
-      path.resolve('D:/yt doenlord/storage', cleanKey),
-      path.resolve('D:/yt doenlord/storage/artifacts', cleanKey),
+    // Strict Path Traversal Defense: Reject directory traversal sequences, null bytes, and path escalations
+    if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\0') || /^[a-zA-Z]:/.test(cleanKey) || /^[\\/]/.test(cleanKey)) {
+      throw MuxaroError.badRequest('Invalid or prohibited storage path');
+    }
+
+    // Candidate base directories for storage artifacts
+    const candidateDirs = [
+      path.resolve(process.cwd(), 'storage/artifacts'),
+      path.resolve(process.cwd(), 'storage'),
+      path.resolve(process.cwd(), '../worker-media/storage/artifacts'),
+      path.resolve(process.cwd(), '../worker-media/storage'),
+      path.resolve(process.cwd(), '../../apps/worker-media/storage/artifacts'),
+      path.resolve(process.cwd(), '../../apps/worker-media/storage'),
+      path.resolve('D:/yt doenlord/apps/worker-media/storage/artifacts'),
+      path.resolve('D:/yt doenlord/apps/worker-media/storage'),
+      path.resolve('D:/yt doenlord/storage/artifacts'),
+      path.resolve('D:/yt doenlord/storage'),
     ];
 
     let resolvedDiskPath: string | null = null;
-    for (const p of candidatePaths) {
-      if (fs.existsSync(p)) {
-        resolvedDiskPath = p;
+    for (const baseDir of candidateDirs) {
+      const resolved = path.resolve(baseDir, cleanKey);
+      const relative = path.relative(baseDir, resolved);
+      const isContained = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+      if (isContained && fs.existsSync(resolved)) {
+        resolvedDiskPath = resolved;
         break;
       }
     }

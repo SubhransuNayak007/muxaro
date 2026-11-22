@@ -1,0 +1,305 @@
+/* Hallmark · kinetic-motion: MUXARO Luxury Motion System v1.0 · precision easeOutExpo · zero runtime bloat */
+
+:root {
+  /* Motion Curves: Luxury Editorial Bezier & Snappy Tactile */
+  --ease-editorial: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-tactile: cubic-bezier(0.2, 0, 0, 1);
+  --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Timeline Durations */
+  --motion-duration-headline: 650ms;
+  --motion-duration-fade: 550ms;
+  --motion-duration-hairline: 600ms;
+  --motion-duration-tab: 220ms;
+
+  /* Hallmark-Compliant Segmented Indicator Tokens */
+  --motion-indicator-bg-light: #faf9f7;
+  --motion-indicator-bg-dark: #161619;
+  --motion-indicator-border-light: rgba(9, 9, 11, 0.08);
+  --motion-indicator-border-dark: rgba(255, 255, 255, 0.08);
+  --motion-indicator-shadow-light: 0 1px 3px rgba(16, 24, 40, 0.08);
+  --motion-indicator-shadow-dark: 0 1px 3px rgba(0, 0, 0, 0.5);
+
+  --motion-tab-group-bg-light: #f2f4f7;
+  --motion-tab-group-bg-dark: #111113;
+  --motion-tab-group-border-light: rgba(9, 9, 11, 0.08);
+  --motion-tab-group-border-dark: rgba(255, 255, 255, 0.08);
+
+  --motion-tab-text-light: #475569;
+  --motion-tab-text-dark: #8e8e93;
+  --motion-tab-text-active-light: #0b0b0d;
+  --motion-tab-text-active-dark: #f5f5f7;
+}
+
+/* -------------------------------------------------------------------------- */
+/* GPU-Composited Keyframes                                                   */
+/* -------------------------------------------------------------------------- */
+
+@keyframes maskedRevealUp {
+  0% {
+    transform: translateY(110%);
+  }
+  100% {
+    transform: translateY(0%);
+  }
+}
+
+@keyframes editorialFadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hairlineRevealX {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes subtleFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* 1. Masked Text Reveal Primitives                                           */
+/* -------------------------------------------------------------------------- */
+
+.motion-mask {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+  line-height: inherit;
+}
+
+.motion-mask-block {
+  display: block;
+  overflow: hidden;
+}
+
+.motion-reveal-item {
+  display: inline-block;
+  transform: translateY(110%);
+  animation: maskedRevealUp var(--motion-duration-headline) var(--ease-editorial) forwards;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.motion-reveal-block {
+  display: block;
+  transform: translateY(110%);
+  animation: maskedRevealUp var(--motion-duration-headline) var(--ease-editorial) forwards;
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Stagger presets (60ms - 90ms intervals for editorial pacing) */
+.motion-stagger-1 {
+  animation-delay: 0ms;
+}
+.motion-stagger-2 {
+  animation-delay: 75ms;
+}
+.motion-stagger-3 {
+  animation-delay: 150ms;
+}
+.motion-stagger-4 {
+  animation-delay: 225ms;
+}
+.motion-stagger-5 {
+  animation-delay: 300ms;
+}
+.motion-stagger-6 {
+  animation-delay: 375ms;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 2. Editorial Fade Up Primitives                                            */
+/* -------------------------------------------------------------------------- */
+
+.motion-fade-up {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: editorialFadeUp var(--motion-duration-fade) var(--ease-editorial) forwards;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* Precise Delay Helpers (Opening budget: resolves by 910ms <= 950ms) */
+.motion-delay-0 {
+  animation-delay: 0ms;
+}
+.motion-delay-60 {
+  animation-delay: 60ms;
+}
+.motion-delay-75 {
+  animation-delay: 75ms;
+}
+.motion-delay-120 {
+  animation-delay: 120ms;
+}
+.motion-delay-180 {
+  animation-delay: 180ms; /* Ideal for Subtitle */
+}
+.motion-delay-220 {
+  animation-delay: 220ms; /* Ideal for Hairline Divider */
+}
+.motion-delay-260 {
+  animation-delay: 260ms; /* Ideal for Workspace Card / Omnibox */
+}
+.motion-delay-340 {
+  animation-delay: 340ms; /* Ideal for Trust Strip / Secondary Metrics */
+}
+.motion-delay-420 {
+  animation-delay: 420ms;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 3. Hairline Reveal Primitives                                              */
+/* -------------------------------------------------------------------------- */
+
+.motion-hairline {
+  display: block;
+  width: 100%;
+  height: 1px;
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: hairlineRevealX var(--motion-duration-hairline) var(--ease-editorial) forwards;
+  will-change: transform;
+}
+
+.motion-hairline-center {
+  transform-origin: center center;
+}
+
+.motion-hairline-right {
+  transform-origin: right center;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 4. Tactile Segmented Sliding Indicator                                     */
+/* -------------------------------------------------------------------------- */
+
+.tactile-segmented-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background-color: var(--motion-tab-group-bg-light);
+  border: 1px solid var(--motion-tab-group-border-light);
+  color: var(--motion-tab-text-light);
+}
+
+.dark .tactile-segmented-group {
+  background-color: var(--motion-tab-group-bg-dark);
+  border-color: var(--motion-tab-group-border-dark);
+  color: var(--motion-tab-text-dark);
+}
+
+.tactile-segmented-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 8px;
+  background-color: var(--motion-indicator-bg-light);
+  box-shadow: var(--motion-indicator-shadow-light);
+  border: 1px solid var(--motion-indicator-border-light);
+  color: var(--motion-tab-text-active-light);
+  z-index: 1;
+  pointer-events: none;
+  will-change: transform;
+  transition: transform var(--motion-duration-tab) var(--ease-tactile);
+}
+
+.dark .tactile-segmented-indicator {
+  background-color: var(--motion-indicator-bg-dark);
+  box-shadow: var(--motion-indicator-shadow-dark);
+  border-color: var(--motion-indicator-border-dark);
+  color: var(--motion-tab-text-active-dark);
+}
+
+.tactile-segmented-tab {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--motion-tab-text-light);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 150ms ease;
+  user-select: none;
+}
+
+.dark .tactile-segmented-tab {
+  color: var(--motion-tab-text-dark);
+}
+
+.tactile-segmented-tab:hover {
+  color: var(--motion-tab-text-active-light);
+}
+
+.dark .tactile-segmented-tab:hover {
+  color: var(--motion-tab-text-active-dark);
+}
+
+.tactile-segmented-tab[aria-selected="true"],
+.tactile-segmented-tab.active {
+  color: var(--motion-tab-text-active-light);
+  font-weight: 600;
+}
+
+.dark .tactile-segmented-tab[aria-selected="true"],
+.dark .tactile-segmented-tab.active {
+  color: var(--motion-tab-text-active-dark);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 5. Accessible Reduced Motion Override                                      */
+/* -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .motion-reveal-item,
+  .motion-reveal-block,
+  .motion-fade-up,
+  .motion-hairline,
+  .tactile-segmented-indicator {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}

@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { Activity } from 'lucide-react';
+import { Anchor } from 'lucide-react';
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -17,13 +17,14 @@ export default function Footer() {
               aria-label="MUXARO Home"
             >
               <img
-                src="/brand/muxaro-mark.svg"
+                src="/brand/muxaro-mark-mono.svg"
                 alt=""
                 width={24}
                 height={24}
-                className="w-6 h-6 object-contain"
+                className="w-6 h-6 object-contain text-content"
+                style={{ color: 'currentColor', filter: 'none' }}
               />
-              <span className="font-sans font-extrabold text-lg tracking-tight text-content">
+              <span className="font-sans font-extrabold text-lg tracking-[-0.03em] text-content">
                 MUXARO
               </span>
             </Link>
@@ -32,11 +33,11 @@ export default function Footer() {
             </p>
             <div className="pt-1">
               <Link
-                href="/status"
+                href="/dock"
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-line bg-surface-muted text-content-secondary hover:text-content hover:border-brand-violet transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
               >
-                <Activity className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                <span>Service status</span>
+                <Anchor className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                <span>Dock</span>
               </Link>
             </div>
           </div>
@@ -81,10 +82,10 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/status"
+                  href="/dock"
                   className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
                 >
-                  Status
+                  Dock
                 </Link>
               </li>
               <li>
@@ -179,10 +180,10 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/status"
+                  href="/dock"
                   className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
                 >
-                  Service status
+                  Dock
                 </Link>
               </li>
             </ul>

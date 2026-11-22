@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- MUXARO Studio Mark — Luxury Minimalist Monochrome -->
+  <!-- Geometric M: two vertical strokes + a sharp V descent, razor-precise -->
+  <rect x="3" y="6" width="3" height="20" fill="currentColor"/>
+  <rect x="26" y="6" width="3" height="20" fill="currentColor"/>
+  <polygon points="3,6 16,20 29,6 29,10 16,26 3,10" fill="currentColor"/>
+  <!-- 1px architectural underline hairline -->
+  <line x1="3" y1="29" x2="29" y2="29" stroke="currentColor" stroke-width="1"/>
+</svg>

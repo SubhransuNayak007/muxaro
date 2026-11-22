@@ -1561,6 +1561,12 @@ class ApiClient {
     if (params.formatId) {
       payload.formatId = params.formatId;
     }
+    if ((params as any).videoFormatId) {
+      payload.videoFormatId = (params as any).videoFormatId;
+    }
+    if ((params as any).audioFormatId) {
+      payload.audioFormatId = (params as any).audioFormatId;
+    }
 
     const raw = await this.requestStrict<any>('/jobs', {
       method: 'POST',

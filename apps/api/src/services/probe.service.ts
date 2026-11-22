@@ -238,6 +238,7 @@ export class ProbeService {
       '--socket-timeout', '30',
       '--js-runtimes', 'deno,node',
       ...baseArgs,
+      '--',
       url,
     ];
 
@@ -473,7 +474,7 @@ export class ProbeService {
    */
   private static async probeWithGalleryDl(url: string, platform: SupportedPlatform): Promise<NormalizedProbeResponse> {
     const env = getExecutionEnv();
-    const args = ['--dump-json', url];
+    const args = ['--dump-json', '--', url];
 
     const { stdout } = await execFileAsync('gallery-dl', args, {
       timeout: 30000,

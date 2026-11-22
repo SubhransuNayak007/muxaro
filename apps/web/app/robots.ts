@@ -52,7 +52,7 @@ export default function robots(): MetadataRoute.Robots {
           '/convert/',
           '/alternatives',
           '/alternatives/',
-          '/status',
+          '/dock',
           '/terms',
           '/privacy',
           '/dmca',

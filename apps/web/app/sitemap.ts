@@ -80,10 +80,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${SITE_URL}/status`,
+      url: `${SITE_URL}/dock`,
       lastModified: currentDate,
-      changeFrequency: 'hourly',
-      priority: 0.5,
+      changeFrequency: 'weekly',
+      priority: 0.7,
     },
     {
       url: `${SITE_URL}/terms`,

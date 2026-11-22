@@ -7,22 +7,16 @@ import { useRouter } from 'next/navigation';
 import {
   Link2,
   UploadCloud,
-  ClipboardPaste,
-  Check,
   Loader2,
   Film,
   Music,
   Layers,
   ListVideo,
-  CheckCircle2,
   AlertCircle,
   ShieldCheck,
   RotateCcw,
   X,
   Clock,
-  Sparkles,
-  ArrowUp,
-  ExternalLink,
 } from 'lucide-react';
 import HeroWaveLines from '@/components/HeroWaveLines';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
@@ -83,12 +77,6 @@ const CAPABILITIES = [
   },
 ] as const;
 
-const TRUST_GUARANTEES = [
-  'Zero ads or pop-ups',
-  '60-minute auto-delete',
-  'Original quality when compatible',
-  'Continues safely in background',
-] as const;
 
 const ACTIVE_STATES = new Set<JobState>([
   'CREATED',
@@ -411,15 +399,12 @@ export default function HomePage() {
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
           {/* Hero Header */}
           <div className="text-center max-w-3xl mx-auto mb-6 sm:mb-8">
-            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-content tracking-tight leading-[1.12] mb-3">
-              Universal Video Downloader &{' '}
-              <span className="muxaro-text-gradient block sm:inline">
-                Lossless Converter
-              </span>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-content tracking-tight leading-[1.1] mb-3">
+              Lossless Media Downloader &amp; Remuxer
             </h1>
 
             <p className="text-base sm:text-lg text-content-secondary max-w-2xl mx-auto leading-relaxed">
-              Download up to 8K video, extract lossless 320 kbps MP3 & studio FLAC, or convert formats cleanly. 100% ad-free with a 4 GB free limit.
+              Stream-copy video up to 8K and extract uncompressed audio. Zero conversion quality loss.
             </p>
           </div>
 
@@ -697,7 +682,7 @@ export default function HomePage() {
           <div className="max-w-3xl mx-auto mb-5">
             <div className="rounded-2xl bg-surface border border-line shadow-sm px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start sm:items-center gap-2.5 text-sm text-content min-w-0">
-                <Sparkles className="w-4 h-4 text-brand-violet shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
+                <ShieldCheck className="w-4 h-4 text-brand-violet shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
                 <span>
                   Create a free account for higher file-size caps, batch playlist downloads, and 24-hr cloud history.
                 </span>
@@ -722,77 +707,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Structured Free Account Benefits Card */}
-        {!authLoading && !authenticated && !manifest && !activeJob && (
-          <div className="max-w-3xl mx-auto mt-2 mb-10">
-            <div className="rounded-2xl border border-line bg-surface p-5 sm:p-6 shadow-card transition-colors">
-              {/* Header with Title and Primary CTA Button */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-line/60">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-info-bg text-brand-violet dark:text-content text-[11px] font-semibold border border-brand-violet/20">
-                      <Sparkles className="w-3 h-3 text-brand-violet" aria-hidden="true" />
-                      Free Account Benefits
-                    </span>
-                  </div>
-                  <h3 className="text-base sm:text-lg font-bold text-content tracking-tight">
-                    Upgrade Your Media Studio Experience
-                  </h3>
-                  <p className="text-xs text-content-secondary mt-0.5">
-                    100% free forever — no payment card required.
-                  </p>
-                </div>
-
-                <Link
-                  href="/register"
-                  className="muxaro-btn-primary px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-2 whitespace-nowrap active:scale-[0.98] transition-transform shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet self-stretch sm:self-auto"
-                >
-                  <span>Create free account</span>
-                  <Sparkles className="w-3.5 h-3.5 text-amber-300" aria-hidden="true" />
-                </Link>
-              </div>
-
-              {/* 3-Column Features */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                <div className="flex items-start gap-3 p-3 rounded-xl bg-surface-elevated/40 border border-line/50">
-                  <div className="w-8 h-8 rounded-lg bg-interactive text-brand-violet flex items-center justify-center shrink-0">
-                    <UploadCloud className="w-4 h-4" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-content">Higher File-Size Caps</p>
-                    <p className="text-[11px] text-content-secondary mt-0.5 leading-snug">
-                      Process large media files up to 4 GB with dedicated priority worker allocations.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 p-3 rounded-xl bg-surface-elevated/40 border border-line/50">
-                  <div className="w-8 h-8 rounded-lg bg-info-bg text-brand-blue flex items-center justify-center shrink-0">
-                    <ListVideo className="w-4 h-4" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-content">Batch Playlists</p>
-                    <p className="text-[11px] text-content-secondary mt-0.5 leading-snug">
-                      Download complete YouTube, Vimeo, or audio playlists into a single archive.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3 p-3 rounded-xl bg-surface-elevated/40 border border-line/50">
-                  <div className="w-8 h-8 rounded-lg bg-success-bg text-success flex items-center justify-center shrink-0">
-                    <Clock className="w-4 h-4" aria-hidden="true" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-content">24-Hr Cloud History</p>
-                    <p className="text-[11px] text-content-secondary mt-0.5 leading-snug">
-                      Instant re-downloads, persistent SHA-256 hashes, and transfer sync across devices.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Concise 4-Item Capability Strip */}
         <section className="pt-4 pb-12" aria-labelledby="capabilities-heading">
@@ -839,19 +753,6 @@ export default function HomePage() {
 
         {/* Why Creators Choose MUXARO Comparison Module */}
         <WhyChooseMuxaro />
-
-        {/* Clean Trust & Privacy Bar */}
-        <section
-          aria-label="Workspace guarantees"
-          className="py-6 border-t border-line flex flex-wrap items-center justify-center sm:justify-between gap-x-8 gap-y-3 text-sm text-content-secondary"
-        >
-          {TRUST_GUARANTEES.map((item) => (
-            <div key={item} className="inline-flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-success shrink-0" aria-hidden="true" />
-              <span>{item}</span>
-            </div>
-          ))}
-        </section>
       </div>
     </div>
   );

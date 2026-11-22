@@ -1,17 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Link2,
   ClipboardPaste,
   X,
-  ArrowUp,
+  ArrowRight,
   Loader2,
   Check,
-  Sparkles,
   SlidersHorizontal,
-  ShieldCheck,
-  Clock,
 } from 'lucide-react';
 
 export type SupportedPlatform =
@@ -31,10 +28,10 @@ export interface PlatformConfig {
   id: NonNullable<SupportedPlatform>;
   name: string;
   domainPattern: RegExp;
-  colorClass: string;
-  hoverColorClass: string;
-  activeBgClass: string;
-  activeBorderClass: string;
+  colorClass?: string;
+  hoverColorClass?: string;
+  activeBgClass?: string;
+  activeBorderClass?: string;
 }
 
 export const SUPPORTED_PLATFORMS: PlatformConfig[] = [
@@ -42,73 +39,41 @@ export const SUPPORTED_PLATFORMS: PlatformConfig[] = [
     id: 'youtube',
     name: 'YouTube',
     domainPattern: /youtube\.com|youtu\.be/i,
-    colorClass: 'text-[#FF0000]',
-    hoverColorClass: 'group-hover:text-[#FF0000]',
-    activeBgClass: 'bg-[#FF0000]/10',
-    activeBorderClass: 'border-[#FF0000]/40',
   },
   {
     id: 'instagram',
     name: 'Instagram',
     domainPattern: /instagram\.com/i,
-    colorClass: 'text-[#E4405F]',
-    hoverColorClass: 'group-hover:text-[#E4405F]',
-    activeBgClass: 'bg-[#E4405F]/10',
-    activeBorderClass: 'border-[#E4405F]/40',
   },
   {
     id: 'x',
     name: 'X',
     domainPattern: /twitter\.com|x\.com/i,
-    colorClass: 'text-content',
-    hoverColorClass: 'group-hover:text-content',
-    activeBgClass: 'bg-surface-elevated',
-    activeBorderClass: 'border-line',
   },
   {
     id: 'facebook',
     name: 'Facebook',
     domainPattern: /facebook\.com|fb\.watch/i,
-    colorClass: 'text-[#1877F2]',
-    hoverColorClass: 'group-hover:text-[#1877F2]',
-    activeBgClass: 'bg-[#1877F2]/10',
-    activeBorderClass: 'border-[#1877F2]/40',
   },
   {
     id: 'pinterest',
     name: 'Pinterest',
     domainPattern: /pinterest\.com|pin\.it/i,
-    colorClass: 'text-[#BD081C]',
-    hoverColorClass: 'group-hover:text-[#BD081C]',
-    activeBgClass: 'bg-[#BD081C]/10',
-    activeBorderClass: 'border-[#BD081C]/40',
   },
   {
     id: 'tiktok',
     name: 'TikTok',
     domainPattern: /tiktok\.com/i,
-    colorClass: 'text-[#00F2FE] dark:text-[#FE2C55]',
-    hoverColorClass: 'group-hover:text-[#00F2FE] dark:group-hover:text-[#FE2C55]',
-    activeBgClass: 'bg-info-bg',
-    activeBorderClass: 'border-info-bg',
   },
   {
     id: 'reddit',
     name: 'Reddit',
     domainPattern: /reddit\.com/i,
-    colorClass: 'text-[#FF4500]',
-    hoverColorClass: 'group-hover:text-[#FF4500]',
-    activeBgClass: 'bg-[#FF4500]/10',
-    activeBorderClass: 'border-[#FF4500]/40',
   },
   {
     id: 'vimeo',
     name: 'Vimeo',
     domainPattern: /vimeo\.com/i,
-    colorClass: 'text-[#1AB7EA]',
-    hoverColorClass: 'group-hover:text-[#1AB7EA]',
-    activeBgClass: 'bg-[#1AB7EA]/10',
-    activeBorderClass: 'border-[#1AB7EA]/40',
   },
 ];
 
@@ -155,7 +120,7 @@ export function PlatformIcon({ platform, className = 'w-4 h-4' }: { platform: Su
     case 'pinterest':
       return (
         <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-          <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738.098.119.112.224.083.345-.09.375-.291 1.199-.332 1.357-.053.211-.174.268-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.631-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146 1.124.347 2.317.535 3.554.535 6.627 0 12-5.373 12-12 0-6.628-5.373-12-12-12z" />
+          <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738.098.119.112.224.083.345-.09.375-.291 1.199-.332 1.357-.053.211-.174.268-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.631-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146 1.124.347 2.317.535 3.554.535 6.627 0 12-5.373 12-12 0-6.628-5.373-12-12-12z" />
         </svg>
       );
     case 'tiktok':
@@ -277,10 +242,6 @@ export default function HeroOmnibox({
     }
   };
 
-  const handleBadgeClick = (platformId: NonNullable<SupportedPlatform>) => {
-    inputRef.current?.focus();
-  };
-
   const presetLabels: Record<SmartPreset, string> = {
     best: 'Best (8K/4K)',
     '1080p': '1080p MP4',
@@ -300,16 +261,10 @@ export default function HeroOmnibox({
           <div className="flex items-center pl-1.5 shrink-0">
             {detectedPlatform ? (
               <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors duration-150 ${
-                  SUPPORTED_PLATFORMS.find((p) => p.id === detectedPlatform)?.activeBgClass || 'bg-surface-elevated'
-                } ${
-                  SUPPORTED_PLATFORMS.find((p) => p.id === detectedPlatform)?.activeBorderClass || 'border-line'
-                } ${
-                  SUPPORTED_PLATFORMS.find((p) => p.id === detectedPlatform)?.colorClass || 'text-content'
-                }`}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-content text-base border border-content transition-colors duration-150 shadow-xs"
                 title={`Detected platform: ${detectedPlatform}`}
               >
-                <PlatformIcon platform={detectedPlatform} className="w-3.5 h-3.5 shrink-0" />
+                <PlatformIcon platform={detectedPlatform} className="w-3.5 h-3.5 shrink-0 text-inherit" />
                 <span className="capitalize hidden xs:inline">{detectedPlatform}</span>
               </span>
             ) : (
@@ -328,7 +283,7 @@ export default function HeroOmnibox({
             onChange={(e) => onUrlChange(e.target.value)}
             onFocus={() => onFocusChange?.(true)}
             onBlur={() => onFocusChange?.(false)}
-            placeholder="Paste link from YouTube, Instagram, X, TikTok, Vimeo…"
+            placeholder="Paste video, audio, or playlist URL…"
             aria-label="Media URL input"
             className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary text-sm sm:text-base font-sans focus:outline-none focus:ring-0 px-2 py-1 select-text"
           />
@@ -409,29 +364,29 @@ export default function HeroOmnibox({
               <span className="hidden xs:inline">{pastedFeedback ? 'Pasted!' : 'Paste'}</span>
             </button>
 
-            {/* Primary Submit Button */}
+            {/* Primary Submit Action: High-Contrast Solid Action Button (Zero Sparkles) */}
             <button
               type="submit"
               disabled={probing || !url.trim()}
               aria-label={probing ? 'Analyzing media link' : 'Analyze media link'}
-              className={`px-3.5 sm:px-5 py-2 min-h-[38px] sm:min-h-[40px] rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface shadow-sm select-none ${
+              className={`px-4 sm:px-5 py-2 min-h-[40px] rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap active:translate-y-px transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content focus-visible:ring-offset-2 focus-visible:ring-offset-surface select-none ${
                 url.trim() && !probing
-                  ? 'bg-brand-violet hover:bg-brand-violet/90 text-white shadow-md shadow-brand-violet/25 cursor-pointer ring-1 ring-brand-violet/50'
-                  : 'bg-surface-elevated text-content-secondary/60 border border-line cursor-not-allowed opacity-60'
+                  ? 'bg-content text-base hover:opacity-90 cursor-pointer shadow-sm'
+                  : 'bg-surface-elevated text-content-secondary/50 border border-line cursor-not-allowed opacity-60'
               }`}
             >
-              {probing ? (
-                <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" />
-              ) : (
-                <Sparkles className="w-4 h-4 text-amber-300 dark:text-amber-200" aria-hidden="true" />
-              )}
               <span>{probing ? 'Analyzing…' : 'Analyze'}</span>
+              {probing ? (
+                <Loader2 className="w-4 h-4 motion-safe:animate-spin shrink-0" aria-hidden="true" />
+              ) : (
+                <ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" />
+              )}
             </button>
           </div>
         </form>
       </div>
 
-      {/* Sleek, Non-Clickable Informational Supported Platform Strip */}
+      {/* Sleek Minimalist Monochrome Platform Strip */}
       <div
         role="region"
         aria-label="Supported media platforms"
@@ -446,17 +401,17 @@ export default function HeroOmnibox({
             return (
               <span
                 key={platform.id}
-                title={`${platform.name} supported (Lossless up to 8K)`}
-                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors duration-150 select-none shrink-0 ${
+                title={`${platform.name} supported (Lossless stream copy)`}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-colors duration-150 select-none shrink-0 ${
                   isDetected
-                    ? `${platform.activeBgClass} ${platform.activeBorderClass} ${platform.colorClass} font-semibold ring-1 ring-current shadow-xs`
-                    : 'bg-surface border-line/60 text-content-secondary/70'
+                    ? 'bg-content text-base border-content font-semibold shadow-xs'
+                    : 'bg-surface/60 border-line text-content-secondary hover:text-content hover:border-line-hover font-normal'
                 }`}
               >
                 <PlatformIcon
                   platform={platform.id}
                   className={`w-3 h-3 shrink-0 ${
-                    isDetected ? platform.colorClass : 'text-content-secondary/60'
+                    isDetected ? 'text-inherit' : 'text-content-secondary'
                   }`}
                 />
                 <span className="leading-none">{platform.name}</span>

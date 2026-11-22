@@ -1,78 +1,95 @@
-/* Hallmark · theme: MUXARO Consumer SaaS v2.0 · surface: absolute · shape: app screen · posture: committed · hero: custom · nav: edge-aligned · footer: mast */
+/* Hallmark · theme: MUXARO Luxury Media Studio · surface: architectural obsidian / alabaster · posture: committed · typography: display-tight-tracking · contrast: high */
 /* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5 · weakest: S, domain precision for media workspace */
-/* Hallmark · waive 2b · single-hue ramp from tokens · brand gradient on hero action headings */
-/* Hallmark · waive 7b · surface: absolute · crisp white card surfaces on light slate canvas */
+/* Hallmark · waive 2b · monochrome ink ramp from tokens · architectural text gradient */
+/* Hallmark · waive 7b · surface: absolute · crisp white card surfaces on light stone canvas */
+/* Hallmark · waive 29 · subtle architectural frosted glass · luxury studio materials contract */
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* Brand Core Palette (Refined SaaS Purple/Indigo) */
-  --muxaro-indigo: #6558F5;
-  --muxaro-blue: #4677ff;
-  --muxaro-cyan: #36d6d1;
-  --muxaro-gradient-primary: linear-gradient(180deg, #6558F5 0%, #4f46e5 100%);
-  --muxaro-gradient-hover: linear-gradient(180deg, #5345E7 0%, #4338CA 100%);
-  --muxaro-gradient-subtle: linear-gradient(135deg, rgba(101, 88, 245, 0.08) 0%, rgba(70, 119, 255, 0.08) 100%);
+  /* =========================================================================
+     LIGHT THEME: Gallery Alabaster Light (#FAF9F7 Canvas + Crisp #FFFFFF Surfaces)
+     ========================================================================= */
+  --muxaro-bg-base: #FAF9F7;               /* warm architectural alabaster/stone */
+  --muxaro-bg-surface: #FFFFFF;            /* crisp paper-white surfaces */
+  --muxaro-bg-elevated: #F5F4F0;           /* elevated warm stone surface */
+  --muxaro-bg-interactive: #ECEAE4;        /* interactive hover/pill surface */
   
-  /* Light Theme (Clean Violet & Alex Reji SaaS Canvas) */
-  --muxaro-bg-base: #F8F9FC;
-  --muxaro-bg-surface: #ffffff;
-  --muxaro-bg-elevated: #F2F4F7;
-  --muxaro-bg-interactive: #eef1f8;
-  
-  --muxaro-border: #E6E9F1;
-  --muxaro-border-subtle: #f0f2f7;
-  --muxaro-border-focus: #6558F5;
+  /* Razor-Sharp 1px Architectural Hairlines */
+  --muxaro-border: rgba(9, 9, 11, 0.08);   /* 1px architectural hairline resting */
+  --muxaro-border-hover: rgba(9, 9, 11, 0.16); /* 1px architectural hairline hover */
+  --muxaro-border-subtle: rgba(9, 9, 11, 0.04);/* subtle inner divider hairline */
+  --muxaro-border-focus: #0B0B0D;          /* crisp dark ink focus ring */
+  --muxaro-hairline-resting: rgba(9, 9, 11, 0.08);
+  --muxaro-hairline-hover: rgba(9, 9, 11, 0.16);
 
-  --muxaro-text-primary: #0F172A;
-  --muxaro-text-secondary: #475569;
-  --muxaro-text-tertiary: #64748B;
+  /* Typography: True Ink Black & Calibrated Graphite */
+  --muxaro-text-primary: #0B0B0D;          /* true ink black */
+  --muxaro-text-secondary: #5C5C62;        /* calibrated graphite secondary text */
+  --muxaro-text-tertiary: #8E8E93;         /* tertiary / metadata graphite */
   
-  /* Status Semantics */
-  --muxaro-success: #10b981;
-  --muxaro-success-bg: rgba(16, 185, 129, 0.1);
-  --muxaro-warning: #f59e0b;
-  --muxaro-warning-bg: rgba(245, 158, 11, 0.1);
-  --muxaro-error: #ef4444;
-  --muxaro-error-bg: rgba(239, 68, 68, 0.1);
-  --muxaro-info: #4677ff;
-  --muxaro-info-bg: rgba(70, 119, 255, 0.1);
+  /* Brand Core / Action Tokens (Architectural Carbon / Obsidian Ink — Zero Lavender) */
+  --muxaro-indigo: #0B0B0D;                /* Architectural Ink Black accent */
+  --muxaro-blue: #2563EB;                  /* Reference technical blue */
+  --muxaro-cyan: #0D9488;                  /* Reference technical cyan */
+  --muxaro-accent: #0B0B0D;
+  --muxaro-accent-hover: #161619;
+  
+  /* Buttons & Action Controls */
+  --muxaro-btn-bg: #0B0B0D;
+  --muxaro-btn-fg: #FAF9F7;
+  --muxaro-btn-border: rgba(9, 9, 11, 0.12);
+  --muxaro-btn-border-hover: rgba(9, 9, 11, 0.24);
+  --muxaro-gradient-primary: linear-gradient(180deg, #161619 0%, #0B0B0D 100%);
+  --muxaro-gradient-hover: linear-gradient(180deg, #27272A 0%, #161619 100%);
+  --muxaro-gradient-subtle: linear-gradient(180deg, rgba(9, 9, 11, 0.04) 0%, rgba(9, 9, 11, 0.01) 100%);
 
-  /* Shadows & Elevation (Clean Alex Reji / Untitled UI Depth) */
-  --muxaro-shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(16, 24, 40, 0.02);
-  --muxaro-shadow-md: 0 4px 14px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.04);
-  --muxaro-shadow-lg: 0 20px 40px -15px rgba(16, 24, 40, 0.07), 0 1px 3px rgba(16, 24, 40, 0.03);
-  --muxaro-shadow-focus: 0 0 0 3px rgba(101, 88, 245, 0.14);
-  --muxaro-shadow-btn: 0 2px 8px rgba(101, 88, 245, 0.22);
-  --muxaro-shadow-btn-hover: 0 4px 14px rgba(101, 88, 245, 0.32);
+  /* Tag Pills / Icon Box (Architectural Alabaster Stone — Pastel Purple Eliminated) */
+  --muxaro-tag-pill-bg: #F2F1ED;
+  --muxaro-tag-pill-border: rgba(9, 9, 11, 0.08);
+  --muxaro-tag-pill-text: #0B0B0D;
+  --muxaro-tag-pill-hover-bg: #ECEAE4;
+
+  /* Restrained Architectural Shadows & Depth */
+  --muxaro-shadow-sm: 0 1px 2px rgba(9, 9, 11, 0.04);
+  --muxaro-shadow-md: 0 4px 12px rgba(9, 9, 11, 0.06), 0 1px 3px rgba(9, 9, 11, 0.03);
+  --muxaro-shadow-lg: 0 16px 32px -12px rgba(9, 9, 11, 0.08), 0 1px 3px rgba(9, 9, 11, 0.03);
+  --muxaro-shadow-card: 0 12px 28px -10px rgba(9, 9, 11, 0.06), 0 1px 2px rgba(9, 9, 11, 0.03);
+  --muxaro-shadow-tab: 0 1px 2px rgba(9, 9, 11, 0.06);
+  --muxaro-shadow-pill: 0 1px 2px rgba(9, 9, 11, 0.03);
+  --muxaro-shadow-pill-hover: 0 2px 6px rgba(9, 9, 11, 0.08);
+  --muxaro-shadow-focus: 0 0 0 3px rgba(9, 9, 11, 0.12);
+  --muxaro-shadow-btn: 0 1px 2px rgba(9, 9, 11, 0.12), 0 2px 6px rgba(9, 9, 11, 0.08);
+  --muxaro-shadow-btn-hover: 0 2px 8px rgba(9, 9, 11, 0.16), 0 4px 12px rgba(9, 9, 11, 0.1);
+  --muxaro-shadow-announcement: 0 1px 3px rgba(9, 9, 11, 0.04);
+  --muxaro-shadow-announcement-hover: 0 2px 8px rgba(9, 9, 11, 0.08);
 
   /* Button and Control Foreground */
-  --muxaro-btn-fg: #f8f9fe;
-  --muxaro-action-circle-hover: #5345E7;
-  --muxaro-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(101, 88, 245, 0.07) 0%, rgba(70, 119, 255, 0.03) 45%, rgba(248, 249, 252, 0) 100%);
-  --dark-hero-wash: radial-gradient(78% 52% at 50% -6%, rgba(101, 88, 245, 0.15) 0%, rgba(70, 119, 255, 0.06) 45%, rgba(10, 13, 20, 0) 100%);
+  --muxaro-action-circle-hover: #161619;
 
-  /* Card Surface Shadows & Elevation Tokens */
-  --muxaro-shadow-card: 0 20px 40px -15px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.03);
-  --muxaro-shadow-tab: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
-  --muxaro-shadow-pill: 0 1px 3px rgba(16, 24, 40, 0.03);
-  --muxaro-shadow-pill-hover: 0 4px 12px rgba(101, 88, 245, 0.12);
-  --muxaro-shadow-announcement: 0 2px 8px rgba(23, 27, 43, 0.04);
-  --muxaro-shadow-announcement-hover: 0 4px 14px rgba(105, 91, 255, 0.15);
+  /* Background Washes: Lavender Radial Washes Completely Eliminated */
+  --muxaro-hero-wash: none;
+  --dark-hero-wash: none;
+  --muxaro-aurora-static: none;
+  --muxaro-aurora-ribbon-bg: none;
+  --muxaro-aurora-glow-bg: none;
+  --muxaro-aurora-pulse-bg: none;
 
-  /* Pill & Filter Tokens */
-  --muxaro-tag-pill-bg: #F5F3FF;
-  --muxaro-tag-pill-border: #DDD6FE;
-  --muxaro-tag-pill-text: #6558F5;
-  --muxaro-tag-pill-hover-bg: #EDE9FE;
+  /* Glass Surface Tokens */
+  --muxaro-glass-bg: rgba(255, 255, 255, 0.82);
+  --muxaro-glass-border: rgba(9, 9, 11, 0.08);
 
-  /* MUXARO Aurora Flow Tokens (Light Theme) */
-  --muxaro-aurora-static: linear-gradient(180deg, rgba(105, 91, 255, 0.08) 0%, rgba(70, 119, 255, 0.04) 48%, rgba(247, 248, 252, 0) 100%);
-  --muxaro-aurora-ribbon-bg: linear-gradient(112deg, rgba(105, 91, 255, 0) 8%, rgba(105, 91, 255, 0.14) 30%, rgba(70, 119, 255, 0.12) 52%, rgba(54, 214, 209, 0.12) 72%, rgba(54, 214, 209, 0) 92%);
-  --muxaro-aurora-glow-bg: radial-gradient(ellipse 64% 58% at 50% 42%, rgba(105, 91, 255, 0.14) 0%, rgba(70, 119, 255, 0.08) 44%, rgba(54, 214, 209, 0.04) 70%, rgba(247, 248, 252, 0) 100%);
-  --muxaro-aurora-pulse-bg: linear-gradient(90deg, rgba(105, 91, 255, 0) 0%, rgba(105, 91, 255, 0.2) 32%, rgba(70, 119, 255, 0.22) 50%, rgba(54, 214, 209, 0.2) 68%, rgba(54, 214, 209, 0) 100%);
+  /* Status Semantics */
+  --muxaro-success: #15803d;
+  --muxaro-success-bg: rgba(21, 128, 61, 0.08);
+  --muxaro-warning: #b45309;
+  --muxaro-warning-bg: rgba(180, 83, 9, 0.08);
+  --muxaro-error: #b91c1c;
+  --muxaro-error-bg: rgba(185, 28, 28, 0.08);
+  --muxaro-info: #1d4ed8;
+  --muxaro-info-bg: rgba(29, 78, 216, 0.08);
 
   /* Radii */
   --muxaro-radius-sm: 6px;
@@ -80,38 +97,64 @@
   --muxaro-radius-lg: 16px;
   --muxaro-radius-full: 9999px;
 
-  /* Dark Theme Tokens Declared in Root Token Block */
-  --dark-bg-base: #0a0d14;
-  --dark-bg-surface: #111520;
-  --dark-bg-elevated: #181d2c;
-  --dark-bg-interactive: #1f2538;
-  --dark-border: #23293d;
-  --dark-border-subtle: #1a1f2e;
-  --dark-border-focus: #695bff;
-  --dark-text-primary: #F8FAFC;
-  --dark-text-secondary: #94A3B8;
-  --dark-text-tertiary: #64748B;
-  --dark-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --dark-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
-  --dark-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
-  --dark-shadow-focus: 0 0 0 3px rgba(105, 91, 255, 0.35);
-  --dark-shadow-btn: 0 2px 10px rgba(105, 91, 255, 0.35);
-  --dark-shadow-btn-hover: 0 4px 18px rgba(105, 91, 255, 0.5);
-  --dark-media-card-bg: rgba(17, 21, 32, 0.95);
-  --dark-glass-border: rgba(255, 255, 255, 0.08);
-  --dark-media-card-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --dark-tab-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --dark-pill-btn-bg: rgba(17, 21, 32, 0.85);
-  --dark-announcement-bg: rgba(17, 21, 32, 0.75);
-  --dark-tag-pill-bg: rgba(101, 88, 245, 0.15);
-  --dark-tag-pill-border: rgba(101, 88, 245, 0.35);
-  --dark-tag-pill-text: #C4B5FD;
-  --dark-aurora-static: linear-gradient(180deg, rgba(105, 91, 255, 0.14) 0%, rgba(70, 119, 255, 0.07) 48%, rgba(10, 13, 20, 0) 100%);
-  --dark-aurora-ribbon-bg: linear-gradient(112deg, rgba(105, 91, 255, 0) 8%, rgba(105, 91, 255, 0.24) 30%, rgba(70, 119, 255, 0.19) 52%, rgba(54, 214, 209, 0.15) 72%, rgba(54, 214, 209, 0) 92%);
-  --dark-aurora-glow-bg: radial-gradient(ellipse 64% 58% at 50% 42%, rgba(105, 91, 255, 0.24) 0%, rgba(70, 119, 255, 0.13) 44%, rgba(54, 214, 209, 0.06) 70%, rgba(10, 13, 20, 0) 100%);
-  --dark-aurora-pulse-bg: linear-gradient(90deg, rgba(105, 91, 255, 0) 0%, rgba(105, 91, 255, 0.3) 32%, rgba(70, 119, 255, 0.32) 50%, rgba(54, 214, 209, 0.26) 68%, rgba(54, 214, 209, 0) 100%);
+  /* =========================================================================
+     DARK THEME: Obsidian Dark Token Defaults (#09090B Obsidian + #111113 Carbon)
+     ========================================================================= */
+  --dark-bg-base: #09090B;                 /* deep architectural obsidian */
+  --dark-bg-surface: #111113;              /* elevated carbon surface 1 */
+  --dark-bg-elevated: #161619;             /* elevated carbon surface 2 */
+  --dark-bg-interactive: #1E1E22;          /* interactive carbon hover surface */
 
-  /* Backward-compatible token aliases for legacy components */
+  --dark-border: rgba(255, 255, 255, 0.08); /* razor-sharp 1px resting hairline */
+  --dark-border-hover: rgba(255, 255, 255, 0.16); /* 1px hairline hover */
+  --dark-border-subtle: rgba(255, 255, 255, 0.04); /* subtle inner divider hairline */
+  --dark-border-focus: #F5F5F7;            /* crisp ivory focus */
+  --dark-hairline-resting: rgba(255, 255, 255, 0.08);
+  --dark-hairline-hover: rgba(255, 255, 255, 0.16);
+
+  --dark-text-primary: #F5F5F7;            /* pure crisp ivory ink */
+  --dark-text-secondary: #8E8E93;          /* calibrated graphite secondary text */
+  --dark-text-tertiary: #636366;           /* muted graphite tertiary */
+
+  --dark-indigo: #F5F5F7;                  /* crisp ivory accent */
+  --dark-accent: #F5F5F7;
+  --dark-accent-hover: #FFFFFF;
+
+  --dark-btn-bg: #F5F5F7;
+  --dark-btn-fg: #09090B;
+  --dark-btn-border: rgba(255, 255, 255, 0.18);
+  --dark-btn-border-hover: rgba(255, 255, 255, 0.35);
+  --dark-gradient-primary: linear-gradient(180deg, #FFFFFF 0%, #E8E8ED 100%);
+  --dark-gradient-hover: linear-gradient(180deg, #FFFFFF 0%, #F5F5F7 100%);
+  --dark-gradient-subtle: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+
+  --dark-tag-pill-bg: #161619;
+  --dark-tag-pill-border: rgba(255, 255, 255, 0.08);
+  --dark-tag-pill-text: #F5F5F7;
+  --dark-tag-pill-hover-bg: #1E1E22;
+
+  --dark-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --dark-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.6);
+  --dark-shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.7);
+  --dark-shadow-focus: 0 0 0 3px rgba(245, 245, 247, 0.25);
+  --dark-shadow-btn: 0 1px 3px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --dark-shadow-btn-hover: 0 2px 8px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  --dark-media-card-bg: #111113;
+  --dark-glass-border: rgba(255, 255, 255, 0.08);
+  --dark-media-card-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --dark-tab-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --dark-pill-btn-bg: #161619;
+  --dark-announcement-bg: #111113;
+
+  --dark-glass-bg: rgba(17, 17, 19, 0.82);
+
+  --dark-aurora-static: none;
+  --dark-aurora-ribbon-bg: none;
+  --dark-aurora-glow-bg: none;
+  --dark-aurora-pulse-bg: none;
+
+  /* Backward Compatibility Aliases for Existing Legacy Components */
   --bg-main: var(--muxaro-bg-base);
   --surface: var(--muxaro-bg-surface);
   --surface-elevated: var(--muxaro-bg-elevated);
@@ -128,7 +171,7 @@
   --brand-gradient-hover: var(--muxaro-gradient-hover);
   --focus-ring: var(--muxaro-border-focus);
 
-  --color-paper: #f7f8fc;
+  --color-paper: var(--muxaro-bg-base);
   --color-paper-2: var(--muxaro-bg-surface);
   --color-paper-3: var(--muxaro-bg-elevated);
   --color-ink: var(--muxaro-text-primary);
@@ -140,12 +183,14 @@
   --color-accent-ink: var(--muxaro-btn-fg);
   --color-focus: var(--muxaro-border-focus);
 
-  --font-display: var(--font-sans), system-ui, sans-serif;
-  --font-body: var(--font-sans), system-ui, sans-serif;
+  --font-display: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-outlier: var(--font-mono), monospace;
 }
 
-/* High-Contrast Dark Mode Canvas Activation */
+/* =============================================================================
+   High-Contrast Obsidian Dark Theme Activation
+   ============================================================================= */
 .dark,
 [data-theme="dark"] {
   --muxaro-bg-base: var(--dark-bg-base);
@@ -154,12 +199,32 @@
   --muxaro-bg-interactive: var(--dark-bg-interactive);
   
   --muxaro-border: var(--dark-border);
+  --muxaro-border-hover: var(--dark-border-hover);
   --muxaro-border-subtle: var(--dark-border-subtle);
   --muxaro-border-focus: var(--dark-border-focus);
+  --muxaro-hairline-resting: var(--dark-hairline-resting);
+  --muxaro-hairline-hover: var(--dark-hairline-hover);
 
   --muxaro-text-primary: var(--dark-text-primary);
   --muxaro-text-secondary: var(--dark-text-secondary);
   --muxaro-text-tertiary: var(--dark-text-tertiary);
+
+  --muxaro-indigo: var(--dark-indigo);
+  --muxaro-accent: var(--dark-accent);
+  --muxaro-accent-hover: var(--dark-accent-hover);
+
+  --muxaro-btn-bg: var(--dark-btn-bg);
+  --muxaro-btn-fg: var(--dark-btn-fg);
+  --muxaro-btn-border: var(--dark-btn-border);
+  --muxaro-btn-border-hover: var(--dark-btn-border-hover);
+  --muxaro-gradient-primary: var(--dark-gradient-primary);
+  --muxaro-gradient-hover: var(--dark-gradient-hover);
+  --muxaro-gradient-subtle: var(--dark-gradient-subtle);
+
+  --muxaro-tag-pill-bg: var(--dark-tag-pill-bg);
+  --muxaro-tag-pill-border: var(--dark-tag-pill-border);
+  --muxaro-tag-pill-text: var(--dark-tag-pill-text);
+  --muxaro-tag-pill-hover-bg: var(--dark-tag-pill-hover-bg);
 
   --muxaro-shadow-sm: var(--dark-shadow-sm);
   --muxaro-shadow-md: var(--dark-shadow-md);
@@ -172,180 +237,16 @@
   --muxaro-aurora-ribbon-bg: var(--dark-aurora-ribbon-bg);
   --muxaro-aurora-glow-bg: var(--dark-aurora-glow-bg);
   --muxaro-aurora-pulse-bg: var(--dark-aurora-pulse-bg);
-}
 
-html {
-  scroll-behavior: smooth;
-}
-
-.muxaro-hero-surface {
-  background-color: var(--muxaro-bg-base);
-  background-image: var(--muxaro-hero-wash);
-  background-repeat: no-repeat;
+  --muxaro-glass-bg: var(--dark-glass-bg);
+  --muxaro-glass-border: var(--dark-glass-border);
 }
 
 /* =============================================================================
-   MUXARO Aurora Flow — Restrained CSS-only GPU-composited luminous atmosphere
-   Uses strictly transform + opacity; automatic static fallback on low-end/hidden
+   Base & Root Document Typography
    ============================================================================= */
-@keyframes muxaro-aurora-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 0.8;
-  }
-}
-
-@keyframes muxaro-aurora-drift {
-  0% {
-    transform: translate3d(-2%, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(2%, 1.5%, 0) scale(1.03);
-  }
-  100% {
-    transform: translate3d(-1%, 0.5%, 0) scale(0.99);
-  }
-}
-
-@keyframes muxaro-aurora-breathe {
-  0% {
-    transform: translate3d(0, 0, 0) scale(0.98);
-    opacity: 0.65;
-  }
-  100% {
-    transform: translate3d(0, 1.5%, 0) scale(1.035);
-    opacity: 0.85;
-  }
-}
-
-@keyframes muxaro-aurora-sweep {
-  0% {
-    transform: translate3d(-32%, 0, 0);
-    opacity: 0.2;
-  }
-  50% {
-    transform: translate3d(0%, 0, 0);
-    opacity: 0.88;
-  }
-  100% {
-    transform: translate3d(32%, 0, 0);
-    opacity: 0.2;
-  }
-}
-
-.muxaro-aurora-shell {
-  position: relative;
-  isolation: isolate;
-  overflow: clip;
-  background-color: var(--muxaro-bg-base);
-  background-image: var(--muxaro-hero-wash);
-  background-repeat: no-repeat;
-}
-
-.muxaro-aurora-shell::before {
-  content: "";
-  position: absolute;
-  inset: 0 -20% auto -20%;
-  height: 56%;
-  z-index: 0;
-  pointer-events: none;
-  background-image: var(--muxaro-aurora-pulse-bg);
-  opacity: 0;
-  transform: translate3d(-32%, 0, 0);
-  transition: opacity 280ms ease;
-}
-
-.muxaro-aurora-ribbon {
-  position: absolute;
-  inset: -10% -10% auto -10%;
-  height: 66%;
-  z-index: 0;
-  pointer-events: none;
-  background-image: var(--muxaro-aurora-ribbon-bg);
-  filter: blur(28px);
-  opacity: 0.78;
-  will-change: transform, opacity;
-  animation:
-    muxaro-aurora-drift 18s ease-in-out infinite alternate,
-    muxaro-aurora-fade-in 650ms ease-out both;
-  transition: opacity 320ms ease, transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.muxaro-aurora-glow {
-  position: absolute;
-  inset: 4% 8% auto 8%;
-  height: 70%;
-  z-index: 0;
-  pointer-events: none;
-  background-image: var(--muxaro-aurora-glow-bg);
-  filter: blur(24px);
-  opacity: 0.72;
-  will-change: transform, opacity;
-  animation:
-    muxaro-aurora-breathe 14s ease-in-out infinite alternate,
-    muxaro-aurora-fade-in 550ms ease-out both;
-  transition: opacity 280ms ease, transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Subtle heightened presence when the workspace input has focus */
-.muxaro-aurora-shell.muxaro-aurora-focused .muxaro-aurora-glow,
-.muxaro-aurora-glow.muxaro-aurora-focused {
-  opacity: 0.96;
-  transform: translate3d(0, 0, 0) scale(1.03);
-}
-
-.muxaro-aurora-shell.muxaro-aurora-focused .muxaro-aurora-ribbon,
-.muxaro-aurora-ribbon.muxaro-aurora-focused {
-  opacity: 0.92;
-}
-
-/* Refined directional light pulse while media analysis is in flight */
-.muxaro-aurora-shell.muxaro-aurora-analyzing::before {
-  opacity: 0.85;
-  will-change: transform, opacity;
-  animation: muxaro-aurora-sweep 2.2s ease-in-out infinite;
-}
-
-.muxaro-aurora-shell.muxaro-aurora-analyzing .muxaro-aurora-ribbon,
-.muxaro-aurora-ribbon.muxaro-aurora-analyzing {
-  opacity: 0.95;
-  animation-duration: 7s;
-}
-
-/* Low-end device, Lightweight mode, and background-tab static gradient fallback */
-[data-lightweight="true"] .muxaro-aurora-shell,
-.muxaro-aurora-shell[data-lightweight="true"],
-[data-aurora-paused="true"] .muxaro-aurora-shell,
-.muxaro-aurora-shell[data-aurora-paused="true"] {
-  background-image: var(--muxaro-aurora-static);
-}
-
-[data-lightweight="true"] .muxaro-aurora-shell::before,
-.muxaro-aurora-shell[data-lightweight="true"]::before,
-[data-aurora-paused="true"] .muxaro-aurora-shell::before,
-.muxaro-aurora-shell[data-aurora-paused="true"]::before,
-[data-lightweight="true"] .muxaro-aurora-ribbon,
-[data-aurora-paused="true"] .muxaro-aurora-ribbon,
-[data-lightweight="true"] .muxaro-aurora-glow,
-[data-aurora-paused="true"] .muxaro-aurora-glow {
-  animation: none !important;
-  filter: none !important;
-  will-change: auto;
-  transform: none;
-}
-
-[data-lightweight="true"] .muxaro-aurora-ribbon,
-[data-aurora-paused="true"] .muxaro-aurora-ribbon,
-[data-lightweight="true"] .muxaro-aurora-glow,
-[data-aurora-paused="true"] .muxaro-aurora-glow {
-  opacity: 0.45;
-}
-
-[data-lightweight="true"] .muxaro-aurora-shell::before,
-[data-aurora-paused="true"] .muxaro-aurora-shell::before {
-  opacity: 0;
+html {
+  scroll-behavior: smooth;
 }
 
 html,
@@ -353,56 +254,126 @@ body {
   overflow-x: clip;
   background-color: var(--muxaro-bg-base);
   color: var(--muxaro-text-primary);
-  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
   scrollbar-color: var(--muxaro-border) var(--muxaro-bg-elevated);
-  caret-color: var(--muxaro-indigo);
+  caret-color: var(--muxaro-border-focus);
   transition: background-color 180ms ease, color 180ms ease;
 }
 
 ::selection {
-  background-color: var(--muxaro-indigo);
-  color: var(--muxaro-btn-fg);
+  background-color: var(--muxaro-text-primary);
+  color: var(--muxaro-bg-surface);
 }
 
+/* =============================================================================
+   Crisp Display & Section Headings
+   Tight tracking (-0.035em display, -0.025em section), balanced wrapping
+   ============================================================================= */
 h1,
 h2,
 h3,
-h4 {
-  font-family: var(--font-sans), system-ui, sans-serif;
-  font-weight: 700;
+h4,
+.display-heading,
+.heading-display,
+.heading-section,
+.heading-subsection {
+  font-family: var(--font-display);
   color: var(--muxaro-text-primary);
   overflow-wrap: break-word;
   min-width: 0;
 }
 
-h1 {
+h1,
+.display-heading,
+.heading-display {
   font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.025em;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 
-[data-lightweight="true"] h1 {
-  text-wrap: normal;
+h2,
+.heading-section {
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
 }
 
-h2 {
-  font-weight: 700;
-  line-height: 1.25;
+h3,
+.heading-subsection {
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+h4 {
+  font-weight: 600;
+  line-height: 1.4;
   letter-spacing: -0.015em;
 }
 
-/* Refined, non-conflicting focus-visible */
+/* Body and Editorial Microcopy */
+.body-clean,
+.text-body-clean {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  color: var(--muxaro-text-secondary);
+}
+
+.body-clean-lead {
+  font-family: var(--font-body);
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  letter-spacing: -0.015em;
+  color: var(--muxaro-text-secondary);
+}
+
+/* Technical Monospace & Strict Tabular Metrics */
+.tabular-metrics,
+.tabular-nums,
+.mono-metric {
+  font-family: var(--font-outlier);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  font-feature-settings: "tnum" 1, "cv01" 1;
+  font-weight: 500;
+}
+
+/* Tracking utility classes */
+.tracking-tight-display {
+  letter-spacing: -0.035em;
+}
+
+.tracking-tight-section {
+  letter-spacing: -0.025em;
+}
+
+/* =============================================================================
+   Focus Visible & Single Architectural Focus Ring
+   ============================================================================= */
 :focus-visible {
   outline: 2px solid var(--muxaro-border-focus);
   outline-offset: 2px;
 }
 
-/* Crisp single focus ring and guaranteed high-contrast typography on text and search inputs */
+.focus-ring {
+  outline: none !important;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--muxaro-border-focus) !important;
+  outline-offset: 2px !important;
+}
+
+/* =============================================================================
+   Form Inputs: High-Contrast Obsidian / Alabaster Discipline
+   ============================================================================= */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -415,6 +386,7 @@ select,
   outline: none !important;
   color: var(--muxaro-text-primary);
   background-color: var(--muxaro-bg-surface);
+  border-color: var(--muxaro-border);
 }
 
 .dark input[type="text"],
@@ -437,6 +409,7 @@ select,
 [data-theme="dark"] .muxaro-input {
   color: var(--dark-text-primary);
   background-color: var(--dark-bg-surface);
+  border-color: var(--dark-border);
 }
 
 input:-webkit-autofill,
@@ -474,17 +447,61 @@ select:focus-visible,
 .muxaro-input:focus,
 .muxaro-input:focus-visible {
   outline: none !important;
-  border-color: var(--muxaro-indigo) !important;
+  border-color: var(--muxaro-border-focus) !important;
   box-shadow: var(--muxaro-shadow-focus) !important;
 }
 
 button:active,
 a:active {
   filter: brightness(0.96);
-  transform: translateY(1px);
 }
 
-/* Modern Card Surfaces */
+/* =============================================================================
+   Architectural Card Surfaces: Hairlines, Glass, and Solid Carbon
+   ============================================================================= */
+
+/* Razor-sharp 1px Structural Hairline Card */
+.hairline-card {
+  position: relative;
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-primary);
+  border: 1px solid var(--muxaro-border);
+  border-radius: var(--muxaro-radius-lg);
+  box-shadow: var(--muxaro-shadow-sm);
+  transition: border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hairline-card:hover {
+  border-color: var(--muxaro-border-hover);
+}
+
+.dark .hairline-card,
+[data-theme="dark"] .hairline-card {
+  background-color: var(--muxaro-bg-surface);
+  border-color: var(--muxaro-border);
+}
+
+.dark .hairline-card:hover,
+[data-theme="dark"] .hairline-card:hover {
+  border-color: var(--muxaro-border-hover);
+}
+
+/* Restrained Architectural Glass Surface */
+.surface-glass-subtle {
+  background-color: var(--muxaro-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--muxaro-glass-border);
+  border-radius: var(--muxaro-radius-lg);
+  color: var(--muxaro-text-primary);
+  transition: border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.surface-glass-subtle:hover {
+  border-color: var(--muxaro-border-hover);
+}
+
+/* Legacy Card compatibility */
 .muxaro-card {
   background-color: var(--muxaro-bg-surface);
   color: var(--muxaro-text-primary);
@@ -503,60 +520,14 @@ a:active {
 }
 
 .muxaro-card-interactive:hover {
-  border-color: var(--muxaro-indigo);
+  border-color: var(--muxaro-border-hover);
   box-shadow: var(--muxaro-shadow-md);
 }
 
-/* Brand Gradient Text Utility (Single-hue ramp from tokens) */
-.muxaro-text-gradient,
-.text-gradient {
-  background-image: linear-gradient(135deg, var(--muxaro-indigo) 0%, var(--muxaro-blue) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-/* Primary Brand Action Button (Unified 12px High-Craft Language) */
-.muxaro-btn-primary,
-.btn-brand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  background-image: var(--muxaro-gradient-primary);
-  color: var(--muxaro-btn-fg);
-  font-weight: 600;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(101, 88, 245, 0.24);
-  transition: opacity 150ms ease, box-shadow 150ms ease, transform 150ms ease;
-  cursor: pointer;
-  user-select: none;
-}
-
-.muxaro-btn-primary:hover,
-.btn-brand:hover {
-  opacity: 0.98;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(101, 88, 245, 0.32);
-}
-
-.muxaro-btn-primary:active,
-.btn-brand:active {
-  transform: translateY(1px);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
-}
-
-.muxaro-btn-primary:disabled,
-.btn-brand:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* Subtle card styling */
 .glass-card {
-  background-color: var(--muxaro-bg-surface);
+  background-color: var(--muxaro-glass-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   color: var(--muxaro-text-primary);
   border: 1px solid var(--muxaro-border);
   border-radius: var(--muxaro-radius-lg);
@@ -564,7 +535,11 @@ a:active {
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-/* Alex Reji & Untitled UI Signature Media Card Surface */
+.glass-card:hover {
+  border-color: var(--muxaro-border-hover);
+}
+
+/* Signature Media Omnibox Card Surface */
 .muxaro-media-card,
 .deepseek-input-card {
   background-color: var(--muxaro-bg-surface);
@@ -572,7 +547,7 @@ a:active {
   border: 1px solid var(--muxaro-border);
   border-radius: 24px;
   box-shadow: var(--muxaro-shadow-card);
-  transition: box-shadow 180ms ease, transform 180ms ease;
+  transition: box-shadow 180ms ease, border-color 180ms ease;
   position: relative;
 }
 
@@ -581,13 +556,12 @@ a:active {
   background-color: var(--dark-media-card-bg);
   border-color: var(--dark-glass-border);
   box-shadow: var(--dark-media-card-shadow);
+  color: var(--dark-text-primary);
 }
 
-/* Non-waivable fix: The outer card NEVER applies focus-within borders or rings,
-   preventing the oversized double-purple outline bug. Only the inner input gets a single ring. */
+/* Outer card never applies focus-within rings to prevent double-outline artifact */
 .muxaro-media-card:focus-within,
 .deepseek-input-card:focus-within {
-  /* Retain clean neutral border and elevation */
   border-color: var(--muxaro-border);
 }
 
@@ -596,7 +570,75 @@ a:active {
   border-color: var(--dark-glass-border);
 }
 
-/* Alex Reji Segmented Group & Tabs */
+/* =============================================================================
+   Monochrome Ink Ramp Heading (Purple Gradient Text Completely Eliminated)
+   ============================================================================= */
+.muxaro-text-gradient,
+.text-gradient {
+  background-image: linear-gradient(180deg, var(--muxaro-text-primary) 0%, var(--muxaro-text-secondary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--muxaro-text-primary);
+  display: inline-block;
+}
+
+/* =============================================================================
+   Primary Action Controls (Obsidian Dark / Gallery Alabaster Discipline)
+   ============================================================================= */
+.muxaro-btn-primary,
+.btn-brand,
+.deepseek-action-circle,
+.muxaro-action-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-image: var(--muxaro-gradient-primary);
+  background-color: var(--muxaro-btn-bg);
+  color: var(--muxaro-btn-fg);
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid var(--muxaro-btn-border);
+  box-shadow: var(--muxaro-shadow-btn);
+  transition: opacity 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+  cursor: pointer;
+  user-select: none;
+}
+
+.muxaro-btn-primary:hover,
+.btn-brand:hover,
+.deepseek-action-circle:hover,
+.muxaro-action-circle:hover {
+  opacity: 0.98;
+  border-color: var(--muxaro-btn-border-hover);
+  box-shadow: var(--muxaro-shadow-btn-hover);
+}
+
+.muxaro-btn-primary:active,
+.btn-brand:active,
+.deepseek-action-circle:active,
+.muxaro-action-circle:active {
+  box-shadow: var(--muxaro-shadow-sm);
+}
+
+.muxaro-btn-primary:disabled,
+.btn-brand:disabled,
+.deepseek-action-circle:disabled,
+.muxaro-action-circle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Backward compatibility: dark mode invert for hardcoded bg-[var(--muxaro-indigo)] text-white */
+.dark [class*="bg-[var(--muxaro-indigo)]"].text-white,
+[data-theme="dark"] [class*="bg-[var(--muxaro-indigo)]"].text-white {
+  color: var(--dark-bg-base) !important;
+}
+
+/* =============================================================================
+   Architectural Segmented Tabs & Tag Pills (Pastel Purple Eliminated)
+   ============================================================================= */
 .muxaro-segmented-group {
   display: inline-flex;
   align-items: center;
@@ -610,8 +652,8 @@ a:active {
 .muxaro-segmented-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   border-radius: 8px;
   font-size: 0.8125rem;
   font-weight: 500;
@@ -642,12 +684,12 @@ a:active {
   box-shadow: var(--dark-tab-shadow);
 }
 
-/* Alex Reji Lilac Filter Tag Pill with Dismiss Action */
+/* Tag Pill / Filter Pill (Architectural Alabaster / Carbon Stone) */
 .muxaro-tag-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 8px;
+  padding: 4px 12px;
   border-radius: 8px;
   font-size: 0.75rem;
   font-weight: 500;
@@ -665,6 +707,96 @@ a:active {
 
 .muxaro-tag-pill:hover {
   background-color: var(--muxaro-tag-pill-hover-bg);
+  border-color: var(--muxaro-border-hover);
+}
+
+/* Quick Action Pills */
+.deepseek-pill-btn,
+.muxaro-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 9999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1px solid var(--muxaro-border);
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-secondary);
+  box-shadow: var(--muxaro-shadow-pill);
+  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  white-space: nowrap;
+}
+
+.dark .deepseek-pill-btn,
+.dark .muxaro-pill-btn {
+  background-color: var(--dark-pill-btn-bg);
+  border-color: var(--dark-glass-border);
+  color: var(--dark-text-secondary);
+}
+
+.deepseek-pill-btn:hover,
+.muxaro-pill-btn:hover {
+  color: var(--muxaro-text-primary);
+  border-color: var(--muxaro-border-hover);
+  background-color: var(--muxaro-bg-interactive);
+  box-shadow: var(--muxaro-shadow-pill-hover);
+}
+
+.deepseek-pill-btn:active,
+.muxaro-pill-btn:active {
+  box-shadow: var(--muxaro-shadow-sm);
+}
+
+/* Announcement Pill Bar */
+.antigravity-announcement {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--muxaro-border);
+  background-color: var(--muxaro-bg-surface);
+  color: var(--muxaro-text-secondary);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--muxaro-shadow-announcement);
+  transition: border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+
+.dark .antigravity-announcement {
+  background-color: var(--dark-announcement-bg);
+  border-color: var(--dark-glass-border);
+  color: var(--dark-text-secondary);
+}
+
+.antigravity-announcement:hover {
+  border-color: var(--muxaro-border-hover);
+  color: var(--muxaro-text-primary);
+  box-shadow: var(--muxaro-shadow-announcement-hover);
+}
+
+/* =============================================================================
+   Silent Atmospheric Containers (Lavender Radial Washes Eliminated)
+   ============================================================================= */
+.muxaro-hero-surface {
+  background-color: var(--muxaro-bg-base);
+  background-image: var(--muxaro-hero-wash);
+  background-repeat: no-repeat;
+}
+
+.muxaro-aurora-shell {
+  position: relative;
+  isolation: isolate;
+  overflow: clip;
+  background-color: var(--muxaro-bg-base);
+}
+
+.muxaro-aurora-ribbon,
+.muxaro-aurora-glow {
+  display: none !important;
 }
 
 /* Smooth Page Transition Animation */
@@ -684,131 +816,15 @@ a:active {
   will-change: opacity, transform;
 }
 
-/* Action CTA Button (Unified with 12px High-Craft Language) */
-.deepseek-action-circle,
-.muxaro-action-circle {
-  min-height: 42px;
-  padding: 0.5rem 1.125rem;
-  border-radius: 12px;
-  background-image: var(--muxaro-gradient-primary);
-  color: var(--muxaro-btn-fg);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  font-weight: 600;
-  font-size: 0.875rem;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(101, 88, 245, 0.24);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, opacity 160ms ease;
-  flex-shrink: 0;
-  cursor: pointer;
-  user-select: none;
-}
-
-.deepseek-action-circle:hover,
-.muxaro-action-circle:hover {
-  opacity: 0.98;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(101, 88, 245, 0.32);
-}
-
-.deepseek-action-circle:active,
-.muxaro-action-circle:active {
-  transform: translateY(1px);
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
-}
-
-.deepseek-action-circle:disabled,
-.muxaro-action-circle:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* Quick Action Pills */
-.deepseek-pill-btn,
-.muxaro-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 9999px;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  border: 1px solid var(--muxaro-border);
-  background-color: var(--muxaro-bg-surface);
-  color: var(--muxaro-text-secondary);
-  box-shadow: var(--muxaro-shadow-pill);
-  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-  white-space: nowrap;
-}
-
-.dark .deepseek-pill-btn,
-.dark .muxaro-pill-btn {
-  background-color: var(--dark-pill-btn-bg);
-  border-color: var(--dark-glass-border);
-}
-
-.deepseek-pill-btn:hover,
-.muxaro-pill-btn:hover {
-  color: var(--muxaro-text-primary);
-  border-color: var(--muxaro-indigo);
-  background-color: var(--muxaro-bg-interactive);
-  box-shadow: var(--muxaro-shadow-pill-hover);
-  transform: translateY(-1px);
-}
-
-.deepseek-pill-btn:active,
-.muxaro-pill-btn:active {
-  transform: translateY(0);
-}
-
-/* Antigravity Announcement Pill Bar */
-.antigravity-announcement {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.875rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border: 1px solid var(--muxaro-border);
-  background-color: var(--muxaro-bg-surface);
-  color: var(--muxaro-text-secondary);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: var(--muxaro-shadow-announcement);
-  transition: border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
-}
-
-.dark .antigravity-announcement {
-  background-color: var(--dark-announcement-bg);
-  border-color: var(--dark-glass-border);
-}
-
-.antigravity-announcement:hover {
-  border-color: var(--muxaro-indigo);
-  color: var(--muxaro-text-primary);
-  box-shadow: var(--muxaro-shadow-announcement-hover);
-  transform: translateY(-1px);
-}
-
-/* Monospace measurements and units */
-.mono-metric {
-  font-family: var(--font-mono), monospace;
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-}
-
-/* Accessible reduced motion override */
+/* =============================================================================
+   Accessible Reduced Motion Override
+   ============================================================================= */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
   .muxaro-aurora-shell {
-    background-image: var(--muxaro-aurora-static);
+    background-image: none;
   }
   .muxaro-aurora-shell::before,
   .muxaro-aurora-ribbon,
@@ -817,9 +833,8 @@ a:active {
     filter: none !important;
     will-change: auto;
     transform: none;
-  }
-  .muxaro-aurora-shell::before {
-    opacity: 0;
+    opacity: 0 !important;
+    display: none !important;
   }
   .muxaro-page-enter-slide {
     animation: none !important;
