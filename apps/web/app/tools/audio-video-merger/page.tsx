@@ -10,7 +10,6 @@ import {
   ShieldCheck,
   AlertCircle,
   RotateCcw,
-  Sparkles,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
@@ -125,7 +124,7 @@ export default function AudioVideoMergerPage() {
                   </label>
                   {normalizedVideoPreview && (
                     <span className="text-xs text-brand font-medium flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" aria-hidden="true" />
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" aria-hidden="true" />
                       Video link verified
                     </span>
                   )}
@@ -166,7 +165,7 @@ export default function AudioVideoMergerPage() {
                   </label>
                   {normalizedAudioPreview && (
                     <span className="text-xs text-brand font-medium flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" aria-hidden="true" />
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" aria-hidden="true" />
                       Audio link verified
                     </span>
                   )}

@@ -20,7 +20,6 @@ import {
   ShieldCheck,
   CheckCircle2,
   XCircle,
-  Sparkles,
   ArrowRight,
   HardDrive,
   Cpu,

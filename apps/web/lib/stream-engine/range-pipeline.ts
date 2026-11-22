@@ -22,6 +22,7 @@ export interface RangePipelineOptions {
   maxBufferBytes?: number;
   streamType?: 'video' | 'audio' | 'unified';
   signal?: AbortSignal;
+  headers?: Record<string, string>;
   onProgress?: (progress: Partial<StreamProgress>) => void;
   onChunkReceived?: (chunk: BufferChunk) => void;
 }
@@ -31,6 +32,7 @@ export class ParallelRangePipeline {
   private totalBytes: number;
   private streamType: 'video' | 'audio' | 'unified';
   private signal?: AbortSignal;
+  private headers?: Record<string, string>;
 
   private aimd: AimdConcurrencyController;
   private chunkSizer: DynamicChunkSizer;
@@ -53,6 +55,7 @@ export class ParallelRangePipeline {
     this.totalBytes = options.totalBytes ?? 0;
     this.streamType = options.streamType ?? 'unified';
     this.signal = options.signal;
+    this.headers = options.headers;
     this.onProgress = options.onProgress;
     this.onChunkReceived = options.onChunkReceived;
 
@@ -132,6 +135,7 @@ export class ParallelRangePipeline {
     try {
       const resp = await fetch(this.url, {
         method: 'HEAD',
+        headers: this.headers,
         signal: this.signal,
         mode: 'cors',
         credentials: 'omit',
@@ -145,7 +149,7 @@ export class ParallelRangePipeline {
       try {
         const resp = await fetch(this.url, {
           method: 'GET',
-          headers: { Range: 'bytes=0-0' },
+          headers: { ...(this.headers || {}), Range: 'bytes=0-0' },
           signal: this.signal,
           mode: 'cors',
           credentials: 'omit',
@@ -227,7 +231,7 @@ export class ParallelRangePipeline {
         const rangeHeader = `bytes=${startOffset}-${endOffset}`;
         const response = await fetch(this.url, {
           method: 'GET',
-          headers: { Range: rangeHeader },
+          headers: { ...(this.headers || {}), Range: rangeHeader },
           signal: this.signal,
           mode: 'cors',
           credentials: 'omit',

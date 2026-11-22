@@ -34,6 +34,7 @@ import {
   RefreshCw,
   Zap,
   ExternalLink,
+  Terminal,
 } from 'lucide-react';
 
 export interface JobProgressProps {
@@ -62,6 +63,9 @@ type ExtendedProcessingJob = ProcessingJob & {
   etaSeconds?: number;
   speed?: string;
   stage?: string;
+  deliveryMode?: 'zero-hop' | 'tunnel';
+  directStreamUrl?: string;
+  fileSizeBytes?: number;
   artifact?: {
     filename?: string;
     sizeBytes?: number;
@@ -79,6 +83,30 @@ function isTerminalState(status: JobState | undefined): boolean {
     status === 'CANCELLED' ||
     status === 'REJECTED'
   );
+}
+
+function normalizeContractStatus(rawStatusStr: string | undefined, defaultStatus: JobState = 'QUEUED'): JobState {
+  const s = String(rawStatusStr || '').toUpperCase();
+  if (s === 'COMPLETED' || s === 'READY') return 'READY';
+  if (s === 'FAILED') return 'FAILED';
+  if (s === 'CANCELLED') return 'CANCELLED';
+  if (s === 'REJECTED') return 'REJECTED';
+  if (
+    s === 'PROCESSING' ||
+    s === 'DOWNLOADING_VIDEO' ||
+    s === 'DOWNLOADING_AUDIO' ||
+    s === 'DOWNLOADING' ||
+    s === 'MERGING' ||
+    s === 'CONVERTING' ||
+    s === 'PROBING' ||
+    s === 'EXTRACTING' ||
+    s === 'PACKAGING' ||
+    s === 'VERIFYING'
+  ) {
+    return 'PROCESSING';
+  }
+  if (s === 'CREATED' || s === 'QUEUED') return 'QUEUED';
+  return defaultStatus;
 }
 
 function getFriendlyProgressMessage(
@@ -175,6 +203,8 @@ function mergeBackendPayload(
       : undefined) ||
     prev.userMessage;
 
+  const nextStatus = normalizeContractStatus(raw.status, prev.status || 'PROCESSING');
+
   return {
     ...prev,
     ...raw,
@@ -184,7 +214,7 @@ function mergeBackendPayload(
     operation: raw.operation || prev.operation,
     targetFormat: raw.targetFormat || prev.targetFormat,
     targetResolution: raw.targetResolution || prev.targetResolution,
-    status: raw.status || prev.status,
+    status: nextStatus,
     progress: nextProgress,
     progressStage: raw.progressStage || raw.stageMessage || prev.progressStage,
     outputFilename:
@@ -215,6 +245,9 @@ function mergeBackendPayload(
       typeof raw.etaSeconds === 'number' ? raw.etaSeconds : prev.etaSeconds,
     speed: raw.speed || prev.speed,
     stage: raw.stage || prev.stage,
+    deliveryMode: raw.deliveryMode || prev.deliveryMode,
+    directStreamUrl: raw.directStreamUrl || prev.directStreamUrl,
+    fileSizeBytes: raw.fileSizeBytes ?? prev.fileSizeBytes,
   };
 }
 
@@ -224,9 +257,14 @@ export default function JobProgress({
   onDismiss,
   sourceUrl: propSourceUrl,
 }: JobProgressProps) {
-  const [job, setJob] = useState<ExtendedProcessingJob>(
-    initialJob as ExtendedProcessingJob
-  );
+  const [job, setJob] = useState<ExtendedProcessingJob>(() => {
+    const ext = initialJob as ExtendedProcessingJob;
+    return {
+      ...ext,
+      status: normalizeContractStatus(ext.status, 'QUEUED'),
+    };
+  });
+
   const [cancelling, setCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<boolean>(false);
@@ -237,6 +275,9 @@ export default function JobProgress({
     useState<boolean>(false);
   const [showDetails, setShowDetails] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(
+    initialJob.status === 'FAILED' || initialJob.status === 'REJECTED'
+  );
   const [copiedHash, setCopiedHash] = useState<boolean>(false);
   const [isDirectActive, setIsDirectActive] = useState<boolean>(false);
   const [serverlessRoutingDetected, setServerlessRoutingDetected] =
@@ -252,16 +293,22 @@ export default function JobProgress({
 
   const detailsId = useId();
   const autoDownloadId = useId();
-  const jobRef = useRef<ExtendedProcessingJob>(
-    initialJob as ExtendedProcessingJob
-  );
+  const jobRef = useRef<ExtendedProcessingJob>(job);
   const onJobUpdateRef = useRef(onJobUpdate);
   const autoDownloadedIdsRef = useRef<Set<string>>(new Set());
+  const zeroHopTriggeredRef = useRef<Set<string>>(new Set());
   const startTimeRef = useRef<number>(Date.now());
 
   useEffect(() => {
     onJobUpdateRef.current = onJobUpdate;
   }, [onJobUpdate]);
+
+  // Auto-expand diagnostics drawer on failure
+  useEffect(() => {
+    if (job.status === 'FAILED' || job.status === 'REJECTED') {
+      setShowDiagnostics(true);
+    }
+  }, [job.status]);
 
   // Read opt-in auto-download preference (default OFF) and detect Background Fetch support
   useEffect(() => {
@@ -295,16 +342,25 @@ export default function JobProgress({
 
   useEffect(() => {
     const ext = initialJob as ExtendedProcessingJob;
-    setJob(ext);
-    jobRef.current = ext;
+    const normalized: ExtendedProcessingJob = {
+      ...ext,
+      status: normalizeContractStatus(ext.status, 'QUEUED'),
+    };
+    setJob(normalized);
+    jobRef.current = normalized;
     startTimeRef.current = Date.now();
     setCancelError(null);
     setRetryError(null);
     setShowPreview(false);
     setShowDetails(false);
+    if (normalized.status === 'FAILED' || normalized.status === 'REJECTED') {
+      setShowDiagnostics(true);
+    } else {
+      setShowDiagnostics(false);
+    }
     setBgStatusMessage(null);
     setServerlessRoutingDetected(false);
-    setAutoDownloadTriggered(autoDownloadedIdsRef.current.has(ext.id));
+    setAutoDownloadTriggered(autoDownloadedIdsRef.current.has(normalized.id));
   }, [initialJob]);
 
   const isTerminal = isTerminalState(job.status);
@@ -331,17 +387,10 @@ export default function JobProgress({
         if (cancelled || !e.data) return;
         try {
           const payload = JSON.parse(e.data);
-          const rawStatus = String(payload.status || '').toUpperCase();
-          const nextStatus: JobState =
-            rawStatus === 'COMPLETED' || rawStatus === 'READY'
-              ? 'READY'
-              : rawStatus === 'PROCESSING'
-              ? 'PROCESSING'
-              : rawStatus === 'FAILED'
-              ? 'FAILED'
-              : rawStatus === 'CANCELLED'
-              ? 'CANCELLED'
-              : 'QUEUED';
+          // CONTRACT STATE MAPPING:
+          // Active stages (DOWNLOADING_VIDEO, DOWNLOADING_AUDIO, MERGING, CONVERTING, PROBING, etc.)
+          // must map to 'PROCESSING', NOT 'QUEUED'!
+          const nextStatus = normalizeContractStatus(payload.status, jobRef.current.status || 'PROCESSING');
 
           const rawProgress = Number(payload.progressPercent ?? payload.progress);
           const nextProgress = Number.isFinite(rawProgress)
@@ -373,6 +422,9 @@ export default function JobProgress({
                 : jobRef.current.etaSeconds,
             speed: payload.speed || payload.rate || jobRef.current.speed,
             stage: payload.stage || jobRef.current.stage,
+            deliveryMode: payload.deliveryMode || jobRef.current.deliveryMode,
+            directStreamUrl: payload.directStreamUrl || payload.streamUrl || jobRef.current.directStreamUrl,
+            fileSizeBytes: payload.fileSizeBytes ?? payload.sizeBytes ?? jobRef.current.fileSizeBytes,
           };
           jobRef.current = updated;
           setJob(updated);
@@ -622,6 +674,36 @@ export default function JobProgress({
     resolvedDownloadUrl,
   ]);
 
+  // Zero-hop Client Handover: trigger instant browser download directly from origin CDN
+  useEffect(() => {
+    if (
+      job.deliveryMode === 'zero-hop' &&
+      job.id &&
+      typeof document !== 'undefined' &&
+      !zeroHopTriggeredRef.current.has(job.id)
+    ) {
+      const streamUrl = job.directStreamUrl || job.downloadUrl || directFallbackUrl;
+      if (streamUrl) {
+        zeroHopTriggeredRef.current.add(job.id);
+        const a = document.createElement('a');
+        a.href = streamUrl;
+        a.download = job.outputFilename || 'media.mp4';
+        a.rel = 'noreferrer';
+        a.referrerPolicy = 'no-referrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    }
+  }, [
+    job.deliveryMode,
+    job.id,
+    job.directStreamUrl,
+    job.downloadUrl,
+    job.outputFilename,
+    directFallbackUrl,
+  ]);
+
   const handleToggleAutoDownload = () => {
     const next = !autoDownloadEnabled;
     setAutoDownloadEnabled(next);
@@ -686,7 +768,7 @@ export default function JobProgress({
 
       const nextJob: ExtendedProcessingJob = {
         ...mergeBackendPayload(jobRef.current, raw),
-        status: raw.status && !isTerminalState(raw.status) ? raw.status : 'QUEUED',
+        status: normalizeContractStatus(raw.status, 'PROCESSING'),
         progress: Number.isFinite(raw.progress) ? raw.progress : 0,
         error: undefined,
         errorMessage: undefined,
@@ -734,6 +816,19 @@ export default function JobProgress({
     }
   };
 
+  const isAudioOnly =
+    job.jobType === 'extract_audio' ||
+    ['mp3', 'flac', 'opus', 'aac', 'wav', 'm4a'].includes(
+      (job.targetFormat || '').toLowerCase()
+    );
+  const friendlyTitle =
+    job.inputTitle || (isAudioOnly ? 'Your audio' : 'Your video');
+  const displayFilename =
+    job.outputFilename ||
+    `${friendlyTitle}.${(
+      job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
+    ).toLowerCase()}`;
+
   const handleBackgroundDownload = async () => {
     const targetUrl = resolvedDownloadUrl || directFallbackUrl;
     if (!targetUrl || !job.id) return;
@@ -769,17 +864,9 @@ export default function JobProgress({
 
   const currentStageIdx = computeStageIndex(job);
 
-  const isAudioOnly =
-    job.jobType === 'extract_audio' ||
-    ['mp3', 'flac', 'opus', 'aac', 'wav', 'm4a'].includes(
-      (job.targetFormat || '').toLowerCase()
-    );
-
   const formatUpper = (
     job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
   ).toUpperCase();
-  const friendlyTitle =
-    job.inputTitle || (isAudioOnly ? 'Your audio' : 'Your video');
   const friendlyStatus = getFriendlyProgressMessage(
     job,
     isAudioOnly,
@@ -804,11 +891,6 @@ export default function JobProgress({
     typeof job.outputSizeBytes === 'number' && job.outputSizeBytes > 0
       ? formatBytes(job.outputSizeBytes)
       : '';
-  const displayFilename =
-    job.outputFilename ||
-    `${friendlyTitle}.${(
-      job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
-    ).toLowerCase()}`;
   const retentionMinutes =
     typeof job.retentionMinutes === 'number' && job.retentionMinutes > 0
       ? Math.round(job.retentionMinutes)
@@ -818,40 +900,86 @@ export default function JobProgress({
     ? `${checksumValue.slice(0, 12)}…${checksumValue.slice(-8)}`
     : '';
 
-  // Telemetry Calculations for Razor-Thin 3px Precision Rail
+  // Telemetry Calculations for Clean Status Line
   const telemetryEtaSeconds = useMemo(() => {
     if (typeof job.etaSeconds === 'number' && job.etaSeconds > 0) {
-      return job.etaSeconds;
+      return Math.round(job.etaSeconds);
     }
-    if (safeProgress > 5 && safeProgress < 100) {
+    if (hasRealProgress && safeProgress > 5 && safeProgress < 100) {
       const elapsedSec = Math.max(1, (Date.now() - startTimeRef.current) / 1000);
       const totalEstimatedSec = elapsedSec / (safeProgress / 100);
-      return Math.max(1, Math.round(totalEstimatedSec - elapsedSec));
+      const remaining = Math.round(totalEstimatedSec - elapsedSec);
+      return remaining > 0 ? remaining : 0;
     }
     return 0;
-  }, [job.etaSeconds, safeProgress]);
+  }, [job.etaSeconds, safeProgress, hasRealProgress]);
 
-  const telemetrySpeed = useMemo(() => {
-    if (job.speed && job.speed !== '1.0x') return `Speed: ${job.speed}`;
-    if (safeProgress > 10) {
-      return `Speed: ${(1.4 + (safeProgress % 15) * 0.1).toFixed(1)}x`;
+  const platformInfo = useMemo(() => {
+    return directTargetUrl ? detectPlatform(directTargetUrl) : null;
+  }, [directTargetUrl]);
+
+  const shortDomain = useMemo(() => {
+    const candidate = directTargetUrl || job.sourceUrl || propSourceUrl;
+    if (!candidate) return '';
+    try {
+      const parsed = new URL(candidate.startsWith('http') ? candidate : `https://${candidate}`);
+      return parsed.hostname.replace(/^www\./i, '');
+    } catch {
+      return platformInfo?.name ? `${platformInfo.name.toLowerCase()}.com` : '';
     }
-    return 'Speed: Stream Copy';
-  }, [job.speed, safeProgress]);
+  }, [directTargetUrl, job.sourceUrl, propSourceUrl, platformInfo]);
 
-  const telemetryStage = useMemo(() => {
-    return (
-      job.progressStage ||
-      job.stageMessage ||
-      (currentStageIdx === 0
-        ? 'Stream Probe & Manifest'
-        : currentStageIdx === 1
-        ? 'DASH Stream Copy'
-        : currentStageIdx === 2
-        ? 'FFmpeg Stream Remux'
-        : 'Container Verification')
-    );
-  }, [job.progressStage, job.stageMessage, currentStageIdx]);
+  const formatPillLabel = useMemo(() => {
+    if (isAudioOnly) {
+      return formatUpper;
+    }
+    return job.targetResolution ? `${formatUpper} · ${job.targetResolution}` : formatUpper;
+  }, [isAudioOnly, formatUpper, job.targetResolution]);
+
+  // NEVER render "Speed: Stream Copy". While probing/connecting, show only "Connecting to stream…".
+  // Show real MB/s and ETA ONLY once numeric progress > 0 arrives.
+  const statusString = useMemo(() => {
+    if (job.deliveryMode === 'zero-hop') {
+      return 'Connecting to CDN stream · Starting instant download…';
+    }
+
+    if (!hasRealProgress || safeProgress <= 0) {
+      return 'Connecting to stream…';
+    }
+
+    const parts: string[] = [];
+
+    // Stage label
+    const rawStage = (job.progressStage || job.stageMessage || job.stage || '').toLowerCase();
+    if (safeProgress >= 90 || rawStage.includes('mux') || rawStage.includes('merge')) {
+      parts.push('Muxing');
+    } else if (rawStage.includes('extract')) {
+      parts.push('Extracting');
+    } else {
+      parts.push('Downloading');
+    }
+
+    parts.push(`${safeProgress}%`);
+
+    // Speed: show real speed ONLY if valid string exists and does NOT say 'Stream Copy' or 'copy'
+    if (job.speed) {
+      const cleanSpeed = job.speed.replace(/^speed:\s*/i, '').trim();
+      if (
+        cleanSpeed &&
+        !cleanSpeed.toLowerCase().includes('copy') &&
+        !cleanSpeed.toLowerCase().includes('stream')
+      ) {
+        parts.push(cleanSpeed);
+      }
+    }
+
+    // ETA: show only once numeric progress > 0 arrives AND eta is valid
+    if (telemetryEtaSeconds > 0) {
+      parts.push(`${telemetryEtaSeconds}s left`);
+    }
+
+    return parts.join(' · ');
+  }, [job.deliveryMode, hasRealProgress, safeProgress, job.progressStage, job.stageMessage, job.stage, job.speed, telemetryEtaSeconds]);
 
   const rawErrorText =
     typeof job.errorMessage === 'string' && job.errorMessage.trim()
@@ -863,7 +991,6 @@ export default function JobProgress({
       : undefined;
   const friendlyErrorMessage =
     job.userMessage || mapFriendlyError(rawErrorText, job.errorCode);
-  const laneDisplay = formatLaneLabel(job.processingLane);
 
   const directHelperHref = directTargetUrl
     ? `/tools/direct-helper?url=${encodeURIComponent(directTargetUrl)}`
@@ -900,223 +1027,80 @@ export default function JobProgress({
     );
   }, [job]);
 
-  const platformInfo = useMemo(() => {
-    return directTargetUrl ? detectPlatform(directTargetUrl) : null;
-  }, [directTargetUrl]);
-
-  const displayUrl = useMemo(() => {
-    return directTargetUrl ? formatDisplayUrl(directTargetUrl, 44) : '';
-  }, [directTargetUrl]);
-
   return (
     <section
       aria-label="Media progress"
-      className="w-full bg-surface dark:bg-[#121214] border border-line dark:border-neutral-800 rounded-2xl shadow-card p-5 sm:p-6 text-content"
+      className="w-full bg-surface border border-line rounded-2xl shadow-card p-5 sm:p-6 text-content transition-colors"
       style={{ overflowX: 'clip' }}
     >
-      {/* In-Progress View: Serverless-Proof Live Progress */}
+      {/* 1. In-Progress View: Clean 3-Row Linear/Raycast/Cobalt Style */}
       {!isTerminal && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between gap-3">
+        <div className="space-y-4">
+          {/* Top Row: Thumbnail/minimal media icon + Title + short domain on left; single MP4 · 1080p pill + quiet Cancel button on right */}
+          <div className="flex items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div
-                className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-surface-elevated border border-line dark:border-neutral-800 text-content"
-              >
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-elevated border border-line shrink-0 text-content">
                 {isAudioOnly ? (
-                  <FileAudio className="w-5 h-5" aria-hidden="true" />
+                  <FileAudio className="w-4 h-4" aria-hidden="true" />
                 ) : (
-                  <FileVideo className="w-5 h-5" aria-hidden="true" />
+                  <FileVideo className="w-4 h-4" aria-hidden="true" />
                 )}
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-content truncate">
-                    {friendlyTitle}
-                  </h3>
-                  {platformInfo && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-elevated text-content border border-line dark:border-neutral-800 flex-shrink-0">
-                      {platformInfo.name}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-content-secondary mt-0.5">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Loader2
-                      className="w-3.5 h-3.5 motion-safe:animate-spin text-content flex-shrink-0"
-                      aria-hidden="true"
-                    />
-                    <span>{friendlyStatus}</span>
-                  </span>
-                  {displayUrl && (
-                    <span className="text-content-muted font-mono text-[11px] truncate max-w-[180px] sm:max-w-[280px]">
-                      • {displayUrl}
-                    </span>
-                  )}
-                </div>
+                <h3 className="text-sm sm:text-base font-semibold text-content truncate leading-tight">
+                  {friendlyTitle}
+                </h3>
+                {shortDomain && (
+                  <p className="text-xs text-content-secondary font-mono mt-0.5 truncate">
+                    {shortDomain}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-elevated text-xs font-mono font-bold text-content border border-line dark:border-neutral-800">
-                {formatUpper}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-elevated text-xs font-mono font-medium text-content border border-line">
+                {formatPillLabel}
               </span>
-              {!isAudioOnly && job.targetResolution && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-elevated text-xs font-mono font-medium text-content-secondary border border-line dark:border-neutral-800">
-                  {job.targetResolution}
-                </span>
-              )}
-              <span className="font-mono tabular-nums text-sm font-bold text-content pl-1">
-                {hasRealProgress ? `${safeProgress}%` : 'PROBING'}
-              </span>
+              <button
+                type="button"
+                disabled={cancelling}
+                onClick={handleCancel}
+                className="text-xs text-content-secondary hover:text-content font-medium px-2 py-1 rounded hover:bg-surface-elevated transition-colors disabled:opacity-50"
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
             </div>
           </div>
 
-          {/* Real Multi-Stage Progress Stepper: 1px Structural Hairlines */}
-          <div className="w-full py-1" aria-label="Processing stages">
-            <div className="grid grid-cols-4 gap-2 sm:gap-3 relative">
-              {PROGRESS_STAGES.map((stg, idx) => {
-                const isCompleted = currentStageIdx > idx || job.status === 'READY';
-                const isActive = currentStageIdx === idx && job.status !== 'READY' && job.status !== 'FAILED';
-                const isFailed = currentStageIdx === idx && (job.status === 'FAILED' || job.status === 'CANCELLED');
-
-                return (
-                  <div key={stg.key} className="flex flex-col items-center text-center relative select-none">
-                    {/* 1px Structural Connecting Line */}
-                    {idx > 0 && (
-                      <div
-                        className={`absolute top-3.5 sm:top-4 -left-1/2 w-full h-[1px] -z-0 transition-colors duration-200 ${
-                          isCompleted || isActive ? 'bg-neutral-900 dark:bg-white' : 'bg-line dark:bg-neutral-800'
-                        }`}
-                        aria-hidden="true"
-                      />
-                    )}
-
-                    {/* Step Icon */}
-                    <div
-                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold z-10 transition-colors ${
-                        isCompleted
-                          ? 'bg-emerald-500 text-white shadow-xs'
-                          : isActive
-                          ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 ring-2 ring-neutral-400 dark:ring-neutral-600 shadow-sm'
-                          : isFailed
-                          ? 'bg-red-500 text-white'
-                          : 'bg-surface-elevated text-content-secondary border border-line dark:border-neutral-800'
-                      }`}
-                    >
-                      {isCompleted ? (
-                        <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" aria-hidden="true" />
-                      ) : isActive ? (
-                        <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 motion-safe:animate-spin" aria-hidden="true" />
-                      ) : isFailed ? (
-                        <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
-                      ) : (
-                        <span>{idx + 1}</span>
-                      )}
-                    </div>
-
-                    {/* Stage Label */}
-                    <span
-                      className={`mt-1.5 text-[11px] sm:text-xs font-semibold leading-tight ${
-                        isActive
-                          ? 'text-content font-bold'
-                          : isCompleted
-                          ? 'text-content font-medium'
-                          : 'text-content-secondary'
-                      }`}
-                    >
-                      {stg.label}
-                    </span>
-                    <span className="hidden md:block text-[10px] text-content-secondary mt-0.5 leading-tight">
-                      {stg.desc}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Razor-Thin 3px Precision Rail */}
+          {/* Middle Row: Single 4px high-contrast progress bar */}
           <div
-            className="w-full h-[3px] rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden relative"
+            className="w-full h-1 rounded-full bg-line/60 overflow-hidden relative"
             role="progressbar"
             aria-valuenow={hasRealProgress ? safeProgress : undefined}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={friendlyStatus}
+            aria-label={statusString}
           >
-            {hasRealProgress ? (
+            {hasRealProgress && safeProgress > 0 ? (
               <div
-                className="h-full w-full origin-left rounded-full bg-neutral-900 dark:bg-white motion-safe:transition-transform motion-safe:duration-200 ease-out"
+                className="h-full bg-content rounded-full transition-transform duration-200 origin-left ease-out"
                 style={{
                   transform: `scaleX(${Math.max(0.02, safeProgress / 100)})`,
                 }}
               />
             ) : (
-              <div
-                className="h-full w-full rounded-full bg-neutral-900/60 dark:bg-white/60 motion-safe:animate-pulse"
-              />
+              <div className="h-full w-1/3 bg-content/80 rounded-full animate-indeterminate-shimmer" />
             )}
           </div>
 
-          {/* Live Stage Telemetry Bar: stage name, format, speed, ETA, percentage */}
-          <div className="flex flex-wrap items-center justify-between gap-y-1 gap-x-3 text-[11px] font-mono tabular-nums text-content-secondary select-none">
-            <span className="flex items-center gap-1.5 font-semibold text-content">
-              <span className="w-1.5 h-1.5 rounded-full bg-neutral-900 dark:bg-white animate-pulse" />
-              <span>{telemetryStage}</span>
-            </span>
-            <span>
-              {formatUpper}
-              {job.targetResolution ? ` • ${job.targetResolution}` : ''}
-            </span>
-            <span>{telemetrySpeed}</span>
-            <span>
-              {telemetryEtaSeconds > 0
-                ? `ETA: ${telemetryEtaSeconds}s`
-                : safeProgress >= 90
-                ? 'ETA: < 2s'
-                : 'ETA: Calculating…'}
-            </span>
-            <span className="font-bold text-content tabular-nums">
-              {hasRealProgress ? `${safeProgress}%` : 'PROBING…'}
-            </span>
-          </div>
-
-          {/* Serverless-Proof Direct Fallback Download Banner */}
-          {(serverlessRoutingDetected || isDirectActive) && (
-            <div className="p-3.5 sm:p-4 rounded-xl border border-line dark:border-neutral-800 bg-surface-elevated flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-xs font-bold text-content font-mono uppercase tracking-wider">
-                    Direct Stream Available
-                  </span>
-                </div>
-                <p className="text-xs text-content-secondary">
-                  Serverless instance routing in progress. You can save your file directly now.
-                </p>
-              </div>
-              <a
-                href={resolvedDownloadUrl || directFallbackUrl}
-                download={job.outputFilename || true}
-                onClick={triggerBrowserSave}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs font-bold hover:opacity-90 transition-opacity whitespace-nowrap shadow-xs select-none"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Save File Directly</span>
-              </a>
+          {/* Bottom Row: Single crisp status string on left + compact Auto-download toggle on right */}
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <div className="text-content-secondary font-mono truncate">
+              {statusString}
             </div>
-          )}
 
-          {cancelError && (
-            <div className="p-3 rounded-xl bg-surface-elevated border border-line dark:border-neutral-800 text-content-secondary text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
-              <span>{cancelError}</span>
-            </div>
-          )}
-
-          {/* Opt-In Auto-Download Toggle + Cancel */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-            <div className="inline-flex items-center gap-2.5">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 id={autoDownloadId}
                 type="button"
@@ -1124,176 +1108,159 @@ export default function JobProgress({
                 aria-checked={autoDownloadEnabled}
                 aria-label="Automatically download when ready"
                 onClick={handleToggleAutoDownload}
-                className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-150 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 ${
-                  autoDownloadEnabled ? 'bg-neutral-900 dark:bg-white' : 'bg-line dark:bg-neutral-800'
+                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-content ${
+                  autoDownloadEnabled ? 'bg-content' : 'bg-line'
                 }`}
               >
                 <span
                   aria-hidden="true"
-                  className="inline-block h-3.5 w-3.5 rounded-full bg-surface shadow-sm"
+                  className="inline-block h-2.5 w-2.5 rounded-full bg-surface shadow-xs transition-transform duration-150"
                   style={{
-                    transform: autoDownloadEnabled
-                      ? 'translateX(18px)'
-                      : 'translateX(3px)',
-                    transition: 'transform 150ms ease',
+                    transform: autoDownloadEnabled ? 'translateX(14px)' : 'translateX(2px)',
                   }}
                 />
               </button>
               <label
                 htmlFor={autoDownloadId}
-                className="text-xs text-content-secondary hover:text-content cursor-pointer select-none"
+                className="text-xs text-content-secondary cursor-pointer select-none"
               >
-                Automatically download when ready
+                Auto-download
               </label>
             </div>
-
-            <button
-              type="button"
-              disabled={cancelling}
-              onClick={handleCancel}
-              className="whitespace-nowrap self-start sm:self-center inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[38px] sm:min-h-[34px] rounded-lg border border-line dark:border-neutral-800 bg-surface text-content-secondary hover:text-red-500 hover:border-red-500 active:opacity-90 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 disabled:opacity-60"
-            >
-              <XCircle className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{cancelling ? 'Cancelling...' : 'Cancel'}</span>
-            </button>
           </div>
 
-          {/* Server-Side Persistence Note */}
-          <p className="text-xs text-content-secondary pt-3 border-t border-line-subtle">
-            Processing continues safely on our servers even if you leave this page. Completed files stay available in{' '}
-            <Link
-              href="/dashboard"
-              className="whitespace-nowrap font-medium text-content hover:underline active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 rounded-sm"
-            >
+          {/* Direct Stream Available Fallback (if serverless instance routing detected) */}
+          {(serverlessRoutingDetected || isDirectActive) && (
+            <div className="p-3 rounded-xl border border-line bg-surface-elevated flex items-center justify-between gap-3 text-xs">
+              <span className="text-content-secondary truncate">
+                Direct stream connection available
+              </span>
+              <a
+                href={resolvedDownloadUrl || directFallbackUrl}
+                download={job.outputFilename || true}
+                onClick={triggerBrowserSave}
+                className="font-semibold text-content hover:underline shrink-0"
+              >
+                Save directly
+              </a>
+            </div>
+          )}
+
+          {cancelError && (
+            <div className="p-2.5 rounded-lg bg-surface-elevated border border-line text-xs text-content-secondary flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-warning shrink-0" aria-hidden="true" />
+              <span>{cancelError}</span>
+            </div>
+          )}
+
+          {/* Zero-Hop Client Handover / Server Proxy Fallback */}
+          {job.deliveryMode === 'zero-hop' && (
+            <div className="p-2.5 rounded-xl border border-line bg-surface-elevated/50 flex items-center justify-between gap-3 text-xs">
+              <span className="text-content-secondary truncate">
+                Direct CDN download active
+              </span>
+              <a
+                href={job.id ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : (resolvedDownloadUrl || directFallbackUrl)}
+                download={job.outputFilename || true}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content transition-colors select-none shrink-0"
+                title="Download through server proxy if direct CDN download fails"
+              >
+                <Download className="w-3.5 h-3.5 text-content-secondary" />
+                <span>Download via Server Proxy</span>
+              </a>
+            </div>
+          )}
+
+          {/* Subtle card footer: One understated 12px line */}
+          <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
+            Safe to leave this page — files remain in{' '}
+            <Link href="/downloads" className="text-content hover:underline font-medium">
               My Downloads
-            </Link>
-            .
-          </p>
+            </Link>{' '}
+            for 60 minutes.
+          </div>
         </div>
       )}
 
-      {/* Clean Ready Completion Screen */}
+      {/* 2. Ready View: Clean, Confident Completion */}
       {job.status === 'READY' && (
-        <div className="space-y-5">
-          {/* Success Header */}
+        <div className="space-y-4">
           <div className="flex items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3.5 min-w-0">
-              <div className="flex-shrink-0 w-11 h-11 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-xs">
-                <CheckCircle2 className="w-6 h-6" aria-hidden="true" />
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                <CheckCircle2 className="w-5 h-5" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-lg font-bold text-content">{readyHeading}</h3>
-                <p className="text-xs sm:text-sm text-content-secondary">
-                  {autoDownloadTriggered
-                    ? 'Your download started automatically. Click below to save again anytime.'
-                    : 'Your file is verified and ready to save to your device.'}
+                <h3 className="text-base font-semibold text-content truncate leading-tight">
+                  {readyHeading}
+                </h3>
+                <p className="text-xs text-content-secondary truncate mt-0.5">
+                  {friendlyTitle}
+                  {shortDomain ? ` · ${shortDomain}` : ''}
                 </p>
               </div>
             </div>
 
-            {job.losslessPreserved === true && (
-              <span className="whitespace-nowrap hidden sm:inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                Original quality preserved
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-elevated text-xs font-mono font-medium text-content border border-line">
+                {formatPillLabel}
               </span>
-            )}
-          </div>
-
-          {/* All 4 Stages Completed Stepper */}
-          <div className="w-full py-2 border-y border-line-subtle" aria-label="Completed stages">
-            <div className="grid grid-cols-4 gap-2 sm:gap-3 relative">
-              {PROGRESS_STAGES.map((stg, idx) => (
-                <div key={stg.key} className="flex flex-col items-center text-center relative select-none">
-                  {idx > 0 && (
-                    <div
-                      className="absolute top-3.5 sm:top-4 -left-1/2 w-full h-[1px] -z-0 bg-emerald-500"
-                      aria-hidden="true"
-                    />
-                  )}
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold z-10 bg-emerald-500 text-white shadow-xs">
-                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" aria-hidden="true" />
-                  </div>
-                  <span className="mt-1.5 text-[11px] sm:text-xs font-semibold text-content leading-tight">
-                    {stg.label}
-                  </span>
-                  <span className="hidden md:block text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 leading-tight font-mono">
-                    Done
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Clean File Summary Row */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-4 py-3.5 rounded-xl bg-surface-elevated border border-line dark:border-neutral-800">
-            <div className="flex items-center gap-2.5 min-w-0">
-              {isAudioOnly ? (
-                <FileAudio
-                  className="w-4 h-4 text-content flex-shrink-0"
-                  aria-hidden="true"
-                />
-              ) : (
-                <FileVideo
-                  className="w-4 h-4 text-content flex-shrink-0"
-                  aria-hidden="true"
-                />
-              )}
-              <span
-                className="text-sm font-semibold text-content truncate font-mono"
-                title={displayFilename}
-              >
-                {displayFilename}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface text-xs font-mono font-bold text-content border border-line dark:border-neutral-800">
-                {formatUpper}
-              </span>
-              {!isAudioOnly && job.targetResolution && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface text-xs font-mono font-medium text-content-secondary border border-line dark:border-neutral-800">
-                  {job.targetResolution}
-                </span>
-              )}
               {fileSizeLabel && (
-                <span className="font-mono tabular-nums text-xs font-semibold text-content">
+                <span className="text-xs font-mono text-content-secondary tabular-nums">
                   {fileSizeLabel}
                 </span>
               )}
             </div>
           </div>
 
-          {/* Primary Download CTA */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Primary CTA + Secondary Actions */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
             <a
               href={resolvedDownloadUrl}
               download={job.outputFilename || true}
               onClick={triggerBrowserSave}
-              className="flex-1 inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm sm:text-base font-bold shadow-sm active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 cursor-pointer select-none"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-xs cursor-pointer select-none"
             >
               {downloadInitiated ? (
-                <Check className="w-5 h-5" aria-hidden="true" />
+                <Check className="w-4 h-4" aria-hidden="true" />
               ) : (
-                <Download className="w-5 h-5" aria-hidden="true" />
+                <Download className="w-4 h-4" aria-hidden="true" />
               )}
               <span>{downloadInitiated ? 'Saving to browser…' : downloadLabel}</span>
             </a>
 
-            {bgCapabilities.ready && (
+            {previewUrl && (
               <button
                 type="button"
-                onClick={handleBackgroundDownload}
-                className="whitespace-nowrap inline-flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-xl border border-line dark:border-neutral-800 bg-surface text-xs font-semibold text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600"
+                onClick={() => setShowPreview((prev) => !prev)}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
               >
-                <CloudDownload className="w-4 h-4 text-content" aria-hidden="true" />
-                <span>Save in background</span>
+                {showPreview ? (
+                  <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
+                ) : (
+                  <Play className="w-3.5 h-3.5" aria-hidden="true" />
+                )}
+                <span>{previewToggleLabel}</span>
               </button>
+            )}
+
+            {job.deliveryMode === 'zero-hop' && (
+              <a
+                href={job.id ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : resolvedDownloadUrl}
+                download={job.outputFilename || true}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
+                title="Download through server proxy if direct CDN download fails"
+              >
+                <Download className="w-3.5 h-3.5 text-content-secondary" />
+                <span>Download via Server Proxy</span>
+              </a>
             )}
 
             {onDismiss && (
               <button
                 type="button"
                 onClick={onDismiss}
-                className="whitespace-nowrap inline-flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-xl border border-line dark:border-neutral-800 bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
               >
                 <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Process another</span>
@@ -1301,246 +1268,94 @@ export default function JobProgress({
             )}
           </div>
 
-          {bgStatusMessage && (
-            <p className="text-xs text-content-secondary">{bgStatusMessage}</p>
-          )}
-
           {/* Optional Media Preview */}
-          {showPreview &&
-            previewUrl &&
-            (isAudioOnly ? (
-              <div className="p-4 rounded-xl bg-surface-elevated border border-line dark:border-neutral-800">
+          {showPreview && previewUrl && (
+            <div className="pt-2">
+              {isAudioOnly ? (
                 <audio
                   controls
                   preload="metadata"
                   aria-label={displayFilename}
-                  className="w-full"
+                  className="w-full rounded-lg"
                   src={previewUrl}
                 />
-              </div>
-            ) : (
-              <video
-                controls
-                preload="metadata"
-                playsInline
-                poster="/brand/og-image.png"
-                aria-label={displayFilename}
-                className="w-full max-h-80 rounded-xl bg-surface-elevated border border-line dark:border-neutral-800"
-                src={previewUrl}
-              />
-            ))}
-
-          {/* Retention Line + File Details */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line-subtle text-xs text-content-secondary">
-            <span className="inline-flex items-center gap-1.5 font-mono">
-              <Clock className="w-3.5 h-3.5 text-content-secondary flex-shrink-0" aria-hidden="true" />
-              <span>Available for {retentionMinutes} minutes</span>
-            </span>
-
-            <div className="flex flex-wrap items-center gap-3">
-              {previewUrl && (
-                <button
-                  type="button"
-                  aria-expanded={showPreview}
-                  onClick={() => setShowPreview((prev) => !prev)}
-                  className="whitespace-nowrap inline-flex items-center gap-1.5 font-medium text-content-secondary hover:text-content active:opacity-80 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 rounded-sm px-1 py-0.5"
-                >
-                  {showPreview ? (
-                    <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
-                  ) : (
-                    <Play className="w-3.5 h-3.5" aria-hidden="true" />
-                  )}
-                  <span>{previewToggleLabel}</span>
-                </button>
+              ) : (
+                <video
+                  controls
+                  preload="metadata"
+                  playsInline
+                  aria-label={displayFilename}
+                  className="w-full max-h-80 rounded-xl bg-surface-elevated border border-line"
+                  src={previewUrl}
+                />
               )}
+            </div>
+          )}
 
+          {/* Subtle card footer */}
+          <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
+            Safe to leave this page — files remain in{' '}
+            <Link href="/downloads" className="text-content hover:underline font-medium">
+              My Downloads
+            </Link>{' '}
+            for 60 minutes.
+          </div>
+        </div>
+      )}
+
+      {/* 3. Cancelled View */}
+      {job.status === 'CANCELLED' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 text-xs sm:text-sm text-content-secondary">
+              <XCircle className="w-4 h-4 text-content-secondary shrink-0" aria-hidden="true" />
+              <span>Download cancelled.</span>
+            </div>
+            {onDismiss && (
               <button
                 type="button"
-                aria-expanded={showDetails}
-                aria-controls={detailsId}
-                onClick={() => setShowDetails((prev) => !prev)}
-                className="whitespace-nowrap inline-flex items-center gap-1 font-medium text-content-secondary hover:text-content active:opacity-80 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 rounded-sm px-1 py-0.5"
+                onClick={onDismiss}
+                className="text-xs font-semibold text-content hover:underline"
               >
-                <span>File details</span>
-                {showDetails ? (
-                  <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
-                ) : (
-                  <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
-                )}
+                Process another
               </button>
-            </div>
+            )}
           </div>
-
-          {bgCapabilities.saveData && !showPreview && (
-            <p className="text-xs text-content-muted">
-              Data Saver is on, so preview loads only when opened.
-            </p>
-          )}
-
-          {/* Expandable File Details Disclosure */}
-          {showDetails && (
-            <dl
-              id={detailsId}
-              className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-xl bg-surface-elevated border border-line dark:border-neutral-800 text-xs"
-            >
-              <div>
-                <dt className="text-content-secondary">Processing lane</dt>
-                <dd className="font-medium text-content mt-0.5">
-                  {laneDisplay}
-                  {job.strategyLabel ? ` (${job.strategyLabel})` : ''}
-                </dd>
-              </div>
-
-              <div>
-                <dt className="text-content-secondary">Verification</dt>
-                <dd className="font-medium text-content mt-0.5">
-                  {job.losslessPreserved === true
-                    ? `Original quality preserved (${formatUpper})`
-                    : `${formatUpper} container verified`}
-                </dd>
-              </div>
-
-              <div>
-                <dt className="text-content-secondary">Job ID</dt>
-                <dd className="font-mono tabular-nums text-content mt-0.5 truncate" title={job.id}>
-                  {job.id}
-                </dd>
-              </div>
-
-              <div>
-                <dt className="flex items-center justify-between gap-2 text-content-secondary">
-                  <span>SHA-256 checksum</span>
-                  {checksumValue && (
-                    <button
-                      type="button"
-                      onClick={handleCopyHash}
-                      className="whitespace-nowrap inline-flex items-center gap-1 font-medium text-content hover:underline active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 rounded-sm px-1"
-                    >
-                      {copiedHash ? (
-                        <Check className="w-3 h-3 text-emerald-500" aria-hidden="true" />
-                      ) : (
-                        <Copy className="w-3 h-3" aria-hidden="true" />
-                      )}
-                      <span>{copyHashLabel}</span>
-                    </button>
-                  )}
-                </dt>
-                <dd
-                  className="font-mono text-content mt-0.5 truncate"
-                  title={checksumValue || undefined}
-                >
-                  {checksumPreview || 'Not available'}
-                </dd>
-              </div>
-            </dl>
-          )}
+          <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
+            Safe to leave this page — files remain in{' '}
+            <Link href="/downloads" className="text-content hover:underline font-medium">
+              My Downloads
+            </Link>{' '}
+            for 60 minutes.
+          </div>
         </div>
       )}
 
-      {/* Cancelled View */}
-      {job.status === 'CANCELLED' && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <XCircle
-              className="w-5 h-5 flex-shrink-0 text-warning mt-0.5"
-              aria-hidden="true"
-            />
-            <div>
-              <h3 className="text-sm font-semibold text-content">
-                Processing cancelled
-              </h3>
-              <p className="text-xs text-content-secondary mt-0.5">
-                No file was saved and your allowance was restored.
-              </p>
-            </div>
-          </div>
-          {onDismiss && (
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="whitespace-nowrap self-start sm:self-center text-xs font-semibold text-content hover:underline active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 rounded-sm px-1"
-            >
-              Process another
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Failed / Rejected View: Never Leaves User Stuck */}
+      {/* 4. Failed / Rejected View */}
       {(job.status === 'FAILED' || job.status === 'REJECTED') && (
         <div className="space-y-4">
           {isRateLimitedOrChallenged ? (
-            /* Calm Transition to MUXARO Direct */
-            <div className="rounded-2xl border border-line dark:border-neutral-800 bg-surface-elevated p-5 sm:p-6 space-y-4 shadow-xs">
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-xl bg-surface border border-line dark:border-neutral-800 text-content flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Zap className="w-5 h-5" aria-hidden="true" />
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-surface-elevated border border-line flex items-center justify-center shrink-0 mt-0.5 text-content">
+                  <Zap className="w-4 h-4" aria-hidden="true" />
                 </div>
-                <div className="space-y-1.5 min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-surface text-content border border-line dark:border-neutral-800">
-                      Browser Direct Streaming
-                    </span>
-                    {platformInfo && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface text-content-secondary border border-line dark:border-neutral-800">
-                        {platformInfo.name}
-                      </span>
-                    )}
-                    {isDirectActive && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-                        Direct Ready
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="text-base sm:text-lg font-bold text-content leading-snug">
-                    Direct Browser Stream Ready
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm sm:text-base font-semibold text-content leading-tight">
+                    Direct browser stream ready
                   </h3>
-                  <p className="text-xs sm:text-sm text-content-secondary leading-relaxed">
-                    Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser with zero server limits.
+                  <p className="text-xs text-content-secondary mt-1 leading-relaxed">
+                    Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser.
                   </p>
                 </div>
               </div>
 
-              {/* Instant Link & Stream Feedback Confirmation */}
-              <div className="p-3.5 rounded-xl bg-surface border border-line dark:border-neutral-800 space-y-2">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {isAudioOnly ? (
-                      <FileAudio className="w-4 h-4 text-content flex-shrink-0" aria-hidden="true" />
-                    ) : (
-                      <FileVideo className="w-4 h-4 text-content flex-shrink-0" aria-hidden="true" />
-                    )}
-                    <span className="font-semibold text-content truncate font-mono" title={friendlyTitle}>
-                      {friendlyTitle}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="px-2 py-0.5 rounded bg-surface-elevated font-mono font-bold text-content text-[11px] border border-line dark:border-neutral-800">
-                      {formatUpper}
-                    </span>
-                    {job.targetResolution && (
-                      <span className="px-2 py-0.5 rounded bg-surface-elevated text-content-secondary font-mono text-[11px] border border-line dark:border-neutral-800">
-                        {job.targetResolution}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {directTargetUrl && (
-                  <div className="flex items-center gap-2 text-[11px] text-content-muted font-mono truncate">
-                    <span className="font-medium text-content-secondary flex-shrink-0">Source:</span>
-                    <span className="truncate">{directTargetUrl}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Primary Actions: Direct Save + Direct Stream */}
-              <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
                 <Link
                   href={directHelperHref}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-6 py-3.5 min-h-[44px] rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-sm sm:text-base font-bold shadow-sm active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 cursor-pointer text-center"
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
                 >
-                  <Zap className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                  <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>Stream with MUXARO Direct</span>
                 </Link>
 
@@ -1548,112 +1363,81 @@ export default function JobProgress({
                   href={resolvedDownloadUrl || directFallbackUrl}
                   download={job.outputFilename || true}
                   onClick={triggerBrowserSave}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3.5 min-h-[44px] rounded-xl border border-line dark:border-neutral-800 bg-surface text-xs sm:text-sm font-semibold text-content hover:bg-surface-elevated transition-colors duration-150 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Save File Directly</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save file directly</span>
                 </a>
-              </div>
 
-              {retryError && (
-                <div className="p-3 rounded-lg bg-surface-elevated border border-line dark:border-neutral-800 text-content-secondary text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
-                  <span>{retryError}</span>
-                </div>
-              )}
-
-              {/* Bottom Strip */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-line-subtle">
                 {onDismiss && (
                   <button
                     type="button"
                     onClick={onDismiss}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg border border-line dark:border-neutral-800 bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-line text-xs font-medium text-content-secondary hover:text-content transition-colors"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
-                    <span>{directTargetUrl ? 'Paste another link' : 'Choose another file'}</span>
+                    <span>Dismiss</span>
                   </button>
                 )}
-
-                <button
-                  type="button"
-                  disabled={retrying}
-                  onClick={handleRetry}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-lg text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 disabled:opacity-60 cursor-pointer"
-                  title="Retry processing on cloud server"
-                >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${retrying ? 'motion-safe:animate-spin' : ''}`}
-                    aria-hidden="true"
-                  />
-                  <span>{retrying ? 'Retrying cloud…' : 'Retry cloud server'}</span>
-                </button>
               </div>
             </div>
           ) : (
-            /* Non-Challenged State: Serverless-Proof with Immediate Fallback Download */
-            <div className="space-y-4">
-              <div className="p-4 sm:p-5 rounded-2xl bg-surface-elevated border border-line dark:border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-start gap-3.5 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-surface border border-line dark:border-neutral-800 text-content flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Download className="w-5 h-5 text-emerald-500" aria-hidden="true" />
-                  </div>
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <h3 className="text-sm sm:text-base font-bold text-content">
-                      Direct Stream Download Ready
-                    </h3>
-                    <p className="text-xs sm:text-sm text-content-secondary leading-relaxed">
-                      Cloud server reached its task window, but your stream is ready to save directly to your device now.
-                    </p>
-                  </div>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-error-bg border border-error text-error flex items-center justify-center shrink-0 mt-0.5">
+                  <AlertCircle className="w-4 h-4" aria-hidden="true" />
                 </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm sm:text-base font-semibold text-content leading-tight">
+                    Processing could not be completed
+                  </h3>
+                  <p className="text-xs text-content-secondary mt-1 leading-relaxed">
+                    {friendlyErrorMessage || 'The media server returned an error. You can retry or download directly.'}
+                  </p>
+                </div>
+              </div>
 
-                {/* Direct 1-Click Fallback Download Button */}
+              <div className="flex flex-wrap items-center gap-2.5 pt-1">
                 <a
                   href={resolvedDownloadUrl || directFallbackUrl}
                   download={job.outputFilename || true}
                   onClick={triggerBrowserSave}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 text-xs sm:text-sm font-bold hover:opacity-90 active:scale-[0.98] transition-all whitespace-nowrap shadow-xs self-start sm:self-auto cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Save File Directly</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save directly</span>
                 </a>
-              </div>
-
-              {retryError && (
-                <div className="p-3 rounded-lg bg-surface-elevated border border-line dark:border-neutral-800 text-content-secondary text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
-                  <span>{retryError}</span>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-line-subtle">
-                {onDismiss && (
-                  <button
-                    type="button"
-                    onClick={onDismiss}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[40px] rounded-lg border border-line dark:border-neutral-800 bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
-                    <span>{directTargetUrl ? 'Paste another link' : 'Choose another file'}</span>
-                  </button>
-                )}
 
                 <button
                   type="button"
                   disabled={retrying}
                   onClick={handleRetry}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[40px] rounded-lg border border-line dark:border-neutral-800 bg-surface text-xs font-semibold text-content hover:bg-surface-elevated active:opacity-90 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 dark:focus-visible:ring-neutral-600 disabled:opacity-60 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content transition-colors disabled:opacity-50"
                 >
-                  <RefreshCw
-                    className={`w-3.5 h-3.5 ${retrying ? 'motion-safe:animate-spin' : ''}`}
-                    aria-hidden="true"
-                  />
+                  <RotateCcw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
                   <span>{retryButtonLabel}</span>
                 </button>
+
+                {onDismiss && (
+                  <button
+                    type="button"
+                    onClick={onDismiss}
+                    className="inline-flex items-center justify-center px-3 py-2 rounded-xl border border-line text-xs font-medium text-content-secondary hover:text-content transition-colors"
+                  >
+                    <span>Dismiss</span>
+                  </button>
+                )}
               </div>
             </div>
           )}
+
+          {/* Subtle card footer */}
+          <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
+            Safe to leave this page — files remain in{' '}
+            <Link href="/downloads" className="text-content hover:underline font-medium">
+              My Downloads
+            </Link>{' '}
+            for 60 minutes.
+          </div>
         </div>
       )}
     </section>

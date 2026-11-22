@@ -22,7 +22,6 @@ import {
   ExternalLink,
   Copy,
   Zap,
-  Sparkles,
 } from 'lucide-react';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
@@ -632,7 +631,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
                     Select quality up to 8K. All video tiers include highest-fidelity audio auto-merged.
                   </p>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                    <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
                     <span>HQ Audio Auto-Merged (Up to 320 kbps)</span>
                   </span>
                 </div>
@@ -703,7 +702,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
 
                           {/* HQ Audio Auto-Merged Tag */}
                           <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium border border-emerald-500/20">
-                            <Sparkles className="w-2.5 h-2.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                            <Check className="w-2.5 h-2.5 text-emerald-500 shrink-0" aria-hidden="true" />
                             <span>HQ Audio</span>
                           </span>
 

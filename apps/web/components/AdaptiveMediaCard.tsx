@@ -396,6 +396,33 @@ export default function AdaptiveMediaCard({
         setActiveJobId(job.id);
         onJobStarted?.(job);
 
+        // Zero-Hop Client Handover: direct origin CDN stream
+        if (job.deliveryMode === 'zero-hop') {
+          const streamUrl = job.directStreamUrl || job.downloadUrl;
+          if (streamUrl && typeof document !== 'undefined') {
+            const filename = job.outputFilename || `${manifest.title}.${targetFormat}`;
+            const a = document.createElement('a');
+            a.href = streamUrl;
+            a.download = filename;
+            a.rel = 'noreferrer';
+            a.referrerPolicy = 'no-referrer';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            setFallbackDownloadUrl(streamUrl);
+            autoTriggeredRef.current = true;
+            saveToDownloadsHistory(
+              job.id,
+              streamUrl,
+              manifest.title,
+              targetFormat,
+              job.fileSizeBytes || job.outputSizeBytes || 45 * 1024 * 1024
+            );
+            return;
+          }
+        }
+
         // Instant Download Fast-Path: If ready or downloadUrl returned immediately
         const readyUrl =
           job.downloadUrl ||

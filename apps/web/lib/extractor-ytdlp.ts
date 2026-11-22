@@ -83,23 +83,54 @@ function resolveQualityBadge(height: number, fps: number, isHdr: boolean): strin
   return undefined;
 }
 
+// 5-minute warm manifest cache for instantaneous re-probing & speculative pre-fetching
+interface CachedManifest {
+  manifest: ExtractorResult;
+  timestamp: number;
+}
+const MANIFEST_CACHE_TTL_MS = 5 * 60 * 1000;
+const globalForExtractor = globalThis as unknown as {
+  __muxaroManifestCache?: Map<string, CachedManifest>;
+};
+const manifestCache = globalForExtractor.__muxaroManifestCache ?? new Map<string, CachedManifest>();
+globalForExtractor.__muxaroManifestCache = manifestCache;
+
+function getJsRuntimeArgs(): string[] {
+  try {
+    const { execSync } = require('node:child_process');
+    execSync('deno --version', { stdio: 'ignore' });
+    return ['--js-runtimes', 'deno'];
+  } catch {}
+
+  if (process.execPath) {
+    return ['--js-runtimes', 'node'];
+  }
+  return [];
+}
+
 /**
- * Executes yt-dlp with --dump-single-json and safe execution arguments
+ * Executes yt-dlp with --dump-single-json, force-ipv4 and safe execution arguments
  */
 async function runYtDlpDump(targetUrl: string): Promise<any> {
   return new Promise((resolve, reject) => {
     const args = [
       '--dump-single-json',
+      '--force-ipv4',
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
-      '--socket-timeout', '25',
+      '--socket-timeout', '15',
+      ...getJsRuntimeArgs(),
       targetUrl,
     ];
 
     const child = spawn('yt-dlp', args, {
       shell: false,
       windowsHide: true,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+      },
     });
 
     const timer = setTimeout(() => {
@@ -107,7 +138,7 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
         child.kill('SIGTERM');
       } catch {}
       reject(new Error('yt-dlp execution timed out'));
-    }, 6000);
+    }, 15000);
 
     let stdoutData = '';
     let stderrData = '';
@@ -231,6 +262,17 @@ export async function extractMediaMetadata(rawUrl: string): Promise<ExtractorRes
   // Resilient fallback for YouTube (oEmbed + adaptive stream baseline)
   if (platform === 'youtube' || /youtube\.com|youtu\.be/i.test(trimmedUrl)) {
     return await createYouTubeFallback(trimmedUrl);
+  }
+
+  // Dedicated multi-platform direct stream extractors (Pinterest, Twitter/X, Reddit, TikTok, Vimeo, Facebook, Instagram)
+  try {
+    const { extractPlatformMedia, buildExtractorResultFromPlatformMedia } = await import('./platform-extractors.ts');
+    const platformMedia = await extractPlatformMedia(trimmedUrl);
+    if (platformMedia && (platformMedia.streamUrl || platformMedia.mediaUrl)) {
+      return buildExtractorResultFromPlatformMedia(platformMedia, trimmedUrl);
+    }
+  } catch (extractErr) {
+    console.warn('[Extractor] Dedicated platform extractor fallback:', extractErr);
   }
 
   // Resilient fallback for other major social platforms
@@ -890,23 +932,46 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
   let uploader = 'YouTube Creator';
   let uploaderUrl = `https://www.youtube.com/watch?v=${videoId}`;
   let thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+  let resolvedDuration = 180;
 
+  // 1. Try @distube/ytdl-core first for complete metadata & real duration
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(sourceUrl)}&format=json`, {
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (oembedRes.ok) {
-      const oembed: any = await oembedRes.json();
-      if (oembed.title) title = String(oembed.title).trim();
-      if (oembed.author_name) uploader = String(oembed.author_name).trim();
-      if (oembed.author_url) uploaderUrl = String(oembed.author_url).trim();
-      if (oembed.thumbnail_url) thumbnailUrl = String(oembed.thumbnail_url).trim();
+    const { Ytdl } = await import('@distube/ytdl-core');
+    const ytdl = new Ytdl();
+    const info = await ytdl.getInfo(sourceUrl);
+    if (info.videoDetails) {
+      if (info.videoDetails.title) title = info.videoDetails.title;
+      if (info.videoDetails.author?.name) uploader = info.videoDetails.author.name;
+      const authorAny = info.videoDetails.author as any;
+      if (authorAny?.channel_url || authorAny?.user_url) {
+        uploaderUrl = authorAny.channel_url || authorAny.user_url;
+      }
+      if (info.videoDetails.thumbnails?.length) {
+        thumbnailUrl = info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url;
+      }
+      if (info.videoDetails.lengthSeconds) {
+        resolvedDuration = Number(info.videoDetails.lengthSeconds) || 180;
+      }
     }
   } catch {
-    // Gracefully use default metadata
+    // 2. Fallback to oEmbed API
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(sourceUrl)}&format=json`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (oembedRes.ok) {
+        const oembed: any = await oembedRes.json();
+        if (oembed.title) title = String(oembed.title).trim();
+        if (oembed.author_name) uploader = String(oembed.author_name).trim();
+        if (oembed.author_url) uploaderUrl = String(oembed.author_url).trim();
+        if (oembed.thumbnail_url) thumbnailUrl = String(oembed.thumbnail_url).trim();
+      }
+    } catch {
+      // Gracefully use default metadata
+    }
   }
 
   const id = `yt_${videoId}_${Date.now()}`;
@@ -1087,7 +1152,7 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     uploader,
     author: uploader,
     uploaderUrl,
-    durationSeconds: 180,
+    durationSeconds: resolvedDuration,
     thumbnailUrl,
     sourceUrl,
     originalUrl: sourceUrl,
@@ -1192,7 +1257,7 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       isStreamCopyCandidate: true,
       transcodeRequired: false,
       notes: 'Direct MP4 stream',
-      url: sourceUrl,
+      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
     },
   ];
 
@@ -1213,7 +1278,7 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       isStreamCopyCandidate: true,
       transcodeRequired: false,
       notes: 'Original audio stream',
-      url: sourceUrl,
+      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
     },
   ];
 

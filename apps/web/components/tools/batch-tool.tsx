@@ -26,7 +26,6 @@ import {
   ChevronDown,
   ChevronUp,
   Sliders,
-  Sparkles,
   ArrowRight,
   Plus,
   Trash2,

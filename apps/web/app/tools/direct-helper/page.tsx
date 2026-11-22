@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   ExternalLink,
   ArrowRight,
-  Sparkles,
   Flame,
   Info,
   Copy,
@@ -397,7 +396,7 @@ function DirectHelperContent() {
       {/* Header Banner - Rebranded & Compliant */}
       <section className="space-y-3 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-light border border-brand/20 text-brand text-xs font-semibold">
-          <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+          <Zap className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Client-Side Browser Streaming</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-content">
@@ -911,7 +910,7 @@ function DirectHelperContent() {
 
         <div className="p-5 rounded-2xl border border-line bg-surface-elevated space-y-2.5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-brand-light text-brand">
-            <Sparkles className="w-5 h-5" aria-hidden="true" />
+            <Zap className="w-5 h-5" aria-hidden="true" />
           </div>
           <h3 className="text-sm font-semibold text-content">Zero-Wait Pipelining</h3>
           <p className="text-xs text-content-secondary leading-relaxed">

@@ -7,10 +7,10 @@ import {
   ArrowLeft,
   Music,
   ShieldCheck,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
   RotateCcw,
+  Sliders,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
@@ -155,7 +155,7 @@ export default function AudioExtractorPage() {
                   </label>
                   {normalizedPreview && (
                     <span className="text-xs text-brand font-medium flex items-center gap-1">
-                      <Sparkles className="w-3 h-3" aria-hidden="true" />
+                      <CheckCircle2 className="w-3 h-3 text-emerald-500" aria-hidden="true" />
                       Protocol verified
                     </span>
                   )}
@@ -261,7 +261,7 @@ export default function AudioExtractorPage() {
           <aside className="space-y-4">
             <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
-                <Sparkles className="w-4 h-4 text-brand" aria-hidden="true" />
+                <Sliders className="w-4 h-4 text-brand" aria-hidden="true" />
                 <span>Audio extraction specs</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">

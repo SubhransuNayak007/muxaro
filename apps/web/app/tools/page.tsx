@@ -9,7 +9,6 @@ import {
   ListVideo,
   ArrowLeft,
   ArrowRight,
-  Sparkles,
   ArrowUpRight,
 } from 'lucide-react';
 import { constructMetadata, buildBreadcrumbsJsonLd } from '@/lib/seo';
@@ -106,7 +105,7 @@ export default function ToolsIndexPage() {
 
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-surface-elevated border border-brand-violet/30 text-xs font-semibold text-brand-violet mb-4 shadow-xs">
-              <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+              <Layers className="w-3.5 h-3.5" aria-hidden="true" />
               <span>All media tools in one place</span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-content tracking-tight">

@@ -9,7 +9,6 @@ import {
   Menu,
   X,
   Zap,
-  Feather,
   User,
   Download,
   LogOut,
@@ -18,7 +17,6 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { QuotaStatus } from '@/lib/types';
-import { useDeviceMode } from '@/lib/device-mode';
 import { useAuth } from '@/lib/auth-context';
 
 type QuotaLoadState = 'loading' | 'loaded' | 'error';
@@ -59,7 +57,6 @@ export default function Navbar() {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const accountButtonRef = useRef<HTMLButtonElement>(null);
 
-  const { lightweight, manualLightweight, toggleLightweight } = useDeviceMode();
   const { user, authenticated, loading: authLoading, logout } = useAuth();
 
   const [quota, setQuota] = useState<LiveQuotaSummary | null>(null);
@@ -68,7 +65,6 @@ export default function Navbar() {
   const [mounted, setMounted] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState<boolean>(false);
-  const [ecoTooltipVisible, setEcoTooltipVisible] = useState<boolean>(false);
   const [signingOut, setSigningOut] = useState<boolean>(false);
 
   // Desktop Navigation Sliding Indicator State
@@ -279,13 +275,6 @@ export default function Navbar() {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [mounted, updateSlider]);
-
-  const isLightweightActive = mounted && lightweight;
-  const lightweightLabel = isLightweightActive
-    ? manualLightweight
-      ? 'Disable lightweight mode'
-      : 'Lightweight mode active (system or network preference)'
-    : 'Enable lightweight mode';
 
   const isAdmin = Boolean(authenticated && user && user.role === 'admin');
   const userInitials = user
@@ -550,70 +539,6 @@ export default function Navbar() {
             </div>
           )}
 
-          {/* Eco Mode — Studio Utility Control */}
-          <div className="relative inline-flex items-center">
-            <button
-              type="button"
-              onClick={toggleLightweight}
-              onMouseEnter={() => setEcoTooltipVisible(true)}
-              onMouseLeave={() => setEcoTooltipVisible(false)}
-              onFocus={() => setEcoTooltipVisible(true)}
-              onBlur={() => setEcoTooltipVisible(false)}
-              title={
-                isLightweightActive
-                  ? 'Eco Mode active — low-power battery & performance mode. Click to disable.'
-                  : 'Enable Eco Mode — low-power battery & performance mode.'
-              }
-              aria-label={
-                isLightweightActive
-                  ? 'Eco Mode on. Click to disable.'
-                  : 'Enable Eco Mode for reduced battery and GPU load'
-              }
-              aria-pressed={mounted ? isLightweightActive : undefined}
-              className={`h-9 min-w-[36px] sm:min-w-[108px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
-                isLightweightActive
-                  ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
-                  : 'border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content'
-              }`}
-            >
-              <Feather className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Eco Mode</span>
-              <span
-                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded font-mono leading-none ${
-                  isLightweightActive
-                    ? 'bg-brand-violet text-white'
-                    : 'bg-surface-elevated text-content-secondary'
-                }`}
-              >
-                {isLightweightActive ? 'On' : 'Off'}
-              </span>
-            </button>
-
-            {ecoTooltipVisible && (
-              <div
-                role="tooltip"
-                className="absolute right-0 top-full mt-2 w-64 p-3 rounded-xl border border-line bg-surface shadow-xl text-xs z-50 pointer-events-none"
-              >
-                <div className="flex items-center gap-1.5 font-semibold text-content mb-1">
-                  <Feather className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
-                  <span>Eco Mode</span>
-                  <span
-                    className={`ml-auto text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                      isLightweightActive
-                        ? 'bg-brand-violet text-white'
-                        : 'bg-surface-elevated text-content-secondary'
-                    }`}
-                  >
-                    {isLightweightActive ? 'On' : 'Off'}
-                  </span>
-                </div>
-                <p className="text-content-secondary text-[11px] leading-relaxed">
-                  Low-power battery &amp; performance mode. Disables ambient animations and reduces GPU load to extend battery life.
-                </p>
-              </div>
-            )}
-          </div>
-
           {/* Theme Switcher Button */}
           <button
             type="button"
@@ -762,27 +687,6 @@ export default function Navbar() {
                 </Link>
               </div>
             )}
-
-            <div className="flex items-center justify-between px-1 pt-1">
-              <div className="flex flex-col">
-                <span className="text-xs font-medium text-content">Eco mode</span>
-                <span className="text-[11px] text-content-secondary">Reduced motion & battery saving</span>
-              </div>
-              <button
-                type="button"
-                onClick={toggleLightweight}
-                aria-pressed={mounted ? isLightweightActive : undefined}
-                aria-label="Toggle Eco mode"
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-medium transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
-                  isLightweightActive
-                    ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
-                    : 'border-line bg-surface-muted text-content-secondary hover:text-content'
-                }`}
-              >
-                <Feather className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>{isLightweightActive ? 'On' : 'Off'}</span>
-              </button>
-            </div>
           </div>
         </div>
       )}

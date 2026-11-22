@@ -46,6 +46,9 @@ export interface JobRecord {
   filename: string;
   filePath?: string;
   fileSizeBytes?: number;
+  directStreamUrl?: string;
+  directMimeType?: string;
+  deliveryMode?: 'zero-hop' | 'tunnel';
   downloadUrl: string;
   speed?: string;
   etaSeconds?: number;
@@ -124,10 +127,40 @@ function loadJobFromDisk(id: string): JobRecord | undefined {
   return undefined;
 }
 
+// Global shared in-memory job store preserved across Next.js route bundles, workers & HMR reloads
+const globalForJobManager = globalThis as unknown as {
+  __muxaroJobStore?: Map<string, JobRecord>;
+  __muxaroSubscribers?: Map<string, Set<JobSubscriber>>;
+  __muxaroAbortControllers?: Map<string, AbortController>;
+  muxaroJobManager?: JobManager;
+};
+
+const sharedJobs = globalForJobManager.__muxaroJobStore ?? new Map<string, JobRecord>();
+globalForJobManager.__muxaroJobStore = sharedJobs;
+
+const sharedSubscribers = globalForJobManager.__muxaroSubscribers ?? new Map<string, Set<JobSubscriber>>();
+globalForJobManager.__muxaroSubscribers = sharedSubscribers;
+
+const sharedAbortControllers = globalForJobManager.__muxaroAbortControllers ?? new Map<string, AbortController>();
+globalForJobManager.__muxaroAbortControllers = sharedAbortControllers;
+
+function getJsRuntimeArgs(): string[] {
+  try {
+    const { execSync } = require('node:child_process');
+    execSync('deno --version', { stdio: 'ignore' });
+    return ['--js-runtimes', 'deno'];
+  } catch {}
+
+  if (process.execPath) {
+    return ['--js-runtimes', 'node'];
+  }
+  return [];
+}
+
 class JobManager {
-  private jobs = new Map<string, JobRecord>();
-  private subscribers = new Map<string, Set<JobSubscriber>>();
-  private abortControllers = new Map<string, AbortController>();
+  private jobs = sharedJobs;
+  private subscribers = sharedSubscribers;
+  private abortControllers = sharedAbortControllers;
   private cleanupInterval: NodeJS.Timeout;
 
   constructor() {
@@ -340,6 +373,45 @@ class JobManager {
     const abortController = new AbortController();
     this.abortControllers.set(jobId, abortController);
 
+    // PHASE 1.1: ZERO-HOP CLIENT HANDOVER
+    // For Pinterest, TikTok, Twitter/X, Instagram, Vimeo progressive streams, and direct media,
+    // immediately transition to READY with direct origin CDN stream URL without downloading to server disk or /tmp.
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(params.sourceUrl);
+    if (!isYouTube && (params.sourceUrl.startsWith('http://') || params.sourceUrl.startsWith('https://'))) {
+      try {
+        const streamInfo = await this.resolveSocialPlatformStream(params.sourceUrl, abortController.signal);
+        if (streamInfo?.deliveryMode === 'zero-hop' && streamInfo.mediaUrl) {
+          job.status = 'ready';
+          job.progress = 100;
+          job.stage = 'READY';
+          job.stageMessage = 'Zero-hop direct stream ready for instant download';
+          job.deliveryMode = 'zero-hop';
+          job.directStreamUrl = streamInfo.mediaUrl;
+          job.directMimeType = streamInfo.mimeType || 'video/mp4';
+          job.downloadUrl = streamInfo.mediaUrl;
+          if (streamInfo.contentLength) {
+            job.fileSizeBytes = streamInfo.contentLength;
+          }
+          if (streamInfo.title && (!job.title || job.title === 'media_download')) {
+            job.title = streamInfo.title;
+            job.filename = sanitizeFilename(streamInfo.title, job.targetFormat);
+          }
+          job.completedAt = new Date().toISOString();
+          job.artifact = {
+            filename: job.filename,
+            downloadUrl: streamInfo.mediaUrl,
+            sizeBytes: job.fileSizeBytes || 0,
+            format: job.targetFormat,
+          };
+          persistJob(job);
+          this.notify(job);
+          return job;
+        }
+      } catch (zeroHopErr) {
+        console.warn('[JobManager] Zero-hop handover inspection failed, falling back to pipeline:', zeroHopErr);
+      }
+    }
+
     // SOLUTION 3: On serverless environments, run the cloud fallback synchronously
     // so the POST response already contains status:'ready'
     if (isServerless()) {
@@ -423,18 +495,24 @@ class JobManager {
         return;
       }
 
-      // Configure yt-dlp arguments
+      // Configure yt-dlp arguments with high-speed cut-through flags
       const args: string[] = [
+        '--force-ipv4',
         '--newline',
+        '--progress',
         '--no-warnings',
         '--no-playlist',
+        '--force-overwrites',
+        '--no-part',
         '--socket-timeout', '30',
+        ...getJsRuntimeArgs(),
       ];
 
-      // Format selection
+      // Format selection with resilient fallback to avoid format errors
+      const height = parseInt(job.targetResolution || '1080', 10) || 1080;
       if (isAudioOnly) {
         if (params.audioFormatId && params.audioFormatId !== 'source') {
-          args.push('-f', params.audioFormatId);
+          args.push('-f', `${params.audioFormatId}/ba/b`);
         } else {
           args.push('-f', 'ba/b');
         }
@@ -443,12 +521,11 @@ class JobManager {
         const audioId = params.audioFormatId;
 
         if (videoId && audioId) {
-          args.push('-f', `${videoId}+${audioId}/${videoId}+ba/${videoId}/best`);
+          args.push('-f', `${videoId}+${audioId}/${videoId}+ba/bv*[height<=${height}]+ba/b[height<=${height}]/best`);
         } else if (videoId) {
-          args.push('-f', `${videoId}+ba/${videoId}/best`);
+          args.push('-f', `${videoId}+ba/bv*[height<=${height}]+ba/b[height<=${height}]/best`);
         } else {
-          const height = parseInt(job.targetResolution || '1080', 10) || 1080;
-          args.push('-f', `bestvideo[height<=${height}]+bestaudio/best[height<=${height}]/best`);
+          args.push('-f', `bv*[height<=${height}]+ba/b[height<=${height}]/best`);
         }
       }
 
@@ -561,7 +638,7 @@ class JobManager {
   }
 
   /**
-   * Executes yt-dlp and parses stdout progress lines
+   * Executes yt-dlp with unbuffered stdio, stall watchdog & robust progress parsing
    */
   private runYtDlpDownload(
     job: JobRecord,
@@ -570,12 +647,49 @@ class JobManager {
     isAudioOnly: boolean
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      let resolved = false;
+
       const child = spawn('yt-dlp', args, {
         shell: false,
         windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+        },
       });
 
+      // Stall Watchdog: abort after 45s of absolute silence (zero stdout or stderr bytes)
+      let watchdogTimer: NodeJS.Timeout | null = null;
+      const resetWatchdog = () => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
+        watchdogTimer = setTimeout(() => {
+          if (!resolved) {
+            try {
+              child.kill('SIGTERM');
+              setTimeout(() => {
+                try { child.kill('SIGKILL'); } catch {}
+              }, 2000);
+            } catch {}
+            const timeoutErr = new Error('Download timed out: media stream stalled for 45 seconds without data.');
+            job.status = 'failed';
+            job.stage = 'FAILED';
+            job.stageMessage = timeoutErr.message;
+            job.error = {
+              code: 'ERR_DOWNLOAD_TIMEOUT',
+              message: timeoutErr.message,
+              retryable: true,
+            };
+            this.notify(job);
+            reject(timeoutErr);
+          }
+        }, 45000);
+      };
+
+      resetWatchdog();
+
       const abortHandler = () => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
         try {
           child.kill('SIGTERM');
         } catch {}
@@ -585,31 +699,38 @@ class JobManager {
       signal.addEventListener('abort', abortHandler, { once: true });
 
       let stderrLog = '';
+      const stderrLines: string[] = [];
 
       child.stdout.on('data', (chunk) => {
+        resetWatchdog();
         const text = chunk.toString('utf8');
-        const lines = text.split(/\r?\n/);
+        // Handle carriage returns and newlines cleanly
+        const lines = text.split(/[\r\n]+/);
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
           // Track stage transitions
-          if (trimmed.includes('[download] Destination:') || trimmed.includes('[download] Downloading video')) {
+          if (trimmed.includes('[download] Destination:') || trimmed.includes('[download] Downloading video') || trimmed.includes('[download] Downloading')) {
             if (!isAudioOnly) {
-              if (trimmed.includes('.f') && trimmed.includes('.mp4') || trimmed.includes('video')) {
-                job.status = 'downloading_video';
-                job.stage = 'DOWNLOADING_VIDEO';
-                job.stageMessage = 'Downloading video stream...';
-              } else if (trimmed.includes('.f') && trimmed.includes('.m4a') || trimmed.includes('audio')) {
+              if (trimmed.includes('.f') && (trimmed.includes('.m4a') || trimmed.includes('.opus') || trimmed.includes('.webm')) && !trimmed.includes('video')) {
                 job.status = 'downloading_audio';
                 job.stage = 'DOWNLOADING_AUDIO';
                 job.stageMessage = 'Downloading paired audio stream...';
+              } else {
+                job.status = 'downloading_video';
+                job.stage = 'DOWNLOADING_VIDEO';
+                job.stageMessage = 'Downloading video stream...';
               }
+            } else {
+              job.status = 'downloading_audio';
+              job.stage = 'DOWNLOADING_AUDIO';
+              job.stageMessage = 'Downloading audio track...';
             }
           }
 
-          if (trimmed.includes('[Merger] Merging formats into') || trimmed.includes('[ffmpeg] Merging')) {
+          if (trimmed.includes('[Merger]') || trimmed.includes('[ffmpeg] Merging') || trimmed.includes('Merging formats')) {
             job.status = 'merging';
             job.stage = 'MERGING';
             job.stageMessage = 'Merging audio and video streams...';
@@ -617,24 +738,29 @@ class JobManager {
             this.notify(job);
           }
 
-          // Parse progress: [download]  45.2% of ~ 15.20MiB at 4.25MiB/s ETA 00:03
-          const match = trimmed.match(
-            /\[download\]\s+(\d+\.?\d*)%\s+of\s+~?(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)/
-          );
+          // Parse progress from yt-dlp:
+          // Pattern 1: [download]  45.2% of ~ 15.20MiB at 4.25MiB/s ETA 00:03
+          // Pattern 2: [download]  45.2% of 15.20MiB at 4.25MiB/s
+          // Pattern 3: [download]  100% of 15.20MiB in 00:02
+          const matchPercent = trimmed.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+          if (matchPercent) {
+            const rawPercent = parseFloat(matchPercent[1]);
 
-          if (match) {
-            const rawPercent = parseFloat(match[1]);
-            const speed = match[3];
-            const etaStr = match[4];
+            // Speed matching
+            const speedMatch = trimmed.match(/at\s+([~0-9.]+[kKMGT]?i?B\/s)/);
+            if (speedMatch) {
+              job.speed = speedMatch[1];
+            }
 
-            job.speed = speed;
-
-            // Convert ETA (HH:MM:SS or MM:SS) to seconds
-            const etaParts = etaStr.split(':').map(Number);
-            if (etaParts.length === 2) {
-              job.etaSeconds = etaParts[0] * 60 + etaParts[1];
-            } else if (etaParts.length === 3) {
-              job.etaSeconds = etaParts[0] * 3600 + etaParts[1] * 60 + etaParts[2];
+            // ETA matching
+            const etaMatch = trimmed.match(/ETA\s+(\d+:\d+(?::\d+)?)/);
+            if (etaMatch) {
+              const etaParts = etaMatch[1].split(':').map(Number);
+              if (etaParts.length === 2) {
+                job.etaSeconds = etaParts[0] * 60 + etaParts[1];
+              } else if (etaParts.length === 3) {
+                job.etaSeconds = etaParts[0] * 3600 + etaParts[1] * 60 + etaParts[2];
+              }
             }
 
             // Map progress
@@ -656,32 +782,136 @@ class JobManager {
       });
 
       child.stderr.on('data', (chunk) => {
-        stderrLog += chunk.toString('utf8');
-        if (stderrLog.length > 4000) {
-          stderrLog = stderrLog.slice(-2000);
+        resetWatchdog();
+        const errText = chunk.toString('utf8');
+        stderrLog += errText;
+        const errLines = errText.split(/[\r\n]+/).map((l: string) => l.trim()).filter(Boolean);
+        for (const l of errLines) {
+          stderrLines.push(l);
+          if (stderrLines.length > 25) stderrLines.shift();
         }
       });
 
       child.on('error', (err) => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
         signal.removeEventListener('abort', abortHandler);
+        resolved = true;
+        job.status = 'failed';
+        job.stage = 'FAILED';
+        job.stageMessage = err.message;
+        job.error = {
+          code: 'ERR_PROCESS_SPAWN',
+          message: err.message,
+          retryable: true,
+        };
+        this.notify(job);
         reject(err);
       });
 
       child.on('close', (code) => {
+        if (watchdogTimer) clearTimeout(watchdogTimer);
         signal.removeEventListener('abort', abortHandler);
+        resolved = true;
         if (code === 0) {
           resolve();
         } else {
-          reject(new Error(stderrLog.trim() || `yt-dlp exited with code ${code}`));
+          const lastLines = stderrLines.slice(-5).join('; ');
+          const message = lastLines || stderrLog.trim() || `yt-dlp exited with error code ${code}`;
+          job.status = 'failed';
+          job.stage = 'FAILED';
+          job.stageMessage = message;
+          job.error = {
+            code: 'ERR_PROCESS_EXIT',
+            message,
+            retryable: true,
+          };
+          this.notify(job);
+          reject(new Error(message));
         }
       });
     });
   }
 
   /**
+   * Attempts to resolve a direct video/audio stream URL from social platforms
+   * (Pinterest, Twitter/X, Reddit, TikTok, Vimeo, Instagram, etc.)
+   */
+  private async resolveSocialPlatformStream(
+    url: string,
+    signal: AbortSignal
+  ): Promise<{ mediaUrl: string; title?: string; mimeType?: string; contentLength?: number; deliveryMode?: 'zero-hop' | 'tunnel' } | null> {
+    // 1. Try external multi-platform extractor module
+    try {
+      const extModule = './platform-extractors';
+      const mod: any = await import(extModule).catch(() => null);
+      if (mod && typeof mod.extractPlatformMedia === 'function') {
+        const extracted = await mod.extractPlatformMedia(url, { signal });
+        if (extracted?.mediaUrl || extracted?.url || extracted?.streamUrl) {
+          return {
+            mediaUrl: extracted.mediaUrl || extracted.url || extracted.streamUrl,
+            title: extracted.title,
+            mimeType: extracted.mimeType,
+            contentLength: extracted.contentLength,
+            deliveryMode: extracted.deliveryMode || 'tunnel',
+          };
+        }
+      }
+    } catch {}
+
+    // 2. Direct embedded open-graph / video tag scraping heuristic fallback
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal,
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      // If the URL is ALREADY a direct binary media stream (video/mp4, audio/mpeg, etc.)
+      if (!contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
+        return { mediaUrl: url, mimeType: contentType };
+      }
+
+      const html = await res.text();
+
+      // Look for og:video, og:video:secure_url, or twitter:player:stream
+      const ogVideoMatch =
+        html.match(/<meta\s+property=["']og:video(?::secure_url)?["']\s+content=["']([^"']+)["']/i) ||
+        html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:video(?::secure_url)?["']/i) ||
+        html.match(/<meta\s+name=["']twitter:player:stream["']\s+content=["']([^"']+)["']/i);
+
+      if (ogVideoMatch && ogVideoMatch[1] && ogVideoMatch[1].startsWith('http')) {
+        return { mediaUrl: ogVideoMatch[1] };
+      }
+
+      // Pinterest video pattern: https://v.pinimg.com/videos/mc/720p/...mp4
+      const pinMatch = html.match(/https:\/\/v\.pinimg\.com\/videos\/[^\s"']+\.mp4/i);
+      if (pinMatch) {
+        return { mediaUrl: pinMatch[0] };
+      }
+
+      // Twitter / X video pattern
+      const twMatch = html.match(/https:\/\/video\.twimg\.com\/[^\s"']+\.mp4/i);
+      if (twMatch) {
+        return { mediaUrl: twMatch[0] };
+      }
+
+      // Reddit video pattern
+      const redditMatch = html.match(/https:\/\/v\.redd\.it\/[^\s"']+\/DASH_[^\s"']+/i);
+      if (redditMatch) {
+        return { mediaUrl: redditMatch[0] };
+      }
+    } catch {}
+
+    return null;
+  }
+
+  /**
    * Executes a cloud/serverless fallback when yt-dlp binary is not installed in the container.
-   * On serverless (Vercel), this is called synchronously from createJob() so the POST
-   * response itself returns with status:'ready' and a valid downloadUrl.
+   * Resolves genuine audio/video streams via @distube/ytdl-core or direct streaming HTTP fetch.
    */
   private async executeCloudFallback(
     job: JobRecord,
@@ -689,76 +919,210 @@ class JobManager {
     isAudioOnly: boolean,
     signal: AbortSignal
   ): Promise<void> {
-    // 1. Stage: Downloading
     job.status = isAudioOnly ? 'downloading_audio' : 'downloading_video';
     job.stage = isAudioOnly ? 'DOWNLOADING_AUDIO' : 'DOWNLOADING_VIDEO';
-    job.stageMessage = isAudioOnly ? 'Downloading audio track...' : 'Downloading video track...';
-    job.progress = 25;
+    job.stageMessage = isAudioOnly ? 'Extracting lossless audio stream...' : 'Fetching adaptive video stream...';
+    job.progress = 30;
     this.notify(job);
 
-    if (!isServerless()) {
-      // On non-serverless, preserve the original timing delays for realistic UX
-      await new Promise((r) => setTimeout(r, 600));
-      if (signal.aborted) return;
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(job.sourceUrl);
+    let downloaded = false;
 
-      job.progress = 65;
-      this.notify(job);
+    if (isYouTube) {
+      try {
+        const { Ytdl } = await import('@distube/ytdl-core');
+        const ytdl = new Ytdl();
 
-      await new Promise((r) => setTimeout(r, 500));
-      if (signal.aborted) return;
-    } else {
-      // On serverless: skip artificial delays — respond immediately
-      job.progress = 65;
-      this.notify(job);
-    }
-
-    // 2. Stage: Multiplexing / Converting
-    job.status = isAudioOnly ? 'converting' : 'merging';
-    job.stage = isAudioOnly ? 'CONVERTING' : 'MERGING';
-    job.stageMessage = isAudioOnly ? 'Remuxing lossless audio container...' : 'Remuxing video streams...';
-    job.progress = 88;
-    this.notify(job);
-
-    if (!isServerless()) {
-      await new Promise((r) => setTimeout(r, 400));
-      if (signal.aborted) return;
-    }
-
-    // 3. Ensure a valid downloadable media file exists at finalPath
-    try {
-      const sampleCandidates = [
-        path.resolve('test_debug.mp4'),
-        path.resolve('.muxaro-artifacts/job_test_dl_123/sample_video.mp4'),
-      ];
-      let copied = false;
-      for (const cand of sampleCandidates) {
-        if (fs.existsSync(cand)) {
-          fs.copyFileSync(cand, finalPath);
-          copied = true;
-          break;
+        // 1. Resolve media details & optimal format
+        const info = await ytdl.getInfo(job.sourceUrl);
+        if (info.videoDetails?.title && (!job.title || job.title === 'media_download')) {
+          job.title = info.videoDetails.title;
+          job.filename = sanitizeFilename(info.videoDetails.title, job.targetFormat);
         }
+
+        let selectedFormat: any;
+        if (isAudioOnly) {
+          selectedFormat =
+            info.formats.find((f: any) => f.hasAudio && !f.hasVideo) ||
+            info.formats.find((f: any) => f.hasAudio);
+        } else {
+          const reqHeight = parseInt(job.targetResolution || '1080', 10) || 1080;
+          const vFormats = info.formats.filter((f: any) => f.hasVideo);
+          selectedFormat =
+            vFormats.find((f: any) => f.height === reqHeight) ||
+            vFormats.find((f: any) => f.height && f.height <= reqHeight) ||
+            vFormats[0];
+        }
+
+        if (selectedFormat?.url) {
+          job.directStreamUrl = selectedFormat.url;
+          job.directMimeType = selectedFormat.mimeType;
+          if (selectedFormat.contentLength) {
+            job.fileSizeBytes = parseInt(selectedFormat.contentLength, 10);
+          }
+        }
+
+        // 2. Download the real stream to finalPath
+        job.progress = 65;
+        this.notify(job);
+
+        const filterCriteria = isAudioOnly
+          ? { hasAudio: true, hasVideo: false }
+          : { hasVideo: true };
+
+        const dlStream = await ytdl.download(job.sourceUrl, {
+          filter: filterCriteria,
+          quality: isAudioOnly ? 'highestaudio' : 'highest',
+        });
+
+        const out = fs.createWriteStream(finalPath);
+        await new Promise<void>((resolve, reject) => {
+          dlStream.pipe(out);
+          dlStream.on('error', (err: any) => {
+            out.destroy();
+            reject(err);
+          });
+          out.on('error', reject);
+          out.on('finish', () => resolve());
+
+          signal.addEventListener(
+            'abort',
+            () => {
+              dlStream.destroy();
+              out.destroy();
+              reject(new Error('Operation aborted'));
+            },
+            { once: true }
+          );
+        });
+
+        downloaded = true;
+      } catch (ytErr) {
+        console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);
       }
-      if (!copied) {
-        fs.writeFileSync(finalPath, Buffer.from('MUXARO_MEDIA_STREAM_V1\n'));
+    } else if (job.sourceUrl.startsWith('http://') || job.sourceUrl.startsWith('https://')) {
+      try {
+        const streamInfo = await this.resolveSocialPlatformStream(job.sourceUrl, signal);
+
+        if (streamInfo?.mediaUrl) {
+          const directUrl = streamInfo.mediaUrl;
+          if (streamInfo.title && (!job.title || job.title === 'media_download')) {
+            job.title = streamInfo.title;
+            job.filename = sanitizeFilename(streamInfo.title, job.targetFormat);
+          }
+
+          // ZERO-HOP CLIENT HANDOVER:
+          // If the platform stream is progressive/unprotected, skip server download entirely.
+          if (streamInfo.deliveryMode === 'zero-hop') {
+            job.status = 'ready';
+            job.progress = 100;
+            job.stage = 'READY';
+            job.stageMessage = 'Zero-hop direct stream ready for instant download';
+            job.deliveryMode = 'zero-hop';
+            job.directStreamUrl = directUrl;
+            job.directMimeType = streamInfo.mimeType || 'video/mp4';
+            job.downloadUrl = directUrl;
+            if (streamInfo.contentLength) {
+              job.fileSizeBytes = streamInfo.contentLength;
+            }
+            job.completedAt = new Date().toISOString();
+            job.artifact = {
+              filename: job.filename,
+              downloadUrl: directUrl,
+              sizeBytes: job.fileSizeBytes || 0,
+              format: job.targetFormat,
+            };
+            persistJob(job);
+            this.notify(job);
+            return;
+          }
+
+          const resp = await fetch(directUrl, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            },
+            signal,
+          });
+
+          const respContentType = resp.headers.get('content-type') || streamInfo.mimeType || '';
+          const isHtml = respContentType.includes('text/html') || respContentType.includes('application/xhtml');
+
+          // NEVER assign directStreamUrl or download content if the response is an HTML webpage!
+          if (resp.ok && resp.body && !isHtml) {
+            job.directStreamUrl = directUrl;
+            job.directMimeType = respContentType;
+            if (streamInfo.contentLength && (!job.fileSizeBytes || job.fileSizeBytes < 1000)) {
+              job.fileSizeBytes = streamInfo.contentLength;
+            }
+            const headerCl = parseInt(resp.headers.get('content-length') || '0', 10);
+            if (headerCl > 1000) {
+              job.fileSizeBytes = headerCl;
+            }
+            const { Readable } = await import('node:stream');
+            const out = fs.createWriteStream(finalPath);
+            const readable = Readable.fromWeb(resp.body as any);
+
+            await new Promise<void>((resolve, reject) => {
+              readable.pipe(out);
+              readable.on('error', reject);
+              out.on('error', reject);
+              out.on('finish', () => resolve());
+            });
+
+            downloaded = true;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn('[JobManager] Direct stream fetch:', fetchErr);
       }
-    } catch {
-      fs.writeFileSync(finalPath, Buffer.from('MUXARO_MEDIA_STREAM_V1\n'));
     }
 
-    const stat = fs.statSync(finalPath);
+    if (!downloaded && fs.existsSync(job.sourceUrl)) {
+      try {
+        fs.copyFileSync(job.sourceUrl, finalPath);
+        downloaded = true;
+      } catch {}
+    }
 
-    // 4. Stage: Ready
+    let finalSize = job.fileSizeBytes || 0;
+    if (fs.existsSync(finalPath)) {
+      const stat = fs.statSync(finalPath);
+      if (stat.size > 0) {
+        finalSize = stat.size;
+        job.filePath = finalPath;
+      }
+    }
+
+    // STRICT GUARD: Under no circumstances should a < 1KB stub ever be marked ready or given a downloadUrl!
+    if (finalSize < 1000) {
+      if (fs.existsSync(finalPath)) {
+        try { fs.unlinkSync(finalPath); } catch {}
+      }
+      job.filePath = undefined;
+      job.directStreamUrl = undefined;
+      throw new Error(`Unable to fetch playable media for "${job.sourceUrl}". Resulting media file was incomplete or empty (${finalSize} bytes).`);
+    }
+
+    // Build signed/parameterized downloadUrl so any serverless instance can deliver the stream
+    const dlParams = new URLSearchParams();
+    dlParams.set('filename', job.filename);
+    if (job.directStreamUrl) {
+      dlParams.set('stream', job.directStreamUrl);
+    }
+    job.downloadUrl = `/api/v1/jobs/${job.id}/download?${dlParams.toString()}`;
+
+    // Stage: Ready
     job.status = 'ready';
     job.progress = 100;
     job.stage = 'READY';
     job.stageMessage = 'Media ready for instant download';
-    job.filePath = finalPath;
-    job.fileSizeBytes = stat.size;
+    job.fileSizeBytes = finalSize;
     job.completedAt = new Date().toISOString();
     job.artifact = {
       filename: job.filename,
       downloadUrl: job.downloadUrl,
-      sizeBytes: stat.size,
+      sizeBytes: finalSize,
       format: job.targetFormat,
     };
     this.notify(job);
@@ -855,9 +1219,6 @@ class JobManager {
 }
 
 // Global singleton instance preserved across Next.js module bundles and reloads
-const globalForJobManager = globalThis as unknown as {
-  muxaroJobManager?: JobManager;
-};
-
+// (globalForJobManager is already declared above with shared store fields)
 export const jobManager = globalForJobManager.muxaroJobManager ?? new JobManager();
 globalForJobManager.muxaroJobManager = jobManager;

@@ -1,28 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import { jobManager, OUTPUTS_DIR } from '@/lib/job-manager';
 import { formatContentDisposition, sanitizeFilename } from '@/lib/security-validator';
+import { streamTier0ToResponse, inferMime } from '@/lib/pipeline/tier0-passthrough';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-const MIME_MAP: Record<string, string> = {
-  mp4: 'video/mp4',
-  webm: 'video/webm',
-  mkv: 'video/x-matroska',
-  mp3: 'audio/mpeg',
-  m4a: 'audio/mp4',
-  opus: 'audio/opus',
-  flac: 'audio/flac',
-  wav: 'audio/wav',
-};
-
-function getMimeType(filename: string): string {
-  const ext = path.extname(filename).replace('.', '').toLowerCase();
-  return MIME_MAP[ext] || 'application/octet-stream';
-}
 
 function resolveJobFile(id: string, requestedFilename?: string | null): { filePath: string; filename: string } | null {
   const job = jobManager.getJob(id);
@@ -45,6 +29,30 @@ function resolveJobFile(id: string, requestedFilename?: string | null): { filePa
   return null;
 }
 
+function isForbiddenStreamUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '0.0.0.0' ||
+      host === '::1' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+      /^169\.254\./.test(host)
+    ) {
+      return true;
+    }
+    return parsed.protocol !== 'http:' && parsed.protocol !== 'https:';
+  } catch {
+    return true;
+  }
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -52,10 +60,55 @@ export async function GET(
   const { id } = params;
   const searchParams = req.nextUrl.searchParams;
   const requestedFilename = searchParams.get('filename') || searchParams.get('title');
+  const streamParam = searchParams.get('stream');
 
+  const job = jobManager.getJob(id);
   const fileInfo = resolveJobFile(id, requestedFilename);
+  const isInline = searchParams.get('inline') === '1' || searchParams.get('inline') === 'true';
 
-  if (!fileInfo) {
+  // 1. Fast path: Direct remote stream delivery via Tier 0 Zero-Hop Pass-Through
+  const candidateStreamUrl = streamParam || job?.directStreamUrl;
+  const localFileValid = fileInfo && fs.existsSync(fileInfo.filePath) && fs.statSync(fileInfo.filePath).size >= 1000;
+
+  if (!localFileValid && candidateStreamUrl && !isForbiddenStreamUrl(candidateStreamUrl)) {
+    try {
+      const safeFilename = sanitizeFilename(requestedFilename || job?.filename || 'media_download.mp4');
+      const rangeHeader = req.headers.get('range');
+
+      const remoteRes = await fetch(candidateStreamUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          ...(rangeHeader ? { Range: rangeHeader } : {}),
+        },
+        signal: req.signal,
+      });
+
+      if ((remoteRes.ok || remoteRes.status === 206) && remoteRes.body) {
+        const contentLength = remoteRes.headers.get('content-length')
+          ? parseInt(remoteRes.headers.get('content-length')!, 10)
+          : undefined;
+        const contentRange = remoteRes.headers.get('content-range') || undefined;
+        const contentType = remoteRes.headers.get('content-type') || job?.directMimeType || undefined;
+
+        return streamTier0ToResponse({
+          source: remoteRes.body,
+          filename: safeFilename,
+          contentLength,
+          contentRange,
+          contentType,
+          status: remoteRes.status,
+          signal: req.signal,
+          disposition: isInline ? 'inline' : 'attachment',
+        });
+      }
+    } catch (proxyErr) {
+      console.warn('[Download Proxy Error]', proxyErr);
+    }
+  }
+
+  // 2. Local disk file delivery via Tier 0 Zero-Hop Pass-Through
+  if (!fileInfo || !fs.existsSync(fileInfo.filePath)) {
     return NextResponse.json(
       {
         success: false,
@@ -89,12 +142,6 @@ export async function GET(
 
   const stat = fs.statSync(filePath);
   const totalSize = stat.size;
-  const mimeType = getMimeType(safeFilename);
-  const isInline = searchParams.get('inline') === '1' || searchParams.get('inline') === 'true';
-
-  const dispositionHeader = isInline
-    ? `inline; filename="${safeFilename}"`
-    : formatContentDisposition(safeFilename);
 
   // HTTP RFC 9110 Range Header handling
   const rangeHeader = req.headers.get('range');
@@ -117,35 +164,25 @@ export async function GET(
     }
 
     const chunkSize = end - start + 1;
-    const nodeStream = fs.createReadStream(filePath, { start, end });
-    const webStream = Readable.toWeb(nodeStream) as ReadableStream;
-
-    return new Response(webStream, {
+    return streamTier0ToResponse({
+      source: filePath,
+      filename: safeFilename,
+      contentLength: chunkSize,
+      range: { start, end },
+      contentRange: `bytes ${start}-${end}/${totalSize}`,
       status: 206,
-      headers: {
-        'Content-Type': mimeType,
-        'Content-Range': `bytes ${start}-${end}/${totalSize}`,
-        'Content-Length': String(chunkSize),
-        'Accept-Ranges': 'bytes',
-        'Content-Disposition': dispositionHeader,
-        'Cache-Control': 'public, max-age=3600',
-      },
+      signal: req.signal,
+      disposition: isInline ? 'inline' : 'attachment',
     });
   }
 
-  // Full file streaming via fs.createReadStream
-  const nodeStream = fs.createReadStream(filePath);
-  const webStream = Readable.toWeb(nodeStream) as ReadableStream;
-
-  return new Response(webStream, {
-    status: 200,
-    headers: {
-      'Content-Type': mimeType,
-      'Content-Length': String(totalSize),
-      'Accept-Ranges': 'bytes',
-      'Content-Disposition': dispositionHeader,
-      'Cache-Control': 'public, max-age=3600',
-    },
+  // Full file streaming via streamTier0ToResponse
+  return streamTier0ToResponse({
+    source: filePath,
+    filename: safeFilename,
+    contentLength: totalSize,
+    signal: req.signal,
+    disposition: isInline ? 'inline' : 'attachment',
   });
 }
 
@@ -154,7 +191,38 @@ export async function HEAD(
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
-  const fileInfo = resolveJobFile(id);
+  const searchParams = req.nextUrl.searchParams;
+  const requestedFilename = searchParams.get('filename') || searchParams.get('title');
+  const streamParam = searchParams.get('stream');
+
+  const job = jobManager.getJob(id);
+  const candidateStreamUrl = streamParam || job?.directStreamUrl;
+  const fileInfo = resolveJobFile(id, requestedFilename);
+
+  if (candidateStreamUrl && !isForbiddenStreamUrl(candidateStreamUrl)) {
+    try {
+      const remoteRes = await fetch(candidateStreamUrl, {
+        method: 'HEAD',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        signal: req.signal,
+      });
+
+      if (remoteRes.ok) {
+        const safeFilename = sanitizeFilename(requestedFilename || job?.filename || 'media_download.mp4');
+        const headers = new Headers();
+        headers.set('Content-Type', remoteRes.headers.get('content-type') || inferMime(safeFilename));
+        headers.set('Content-Disposition', formatContentDisposition(safeFilename));
+        headers.set('Accept-Ranges', 'bytes');
+        if (remoteRes.headers.get('content-length')) {
+          headers.set('Content-Length', remoteRes.headers.get('content-length')!);
+        }
+        return new Response(null, { status: 200, headers });
+      }
+    } catch {}
+  }
 
   if (!fileInfo) {
     return new Response(null, { status: 404 });
@@ -162,7 +230,7 @@ export async function HEAD(
 
   const stat = fs.statSync(fileInfo.filePath);
   const safeFilename = sanitizeFilename(fileInfo.filename);
-  const mimeType = getMimeType(safeFilename);
+  const mimeType = inferMime(safeFilename);
 
   return new Response(null, {
     status: 200,

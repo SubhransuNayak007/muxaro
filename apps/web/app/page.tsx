@@ -23,7 +23,6 @@ import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 import HeroOmnibox from '@/components/HeroOmnibox';
 import AdaptiveMediaCard from '@/components/AdaptiveMediaCard';
 import TrustStrip from '@/components/TrustStrip';
-import WhyChooseMuxaro from '@/components/WhyChooseMuxaro';
 import { api } from '@/lib/api-client';
 import { useDeviceMode } from '@/lib/device-mode';
 import { useAuth } from '@/lib/auth-context';
@@ -46,34 +45,34 @@ const CAPABILITIES = [
   {
     href: '/tools/media-converter',
     title: 'Convert Video',
-    description: 'Switch between video formats cleanly with zero quality degradation.',
+    description: 'Change video containers without re-encoding frames.',
     icon: Film,
     accentClass: 'bg-interactive text-brand-violet dark:text-content',
-    formats: ['MP4', 'MKV', 'WebM', 'MOV'],
+    formats: 'MP4 · MKV · WEBM',
   },
   {
     href: '/tools/audio-extractor',
     title: 'Extract Audio',
-    description: 'Save studio-quality audio from any video with customizable bitrates.',
+    description: 'Save original audio tracks with zero transcoding.',
     icon: Music,
     accentClass: 'bg-info-bg text-brand-blue dark:text-content',
-    formats: ['MP3', 'FLAC', 'WAV', 'AAC'],
+    formats: 'MP3 · FLAC · WAV',
   },
   {
     href: '/tools/audio-video-merger',
     title: 'Merge Video & Audio',
-    description: 'Combine high-res video streams with custom audio or commentary tracks.',
+    description: 'Combine separate video and audio streams cleanly.',
     icon: Layers,
     accentClass: 'bg-success-bg text-success',
-    formats: ['MP4', 'MKV', 'WebM', 'WAV'],
+    formats: 'MP4 · MKV · WEBM',
   },
   {
     href: '/tools/playlist-batch',
     title: 'Batch & Playlists',
-    description: 'Process full playlists or multi-file batches into a single archive.',
+    description: 'Download full playlists and multi-video queues.',
     icon: ListVideo,
     accentClass: 'bg-interactive text-brand-violet dark:text-content',
-    formats: ['MP4', 'MKV', 'MP3', 'ZIP'],
+    formats: 'MP4 · MKV · MP3',
   },
 ] as const;
 
@@ -399,12 +398,12 @@ export default function HomePage() {
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
           {/* Hero Header */}
           <div className="text-center max-w-3xl mx-auto mb-6 sm:mb-8">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-content tracking-tight leading-[1.1] mb-3">
-              Lossless Media Downloader &amp; Remuxer
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-content tracking-tight leading-[1.1] mb-3">
+              Lossless media downloader.
             </h1>
 
             <p className="text-base sm:text-lg text-content-secondary max-w-2xl mx-auto leading-relaxed">
-              Stream-copy video up to 8K and extract uncompressed audio. Zero conversion quality loss.
+              Save video up to 8K or extract original audio with zero re-encoding.
             </p>
           </div>
 
@@ -669,14 +668,15 @@ export default function HomePage() {
                 </div>
               </div>
             )}
+
+            {/* Quiet hairline-bordered spec line beneath the main workspace card */}
+            <TrustStrip />
           </div>
         </div>
       </section>
 
       {/* Main Content Container */}
       <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        {/* Core Reliability & Privacy Trust Strip */}
-        <TrustStrip />
         {/* Helpful Sign-In Prompt for Guest Inspection (non-blocking, preserves task) */}
         {!authLoading && !authenticated && manifest && !activeJob && (
           <div className="max-w-3xl mx-auto mb-5">
@@ -707,8 +707,7 @@ export default function HomePage() {
           </div>
         )}
 
-
-        {/* Concise 4-Item Capability Strip */}
+        {/* Compact Hairline-Bordered 4-Card Media Tools Grid */}
         <section className="pt-4 pb-12" aria-labelledby="capabilities-heading">
           <h2 id="capabilities-heading" className="sr-only">
             Media tools
@@ -721,7 +720,7 @@ export default function HomePage() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className="muxaro-card-interactive rounded-2xl p-5 flex flex-col group active:translate-y-px"
+                  className="rounded-2xl p-5 border border-line bg-surface hover:border-line-hover transition-colors flex flex-col group active:translate-y-px shadow-xs"
                 >
                   <div
                     className={`w-10 h-10 rounded-xl ${item.accentClass} flex items-center justify-center mb-3.5 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-hover:scale-105`}
@@ -735,24 +734,14 @@ export default function HomePage() {
                   <p className="text-sm text-content-secondary leading-relaxed">
                     {item.description}
                   </p>
-                  <div className="mt-4 pt-3.5 border-t border-line/60 flex flex-wrap gap-1.5 items-center">
-                    {item.formats.map((fmt) => (
-                      <span
-                        key={fmt}
-                        className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-interactive text-content-secondary border border-line/60 group-hover:border-brand-violet/40 transition-colors duration-150"
-                      >
-                        {fmt}
-                      </span>
-                    ))}
+                  <div className="mt-4 pt-3.5 border-t border-line text-[11px] font-mono text-content-secondary select-none">
+                    {item.formats}
                   </div>
                 </Link>
               );
             })}
           </div>
         </section>
-
-        {/* Why Creators Choose MUXARO Comparison Module */}
-        <WhyChooseMuxaro />
       </div>
     </div>
   );

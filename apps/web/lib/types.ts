@@ -93,6 +93,9 @@ export interface ProcessingJob {
   sourceUrl?: string;
   outputFilename?: string;
   outputSizeBytes?: number;
+  deliveryMode?: 'zero-hop' | 'tunnel';
+  directStreamUrl?: string;
+  fileSizeBytes?: number;
   artifact?: {
     size?: number;
     filename?: string;

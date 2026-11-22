@@ -20,7 +20,6 @@ import {
   HelpCircle,
   ArrowDownLeft,
   ArrowUpRight,
-  Sparkles,
   Info,
   AlertCircle,
   Gift,
@@ -879,7 +878,7 @@ export default function CreditsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-6 pt-6 border-t border-line-subtle">
               <div>
                 <div className="flex items-center gap-2 text-xs font-semibold text-content mb-1">
-                  <Sparkles className="w-3.5 h-3.5 text-brand-indigo shrink-0" aria-hidden="true" />
+                  <RefreshCw className="w-3.5 h-3.5 text-brand-indigo shrink-0" aria-hidden="true" />
                   <span>Rolling 24-hour refresh</span>
                 </div>
                 <p className="text-xs text-content-secondary leading-relaxed">

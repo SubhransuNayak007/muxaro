@@ -21,7 +21,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  Sparkles,
   RotateCcw,
   Download,
   Sliders,
@@ -448,7 +447,7 @@ export function ConvertTool() {
             >
               <div className="flex items-start gap-3">
                 {remuxFeasibility.feasible ? (
-                  <Sparkles className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
                 ) : (
                   <Zap className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 )}

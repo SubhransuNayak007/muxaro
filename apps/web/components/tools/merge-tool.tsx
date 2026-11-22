@@ -29,7 +29,6 @@ import {
   ArrowRight,
   X,
   Play,
-  Sparkles,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { useJobStream } from '@/hooks/use-job-stream';

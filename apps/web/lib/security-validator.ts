@@ -76,7 +76,11 @@ export function validateMediaUrl(rawUrl: string): UrlValidationResult {
   const hostname = parsed.hostname.toLowerCase();
 
   // Strip trailing dot if present
-  const cleanHostname = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
+  let cleanHostname = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname;
+  // Strip IPv6 brackets if present e.g. [::1] -> ::1
+  if (cleanHostname.startsWith('[') && cleanHostname.endsWith(']')) {
+    cleanHostname = cleanHostname.slice(1, -1);
+  }
 
   if (BLOCKED_HOSTNAMES.has(cleanHostname)) {
     return { valid: false, normalizedUrl: '', error: 'Access to internal or local hosts is prohibited.' };
