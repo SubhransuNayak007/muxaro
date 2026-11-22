@@ -7,10 +7,12 @@ export function middleware(request: NextRequest) {
   const url = request.nextUrl.clone();
   const host = request.headers.get('host') || '';
 
-  // 1. Domain Consolidation (muxaro.vercel.app & www.muxaro.app -> muxaro.app)
+  // 1. Domain Consolidation (www.muxaro.app -> muxaro.app)
+  // Only redirect vercel.app if ENFORCE_CUSTOM_DOMAIN=true so vercel preview & staging remains testable
+  const shouldRedirectVercel = process.env.ENFORCE_CUSTOM_DOMAIN === 'true' && host.includes('muxaro.vercel.app');
   if (
     process.env.NODE_ENV === 'production' &&
-    (host.includes('muxaro.vercel.app') || host.startsWith('www.'))
+    (shouldRedirectVercel || host.startsWith('www.'))
   ) {
     url.host = CANONICAL_HOST;
     url.port = '';
