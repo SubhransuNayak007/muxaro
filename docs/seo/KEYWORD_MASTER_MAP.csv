@@ -1,31 +1,51 @@
 Keyword,Search Intent,US Monthly Volume,Global Monthly Volume,Keyword Difficulty,Target URL,Schema Type,Priority,Content Stage
-online audio extractor,Transactional,42000,185000,48,https://muxaro.com/tools/audio-extractor,SoftwareApplication;HowTo,P0,Production
-extract audio from video online,Transactional,33000,145000,52,https://muxaro.com/tools/audio-extractor,SoftwareApplication;HowTo,P0,Production
-video audio merger,Transactional,27000,110000,44,https://muxaro.com/tools/audio-video-merger,SoftwareApplication;HowTo,P0,Production
-merge audio and video online,Transactional,22000,95000,46,https://muxaro.com/tools/audio-video-merger,SoftwareApplication;HowTo,P0,Production
-online media converter,Transactional,60000,280000,65,https://muxaro.com/tools/media-converter,SoftwareApplication,P0,Production
-batch media converter,Transactional,8500,38000,34,https://muxaro.com/tools/batch-processing,SoftwareApplication,P1,Production
-stream copy mp4 online,Transactional,3200,14000,22,https://muxaro.com/tools/audio-video-merger,TechArticle,P1,Production
-lossless aac demuxer,Transactional,1800,7500,18,https://muxaro.com/tools/audio-extractor,TechArticle,P1,Production
-combine video and audio track online,Transactional,6400,28000,38,https://muxaro.com/tools/audio-video-merger,SoftwareApplication;HowTo,P1,Production
-extract opus from webm,Transactional,2200,9800,20,https://muxaro.com/tools/audio-extractor,HowTo,P1,Production
-mp4 vs webm,Informational,38000,165000,42,https://muxaro.com/docs/formats,TechArticle,P0,Production
-container vs codec,Informational,14000,62000,31,https://muxaro.com/docs/formats,TechArticle,P0,Production
-opus vs aac,Informational,9800,44000,28,https://muxaro.com/docs/audio-quality,TechArticle,P0,Production
-4k vs 1080p bitrate,Informational,12000,52000,36,https://muxaro.com/docs/resolutions,TechArticle,P0,Production
-is 320kbps mp3 real from youtube,Informational,4500,21000,24,https://muxaro.com/docs/audio-quality,TechArticle;FAQPage,P0,Production
-av1 vs vp9,Informational,8200,39000,30,https://muxaro.com/docs/resolutions,TechArticle,P1,Production
-dash streams explained,Informational,2400,11500,19,https://muxaro.com/docs/resolutions,TechArticle,P1,Production
-lossy vs lossless audio myths,Informational,5100,24000,26,https://muxaro.com/docs/audio-quality,TechArticle,P1,Production
-isobmff atom hierarchy,Informational,1200,5800,16,https://muxaro.com/docs/formats,TechArticle,P2,Production
-why separates audio video dash,Informational,1600,7200,18,https://muxaro.com/docs/resolutions,TechArticle,P1,Production
-audio video out of sync fix,Diagnostic,18000,78000,39,https://muxaro.com/docs/troubleshooting,TechArticle;FAQPage,P0,Production
-moov atom not found fix,Diagnostic,6200,28000,26,https://muxaro.com/docs/troubleshooting,TechArticle;FAQPage,P0,Production
-fix variable frame rate audio desync,Diagnostic,3100,13500,21,https://muxaro.com/docs/troubleshooting,TechArticle,P1,Production
-faststart mp4 ffmpeg,Diagnostic,4800,22000,19,https://muxaro.com/docs/formats,TechArticle,P1,Production
-http 429 too many requests streaming,Diagnostic,5500,26000,25,https://muxaro.com/docs/troubleshooting,TechArticle,P1,Production
-pts dts drift video,Diagnostic,1400,6100,17,https://muxaro.com/docs/troubleshooting,TechArticle,P2,Production
-unsupported container format webm,Diagnostic,2800,12000,22,https://muxaro.com/docs/troubleshooting,TechArticle,P1,Production
-muxaro media workspace,Navigational,1200,5000,12,https://muxaro.com/,WebApplication,P0,Production
-muxaro rolling quota,Navigational,600,2500,10,https://muxaro.com/docs/faq,FAQPage,P1,Production
-muxaro copyright dmca procedure,Navigational,450,1900,8,https://muxaro.com/legal/dmca,TechArticle,P1,Production
+yt video downloader,Transactional,1850000,14800000,84,https://muxaro.app/,WebApplication;HowTo,P0,Production
+youtube video downloader 4k,Transactional,115000,680000,62,https://muxaro.app/,WebApplication;VideoObject;FAQPage,P0,Production
+youtube to mp4 1080p,Transactional,460000,2950000,78,https://muxaro.app/,WebApplication;HowTo,P0,Production
+extract audio from youtube,Transactional,92000,490000,58,https://muxaro.app/tools/audio-extractor,SoftwareApplication;HowTo,P0,Production
+youtube to mp3 converter,Transactional,1250000,10200000,86,https://muxaro.app/convert/youtube-to-mp3,SoftwareApplication;HowTo,P0,Production
+download youtube video 60fps,Transactional,42000,230000,45,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+youtube shorts downloader 1080p,Transactional,140000,880000,52,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+free online video downloader,Transactional,215000,1420000,71,https://muxaro.app/,WebApplication,P0,Production
+youtube audio downloader high quality,Transactional,68000,390000,49,https://muxaro.app/tools/audio-extractor,SoftwareApplication;FAQPage,P0,Production
+download 8k youtube video,Transactional,18000,95000,38,https://muxaro.app/,TechArticle;WebApplication,P1,Production
+mkv to mp4 online free,Transactional,65000,340000,38,https://muxaro.app/convert/mkv-to-mp4,SoftwareApplication;HowTo,P0,Production
+webm to mp4 60fps,Transactional,24000,125000,32,https://muxaro.app/convert/webm-to-mp4,SoftwareApplication;HowTo,P0,Production
+youtube to flac 24bit,Transactional,15500,72000,28,https://muxaro.app/convert/youtube-to-flac,SoftwareApplication;TechArticle,P0,Production
+youtube to wav lossless,Transactional,38000,195000,41,https://muxaro.app/convert/youtube-to-wav,SoftwareApplication;HowTo,P0,Production
+extract opus from webm,Transactional,3800,19500,21,https://muxaro.app/tools/audio-extractor,HowTo;FAQPage,P1,Production
+mov to mp4 converter fast,Transactional,48000,255000,36,https://muxaro.app/convert/mov-to-mp4,SoftwareApplication;HowTo,P0,Production
+vp9 to h264 converter,Transactional,9200,48000,24,https://muxaro.app/convert/vp9-to-h264,SoftwareApplication;TechArticle,P1,Production
+av1 to mp4 converter,Transactional,6800,34000,22,https://muxaro.app/convert/av1-to-mp4,SoftwareApplication;FAQPage,P1,Production
+ts to mp4 converter online,Transactional,19500,102000,30,https://muxaro.app/convert/ts-to-mp4,SoftwareApplication;HowTo,P1,Production
+m4a to mp3 320kbps,Transactional,31000,168000,33,https://muxaro.app/convert/m4a-to-mp3,SoftwareApplication;HowTo,P0,Production
+ad free youtube downloader,Commercial,34000,175000,39,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+youtube downloader no popups,Commercial,26000,128000,34,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+savefrom alternative no malware,Commercial,21000,105000,31,https://muxaro.app/alternatives/savefrom-net,SoftwareApplication;FAQPage,P0,Production
+y2mate alternative without virus,Commercial,28000,152000,35,https://muxaro.app/alternatives/y2mate,SoftwareApplication;FAQPage,P0,Production
+safe youtube downloader no virus,Commercial,48000,245000,42,https://muxaro.app/docs/security,TechArticle;FAQPage,P0,Production
+cobalt tools alternative,Navigational,10500,54000,26,https://muxaro.app/alternatives/cobalt-tools,SoftwareApplication;FAQPage,P0,Production
+ytmp3 safe alternative no redirect,Commercial,17500,92000,29,https://muxaro.app/alternatives/ytmp3,SoftwareApplication;HowTo,P0,Production
+convert large video file 4gb free,Transactional,14000,72000,27,https://muxaro.app/tools/media-converter,SoftwareApplication;HowTo,P0,Production
+online video converter no file size limit,Transactional,23000,118000,33,https://muxaro.app/tools/media-converter,SoftwareApplication;FAQPage,P0,Production
+cloudconvert alternative free large files,Commercial,8400,44000,25,https://muxaro.app/alternatives/cloudconvert,SoftwareApplication;FAQPage,P1,Production
+merge video and audio online without re encoding,Transactional,9400,49000,26,https://muxaro.app/tools/audio-video-merger,SoftwareApplication;TechArticle,P0,Production
+combine video and audio track online free,Transactional,21000,108000,37,https://muxaro.app/tools/audio-video-merger,SoftwareApplication;HowTo,P0,Production
+remux video no quality loss online,Transactional,4600,24000,23,https://muxaro.app/tools/audio-video-merger,TechArticle;FAQPage,P1,Production
+stitch 1080p youtube video with audio,Technical,6500,33000,25,https://muxaro.app/docs/resolutions,TechArticle;HowTo,P1,Production
+youtube playlist downloader online,Transactional,170000,920000,57,https://muxaro.app/tools/playlist-batch,SoftwareApplication;HowTo,P0,Production
+batch video converter online 4gb,Transactional,5800,30000,24,https://muxaro.app/tools/batch-processing,SoftwareApplication;FAQPage,P1,Production
+download youtube playlist to zip,Transactional,24000,126000,35,https://muxaro.app/tools/playlist-batch,SoftwareApplication;HowTo,P0,Production
+tiktok video downloader no watermark hd,Transactional,340000,2550000,68,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+instagram reel downloader 1080p,Transactional,290000,220000,65,https://muxaro.app/,WebApplication;HowTo,P0,Production
+twitter video downloader high resolution,Transactional,115000,760000,54,https://muxaro.app/,WebApplication;FAQPage,P0,Production
+mp4 vs webm,Informational,38000,165000,42,https://muxaro.app/docs/formats,TechArticle,P0,Production
+container vs codec,Informational,14000,62000,31,https://muxaro.app/docs/formats,TechArticle,P0,Production
+opus vs aac,Informational,9800,44000,28,https://muxaro.app/docs/audio-quality,TechArticle,P0,Production
+4k vs 1080p bitrate,Informational,12000,52000,36,https://muxaro.app/docs/resolutions,TechArticle,P0,Production
+is 320kbps mp3 real from youtube,Informational,4500,21000,24,https://muxaro.app/docs/audio-quality,TechArticle;FAQPage,P0,Production
+av1 vs vp9,Informational,8200,39000,30,https://muxaro.app/docs/resolutions,TechArticle,P1,Production
+dash streams explained,Informational,2400,11500,19,https://muxaro.app/docs/resolutions,TechArticle,P1,Production
+audio video out of sync fix,Diagnostic,18000,78000,39,https://muxaro.app/docs/troubleshooting,TechArticle;FAQPage,P0,Production
+moov atom not found fix,Diagnostic,6200,28000,26,https://muxaro.app/docs/troubleshooting,TechArticle;FAQPage,P0,Production
+muxaro media workspace,Navigational,1200,5000,12,https://muxaro.app/,WebApplication,P0,Production

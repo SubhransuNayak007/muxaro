@@ -21,23 +21,29 @@ const jetbrainsMono = JetBrains_Mono({
   variable: '--font-mono',
 });
 
-const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.pages.dev')
+const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.app')
   .trim()
   .replace(/\/+$/, '');
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: 'MUXARO — Your Media. One Powerful Workspace.',
+  title: 'MUXARO — Universal Video Downloader & Lossless Media Workspace',
   description:
-    'Convert videos, extract studio-grade audio, and combine tracks in one fast, private workspace.',
+    'Download up to 8K video, extract lossless 320 kbps MP3 & studio FLAC, or convert formats cleanly. 100% ad-free with a 4 GB free limit.',
   keywords: [
+    'yt video downloader',
+    'youtube video downloader 4k',
+    'youtube to mp4 1080p',
+    'extract audio from youtube',
+    'youtube to mp3 converter',
+    'download youtube video 60fps',
+    'free online video downloader',
+    'lossless audio extractor',
+    'merge video and audio online',
+    'ad free youtube downloader',
     'media converter',
-    'video converter',
-    'audio extractor',
-    'merge video and audio',
-    'lossless audio',
-    '8k video processing',
     'muxaro workspace',
+    '4gb media converter',
   ],
   alternates: {
     canonical: '/',

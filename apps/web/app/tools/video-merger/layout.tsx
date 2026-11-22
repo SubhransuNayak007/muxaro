@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import {
   constructMetadata,
   buildToolSoftwareAppJsonLd,
+  buildHowToJsonLd,
   buildBreadcrumbsJsonLd,
 } from '@/lib/seo';
 
@@ -17,6 +18,7 @@ export const metadata: Metadata = constructMetadata({
     'concatenate mp4',
     'video merger online',
     'stitch video clips',
+    'merge clips without watermark',
   ],
 });
 
@@ -28,13 +30,34 @@ export default function VideoMergerLayout({
   const softwareAppJsonLd = buildToolSoftwareAppJsonLd({
     name: 'MUXARO Video Clip Joiner',
     description:
-      'Seamless multi-clip video concatenation utility with presentation timestamp synchronization.',
+      'Seamless multi-clip video concatenation utility with presentation timestamp synchronization and zero watermarks.',
     path: '/tools/video-merger',
     features: [
-      'Multi-clip video concatenation',
-      'Smooth frame and timestamp alignment',
-      'Support for uniform codec stream stitching',
-      'Downloadable as unified continuous MP4/MKV',
+      'Multi-clip video concatenation up to 4 GB',
+      'Smooth frame and presentation timestamp (PTS) alignment',
+      'Support for uniform codec stream stitching without re-encoding',
+      'Downloadable as unified continuous MP4/MKV with zero watermark',
+    ],
+  });
+
+  const howToJsonLd = buildHowToJsonLd({
+    name: 'How to Join Multiple Video Clips Online into One File',
+    description:
+      'Step-by-step guide to concatenating multiple MP4 or MKV clips into a continuous video stream without quality loss.',
+    path: '/tools/video-merger',
+    steps: [
+      {
+        name: 'Upload Video Clips',
+        text: 'Add two or more video files in the order you want them merged.',
+      },
+      {
+        name: 'Configure Sequence & Alignment',
+        text: 'Arrange playback sequence and confirm resolution and codec compatibility.',
+      },
+      {
+        name: 'Concatenate and Export',
+        text: 'Merge clips into a seamless single video container and download immediately.',
+      },
     ],
   });
 
@@ -49,6 +72,10 @@ export default function VideoMergerLayout({
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareAppJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(howToJsonLd) }}
       />
       <script
         type="application/ld+json"

@@ -58,11 +58,12 @@ function parseHeight(stream: MediaStream): number {
 
 function getQualityName(height: number): string {
   if (height >= 4320) return '8K Ultra HD';
-  if (height >= 2160) return 'Ultra HD';
+  if (height >= 2160) return '4K Ultra HD';
   if (height >= 1440) return 'Quad HD';
   if (height >= 1080) return 'Full HD';
   if (height >= 720) return 'HD';
   if (height >= 480) return 'Standard';
+  if (height >= 360) return 'Mobile';
   if (height > 0) return 'Compact';
   return 'Original';
 }
@@ -233,11 +234,21 @@ export function normalizeVideoOptions(
     const { stream, height, fps, fpsBucket, hdr } = item;
     const resolutionLabel =
       height >= 4320
-        ? '8K'
+        ? '8K UHD'
         : height >= 2160
-        ? '4K'
+        ? '4K UHD'
         : height >= 1440
         ? '1440p'
+        : height === 1080 && fpsBucket >= 55
+        ? '1080p60'
+        : height === 1080
+        ? '1080p'
+        : height >= 720
+        ? '720p'
+        : height >= 480
+        ? '480p'
+        : height >= 360
+        ? '360p'
         : height > 0
         ? `${height}p`
         : String(stream.resolutionLabel || 'Original');

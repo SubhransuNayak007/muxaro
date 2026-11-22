@@ -32,6 +32,57 @@ const nextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'X-DNS-Prefetch-Control',
+            value: 'on',
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=63072000; includeSubDomains; preload',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'SAMEORIGIN',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin',
+          },
+        ],
+      },
+      {
+        source: '/(robots.txt|sitemap.xml|llms.txt|llms-full.txt)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800',
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+        ],
+      },
+      {
+        source: '/brand/:path*',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=2592000',
+          },
+        ],
+      },
+    ];
+  },
   ...(isCloudflarePages
     ? {
         output: 'export',

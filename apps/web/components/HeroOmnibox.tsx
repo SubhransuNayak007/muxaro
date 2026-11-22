@@ -328,7 +328,7 @@ export default function HeroOmnibox({
             onChange={(e) => onUrlChange(e.target.value)}
             onFocus={() => onFocusChange?.(true)}
             onBlur={() => onFocusChange?.(false)}
-            placeholder="Paste URL from YouTube, Instagram, X, TikTok, Reddit, Vimeo…"
+            placeholder="Paste link from YouTube, Instagram, X, TikTok, Vimeo…"
             aria-label="Media URL input"
             className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary text-sm sm:text-base font-sans focus:outline-none focus:ring-0 px-2 py-1 select-text"
           />
@@ -413,46 +413,54 @@ export default function HeroOmnibox({
             <button
               type="submit"
               disabled={probing || !url.trim()}
-              aria-label={probing ? 'Probing media streams' : 'Analyse media URL'}
-              className="muxaro-btn-primary px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 whitespace-nowrap active:translate-y-px transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface shadow-sm"
+              aria-label={probing ? 'Analyzing media link' : 'Analyze media link'}
+              className={`px-3.5 sm:px-5 py-2 min-h-[38px] sm:min-h-[40px] rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-[0.98] transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface shadow-sm select-none ${
+                url.trim() && !probing
+                  ? 'bg-brand-violet hover:bg-brand-violet/90 text-white shadow-md shadow-brand-violet/25 cursor-pointer ring-1 ring-brand-violet/50'
+                  : 'bg-surface-elevated text-content-secondary/60 border border-line cursor-not-allowed opacity-60'
+              }`}
             >
               {probing ? (
                 <Loader2 className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" />
               ) : (
-                <ArrowUp className="w-4 h-4" aria-hidden="true" />
+                <Sparkles className="w-4 h-4 text-amber-300 dark:text-amber-200" aria-hidden="true" />
               )}
-              <span>{probing ? 'Probing…' : 'Analyse'}</span>
+              <span>{probing ? 'Analyzing…' : 'Analyze'}</span>
             </button>
           </div>
         </form>
       </div>
 
-      {/* Monochrome-to-Color Supported Platform Badge Strip */}
-      <div className="w-full">
-        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+      {/* Sleek, Non-Clickable Informational Supported Platform Strip */}
+      <div
+        role="region"
+        aria-label="Supported media platforms"
+        className="w-full flex items-center justify-center py-1"
+      >
+        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs max-w-full">
+          <span className="text-[11px] font-medium text-content-secondary shrink-0 mr-1 select-none">
+            Supported:
+          </span>
           {SUPPORTED_PLATFORMS.map((platform) => {
             const isDetected = detectedPlatform === platform.id;
             return (
-              <button
+              <span
                 key={platform.id}
-                type="button"
-                onClick={() => handleBadgeClick(platform.id)}
-                title={`Supported platform: ${platform.name} (Lossless up to 8K)`}
-                aria-label={`Supported platform: ${platform.name}`}
-                className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors duration-150 select-none active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet ${
+                title={`${platform.name} supported (Lossless up to 8K)`}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors duration-150 select-none shrink-0 ${
                   isDetected
-                    ? `${platform.activeBgClass} ${platform.activeBorderClass} ${platform.colorClass} font-semibold shadow-xs`
-                    : `bg-surface border-line text-content-secondary hover:bg-surface-elevated hover:border-line ${platform.hoverColorClass}`
+                    ? `${platform.activeBgClass} ${platform.activeBorderClass} ${platform.colorClass} font-semibold ring-1 ring-current shadow-xs`
+                    : 'bg-surface border-line/60 text-content-secondary/70'
                 }`}
               >
                 <PlatformIcon
                   platform={platform.id}
-                  className={`w-3.5 h-3.5 shrink-0 transition-colors duration-150 ${
-                    isDetected ? platform.colorClass : 'text-content-secondary'
-                  } ${platform.hoverColorClass}`}
+                  className={`w-3 h-3 shrink-0 ${
+                    isDetected ? platform.colorClass : 'text-content-secondary/60'
+                  }`}
                 />
-                <span className="text-[11px] leading-tight">{platform.name}</span>
-              </button>
+                <span className="leading-none">{platform.name}</span>
+              </span>
             );
           })}
         </div>

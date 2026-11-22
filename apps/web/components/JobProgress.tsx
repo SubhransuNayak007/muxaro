@@ -109,6 +109,38 @@ function formatLaneLabel(lane?: ProcessingLane): string {
   return 'Standard';
 }
 
+export const PROGRESS_STAGES = [
+  { key: 'preparing', label: 'Preparing', desc: 'Validating & stream probe' },
+  { key: 'downloading', label: 'Downloading Video & Audio', desc: 'DASH / adaptive streams' },
+  { key: 'merging', label: 'Merging with FFmpeg', desc: 'Audio transcode & mux' },
+  { key: 'ready', label: 'Ready', desc: 'Verified & ready to save' },
+] as const;
+
+export function computeStageIndex(job: ExtendedProcessingJob): number {
+  if (job.status === 'READY') return 3;
+  const rawStage = (job.progressStage || job.stageMessage || '').toLowerCase();
+  const progress = Number.isFinite(job.progress) ? job.progress : 0;
+
+  if (
+    rawStage.includes('merge') ||
+    rawStage.includes('ffmpeg') ||
+    rawStage.includes('mux') ||
+    rawStage.includes('transcode') ||
+    progress >= 75
+  ) {
+    return 2;
+  }
+  if (
+    rawStage.includes('download') ||
+    rawStage.includes('video') ||
+    rawStage.includes('audio') ||
+    progress >= 15
+  ) {
+    return 1;
+  }
+  return 0;
+}
+
 function mergeBackendPayload(
   prev: ExtendedProcessingJob,
   raw: ExtendedProcessingJob
@@ -606,6 +638,27 @@ export default function JobProgress({
     setTimeout(() => setDownloadInitiated(false), 3000);
   };
 
+  const triggerBrowserSave = () => {
+    handleDownloadClick();
+    if (resolvedDownloadUrl && typeof document !== 'undefined') {
+      try {
+        const anchor = document.createElement('a');
+        anchor.href = resolvedDownloadUrl;
+        if (job.outputFilename) {
+          anchor.download = job.outputFilename;
+        } else {
+          anchor.setAttribute('download', '');
+        }
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+      } catch {
+        // Fallback to standard anchor navigation
+      }
+    }
+  };
+
   const handleBackgroundDownload = async () => {
     if (!resolvedDownloadUrl || !job.id) return;
     const result = await startBackgroundDownload({
@@ -637,6 +690,8 @@ export default function JobProgress({
   const safeProgress = hasRealProgress
     ? Math.max(0, Math.min(100, Math.round(job.progress)))
     : 0;
+
+  const currentStageIdx = computeStageIndex(job);
 
   const isAudioOnly =
     job.jobType === 'extract_audio' ||
@@ -811,6 +866,70 @@ export default function JobProgress({
             </div>
           </div>
 
+          {/* Real Multi-Stage Progress Stepper */}
+          <div className="w-full py-2" aria-label="Processing stages">
+            <div className="grid grid-cols-4 gap-2 sm:gap-3 relative">
+              {PROGRESS_STAGES.map((stg, idx) => {
+                const isCompleted = currentStageIdx > idx || job.status === 'READY';
+                const isActive = currentStageIdx === idx && job.status !== 'READY' && job.status !== 'FAILED';
+                const isFailed = currentStageIdx === idx && (job.status === 'FAILED' || job.status === 'CANCELLED');
+
+                return (
+                  <div key={stg.key} className="flex flex-col items-center text-center relative select-none">
+                    {/* Connecting line */}
+                    {idx > 0 && (
+                      <div
+                        className={`absolute top-3.5 sm:top-4 -left-1/2 w-full h-0.5 -z-0 transition-colors duration-200 ${
+                          isCompleted || isActive ? 'bg-brand-violet' : 'bg-line'
+                        }`}
+                        aria-hidden="true"
+                      />
+                    )}
+
+                    {/* Step Icon */}
+                    <div
+                      className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold z-10 transition-colors ${
+                        isCompleted
+                          ? 'bg-emerald-500 text-white shadow-xs'
+                          : isActive
+                          ? 'bg-brand-violet text-white ring-4 ring-brand-violet/20 shadow-sm'
+                          : isFailed
+                          ? 'bg-error text-white'
+                          : 'bg-surface-elevated text-content-secondary border border-line'
+                      }`}
+                    >
+                      {isCompleted ? (
+                        <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" aria-hidden="true" />
+                      ) : isActive ? (
+                        <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 motion-safe:animate-spin" aria-hidden="true" />
+                      ) : isFailed ? (
+                        <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" aria-hidden="true" />
+                      ) : (
+                        <span>{idx + 1}</span>
+                      )}
+                    </div>
+
+                    {/* Stage Label */}
+                    <span
+                      className={`mt-1.5 text-[11px] sm:text-xs font-semibold leading-tight ${
+                        isActive
+                          ? 'text-brand-violet dark:text-content font-bold'
+                          : isCompleted
+                          ? 'text-content font-medium'
+                          : 'text-content-secondary'
+                      }`}
+                    >
+                      {stg.label}
+                    </span>
+                    <span className="hidden md:block text-[10px] text-content-secondary mt-0.5 leading-tight">
+                      {stg.desc}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Honest Progress Bar: calm indeterminate state while queued/0%, scaleX once backend reports % */}
           <div
             className="w-full h-2.5 rounded-full bg-surface-elevated overflow-hidden"
@@ -917,7 +1036,7 @@ export default function JobProgress({
                 <h3 className="text-lg font-bold text-content">{readyHeading}</h3>
                 <p className="text-xs sm:text-sm text-content-secondary">
                   {autoDownloadTriggered
-                    ? 'Your download started automatically. Click below if you need it again.'
+                    ? 'Your download started automatically. Click below to save again anytime.'
                     : 'Your file is ready to save to your device.'}
                 </p>
               </div>
@@ -928,6 +1047,31 @@ export default function JobProgress({
                 Original quality preserved
               </span>
             )}
+          </div>
+
+          {/* All 4 Stages Completed Stepper */}
+          <div className="w-full py-2 border-y border-line-subtle" aria-label="Completed stages">
+            <div className="grid grid-cols-4 gap-2 sm:gap-3 relative">
+              {PROGRESS_STAGES.map((stg, idx) => (
+                <div key={stg.key} className="flex flex-col items-center text-center relative select-none">
+                  {idx > 0 && (
+                    <div
+                      className="absolute top-3.5 sm:top-4 -left-1/2 w-full h-0.5 -z-0 bg-emerald-500"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs font-bold z-10 bg-emerald-500 text-white shadow-xs">
+                    <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" aria-hidden="true" />
+                  </div>
+                  <span className="mt-1.5 text-[11px] sm:text-xs font-semibold text-content leading-tight">
+                    {stg.label}
+                  </span>
+                  <span className="hidden md:block text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 leading-tight">
+                    Done
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Clean File Summary Row (Name, Format, Resolution, Size) */}
@@ -974,15 +1118,15 @@ export default function JobProgress({
             <a
               href={resolvedDownloadUrl}
               download={job.outputFilename || true}
-              onClick={handleDownloadClick}
-              className="muxaro-btn-primary whitespace-nowrap flex-1 inline-flex items-center justify-center gap-2 px-6 py-3.5 text-sm sm:text-base font-semibold active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer"
+              onClick={triggerBrowserSave}
+              className="muxaro-btn-primary whitespace-nowrap flex-1 inline-flex items-center justify-center gap-2.5 px-6 py-3.5 text-sm sm:text-base font-bold shadow-md shadow-brand-violet/20 hover:shadow-lg active:scale-[0.98] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer select-none"
             >
               {downloadInitiated ? (
                 <Check className="w-5 h-5" aria-hidden="true" />
               ) : (
                 <Download className="w-5 h-5" aria-hidden="true" />
               )}
-              <span>{downloadLabel}</span>
+              <span>{downloadInitiated ? 'Saving to browser…' : downloadLabel}</span>
             </a>
 
             {bgCapabilities.ready && (

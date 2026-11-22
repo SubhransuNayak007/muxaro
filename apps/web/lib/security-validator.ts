@@ -56,6 +56,11 @@ export function validateMediaUrl(rawUrl: string): UrlValidationResult {
     return { valid: false, normalizedUrl: '', error: 'Invalid characters in URL.' };
   }
 
+  // Reject non-http(s) schemes immediately (e.g. file:, ftp:, gopher:, javascript:, data:)
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/i.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    return { valid: false, normalizedUrl: '', error: 'Only HTTP and HTTPS protocols are supported.' };
+  }
+
   let parsed: URL;
   try {
     const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
@@ -94,6 +99,9 @@ export function validateMediaUrl(rawUrl: string): UrlValidationResult {
  */
 export function sanitizeFilename(rawTitle: string, defaultExt = 'mp4'): string {
   let name = String(rawTitle || 'media_download').trim();
+
+  // Strip path traversal prefixes and directories to retain strictly the basename
+  name = name.split(/[/\\]/).filter(Boolean).pop() || 'media_download';
 
   // Remove directory traversal and forbidden filesystem characters
   name = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');

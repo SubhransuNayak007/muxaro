@@ -1,66 +1,89 @@
 import { NextRequest } from 'next/server';
+import { jobManager, JobRecord } from '@/lib/job-manager';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
-  const searchParams = req.nextUrl.searchParams;
-  const rawUrl = searchParams.get('url') || '';
-  const format = searchParams.get('format') || 'mp4';
-  const filename = searchParams.get('filename') || `media_${id}.${format}`;
-
-  const downloadUrl = `/api/v1/jobs/${id}/download?url=${encodeURIComponent(
-    rawUrl
-  )}&filename=${encodeURIComponent(filename)}`;
-
   const encoder = new TextEncoder();
+
   const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        // 1. Initial processing event
-        const initialPayload = JSON.stringify({
+    start(controller) {
+      const sendEvent = (eventData: any) => {
+        try {
+          const payload = `event: progress\ndata: ${JSON.stringify(eventData)}\n\n`;
+          controller.enqueue(encoder.encode(payload));
+        } catch {
+          // Stream might be closed
+        }
+      };
+
+      const formatPayload = (job: JobRecord) => ({
+        jobId: job.id,
+        status: job.status.toUpperCase(),
+        stage: job.stage,
+        stageMessage: job.stageMessage,
+        progress: job.progress,
+        speed: job.speed || (job.status === 'ready' ? 'Complete' : undefined),
+        etaSeconds: job.etaSeconds,
+        downloadUrl: job.downloadUrl,
+        artifact: job.artifact,
+        error: job.error,
+      });
+
+      const initialJob = jobManager.getJob(id);
+      if (!initialJob) {
+        sendEvent({
           jobId: id,
-          status: 'PROCESSING',
-          stage: 'REMUXING',
-          stageMessage: 'Demuxing audio/video streams…',
-          progress: 80,
-          speed: '14.2x',
-          etaSeconds: 1,
+          status: 'FAILED',
+          stage: 'FAILED',
+          stageMessage: 'Job was not found or expired.',
+          error: { code: 'ERR_JOB_NOT_FOUND', message: 'Job not found' },
         });
-        controller.enqueue(
-          encoder.encode(`event: progress\ndata: ${initialPayload}\n\n`)
-        );
-
-        // Small delay to allow UI animation
-        await new Promise((resolve) => setTimeout(resolve, 400));
-
-        // 2. Ready completion event
-        const readyPayload = JSON.stringify({
-          jobId: id,
-          status: 'READY',
-          stage: 'READY',
-          stageMessage: 'Media ready for instant download',
-          progress: 100,
-          speed: 'Complete',
-          etaSeconds: 0,
-          downloadUrl,
-          artifact: {
-            filename,
-            downloadUrl,
-            format,
-            sizeBytes: 35000000,
-          },
-        });
-        controller.enqueue(
-          encoder.encode(`event: progress\ndata: ${readyPayload}\n\n`)
-        );
-
-        // 3. Close the stream cleanly
         controller.close();
-      } catch {
-        controller.close();
+        return;
       }
+
+      // 1. Immediately emit current progress snapshot
+      sendEvent(formatPayload(initialJob));
+
+      // If job is already terminal, close stream
+      if (initialJob.status === 'ready' || initialJob.status === 'failed' || initialJob.status === 'cancelled') {
+        controller.close();
+        return;
+      }
+
+      // 2. Subscribe to live pipeline updates
+      const unsubscribe = jobManager.subscribe(id, (updatedJob) => {
+        sendEvent(formatPayload(updatedJob));
+
+        if (
+          updatedJob.status === 'ready' ||
+          updatedJob.status === 'failed' ||
+          updatedJob.status === 'cancelled'
+        ) {
+          unsubscribe();
+          try {
+            controller.close();
+          } catch {}
+        }
+      });
+
+      // 3. Clean up subscription if client disconnects
+      req.signal.addEventListener(
+        'abort',
+        () => {
+          unsubscribe();
+          try {
+            controller.close();
+          } catch {}
+        },
+        { once: true }
+      );
     },
   });
 

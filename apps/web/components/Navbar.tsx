@@ -68,6 +68,7 @@ export default function Navbar() {
   const [mounted, setMounted] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState<boolean>(false);
+  const [ecoTooltipVisible, setEcoTooltipVisible] = useState<boolean>(false);
   const [signingOut, setSigningOut] = useState<boolean>(false);
 
   // Desktop Navigation Sliding Indicator State
@@ -218,12 +219,10 @@ export default function Navbar() {
   }, [logout, pathname, router, signingOut]);
 
   const navLinks = [
-    { href: '/', label: 'Home' },
+    { href: '/', label: 'Downloader' },
     { href: '/tools', label: 'Tools' },
     { href: '/downloads', label: 'Downloads' },
-    { href: '/usage', label: 'Usage' },
     { href: '/status', label: 'Status' },
-    { href: '/credits', label: 'Credits' },
   ];
 
   const isLinkActive = useCallback(
@@ -338,7 +337,7 @@ export default function Navbar() {
             setHoveredHref(null);
             updateSlider(null);
           }}
-          className="relative hidden lg:flex items-center p-1 rounded-full bg-elevated border border-line shadow-xs"
+          className="relative hidden md:flex items-center p-1 rounded-full bg-elevated border border-line shadow-xs"
           aria-label="Main navigation"
         >
           {/* Animated sliding pill */}
@@ -550,39 +549,60 @@ export default function Navbar() {
             </div>
           )}
 
-          {/* Eco Mode / Reduced Motion Toggle */}
-          <button
-            type="button"
-            onClick={toggleLightweight}
-            title={
-              isLightweightActive
-                ? 'Eco mode active (reduced motion and battery saving). Click to turn off.'
-                : 'Eco mode (reduced motion): limits background animations and conserves CPU & battery.'
-            }
-            aria-label={
-              isLightweightActive
-                ? 'Eco mode active. Click to turn off.'
-                : 'Enable Eco mode for reduced motion'
-            }
-            aria-pressed={mounted ? isLightweightActive : undefined}
-            className={`h-9 min-w-[36px] sm:min-w-[102px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
-              isLightweightActive
-                ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
-                : 'border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content'
-            }`}
-          >
-            <Feather className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span className="hidden sm:inline">Eco mode</span>
-            <span
-              className={`text-[10px] font-semibold px-1 py-0.2 rounded font-mono ${
+          {/* Eco Mode / Reduced Motion Toggle with Tooltip */}
+          <div className="relative inline-flex items-center">
+            <button
+              type="button"
+              onClick={toggleLightweight}
+              onMouseEnter={() => setEcoTooltipVisible(true)}
+              onMouseLeave={() => setEcoTooltipVisible(false)}
+              onFocus={() => setEcoTooltipVisible(true)}
+              onBlur={() => setEcoTooltipVisible(false)}
+              title={
                 isLightweightActive
-                  ? 'bg-brand-violet text-white'
-                  : 'bg-surface-elevated text-content-secondary'
+                  ? 'Eco mode active (reduced motion and battery saving). Click to turn off.'
+                  : 'Eco mode (reduced motion): limits background animations and conserves CPU & battery.'
+              }
+              aria-label={
+                isLightweightActive
+                  ? 'Eco mode active. Click to turn off.'
+                  : 'Enable Eco mode for reduced motion and battery saving'
+              }
+              aria-pressed={mounted ? isLightweightActive : undefined}
+              className={`h-9 min-w-[36px] sm:min-w-[104px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                isLightweightActive
+                  ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
+                  : 'border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content'
               }`}
             >
-              {isLightweightActive ? 'On' : 'Off'}
-            </span>
-          </button>
+              <Feather className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Eco mode</span>
+              <span
+                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded font-mono ${
+                  isLightweightActive
+                    ? 'bg-brand-violet text-white'
+                    : 'bg-surface-elevated text-content-secondary'
+                }`}
+              >
+                {isLightweightActive ? 'On' : 'Off'}
+              </span>
+            </button>
+
+            {ecoTooltipVisible && (
+              <div
+                role="tooltip"
+                className="absolute right-0 top-full mt-2 w-64 p-3 rounded-xl border border-line bg-surface shadow-xl text-xs z-50 pointer-events-none"
+              >
+                <div className="flex items-center gap-1.5 font-semibold text-content mb-1">
+                  <Feather className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                  <span>Eco Mode ({isLightweightActive ? 'Active' : 'Off'})</span>
+                </div>
+                <p className="text-content-secondary text-[11px] leading-relaxed">
+                  Conserves laptop battery and reduces GPU load by turning off ambient animated gradients and reducing motion.
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Theme Switcher Button */}
           <button
@@ -608,7 +628,7 @@ export default function Navbar() {
             aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-nav-drawer"
-            className="w-9 h-9 shrink-0 flex items-center justify-center lg:hidden rounded-lg border border-line bg-surface text-content hover:bg-surface-muted transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="w-9 h-9 shrink-0 flex items-center justify-center md:hidden rounded-lg border border-line bg-surface text-content hover:bg-surface-muted transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           >
             {mobileMenuOpen ? (
               <X className="w-5 h-5" aria-hidden="true" />
@@ -623,7 +643,7 @@ export default function Navbar() {
       {mobileMenuOpen && (
         <div
           id="mobile-nav-drawer"
-          className="lg:hidden border-t border-line bg-surface px-4 py-4 space-y-3 shadow-md"
+          className="md:hidden border-t border-line bg-surface px-4 py-4 space-y-3 shadow-md"
         >
           <nav className="flex flex-col space-y-1" aria-label="Mobile navigation">
             {navLinks.map((item) => {

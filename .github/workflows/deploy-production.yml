@@ -157,3 +157,9 @@ jobs:
           curl -fsS "${API_URL}/api/v1/ready"
           curl -fsSI "${SITE_URL}/" | head -n 1 | grep -q "200"
           echo "Production health & readiness verification passed."
+
+      - name: Trigger IndexNow Search Ingestion Automation
+        env:
+          INDEXNOW_KEY: "d3e24b7a95614917a1518f97a8929e01"
+          INDEXNOW_HOST: "muxaro.app"
+        run: node scripts/submit-indexnow.mjs

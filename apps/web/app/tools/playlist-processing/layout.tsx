@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import {
   constructMetadata,
   buildToolSoftwareAppJsonLd,
+  buildHowToJsonLd,
   buildBreadcrumbsJsonLd,
 } from '@/lib/seo';
 
@@ -17,6 +18,7 @@ export const metadata: Metadata = constructMetadata({
     'playlist to zip',
     'bulk playlist extraction',
     'convert playlist to mp3',
+    'youtube playlist archiver',
   ],
 });
 
@@ -31,10 +33,31 @@ export default function PlaylistProcessingLayout({
       'Automated playlist parsing, batch execution, and ZIP archive bundle packaging up to 50 items.',
     path: '/tools/playlist-processing',
     features: [
-      'Full playlist discovery and item extraction',
-      'Unified single-click ZIP packaging',
-      'Up to 50 items per playlist job',
-      'Daily playlist quota entitlement management',
+      'Full playlist discovery and item extraction up to 50 items',
+      'Unified single-click ZIP packaging with zero loss',
+      'Lossless stream extraction for all audio and video formats',
+      'Daily playlist quota entitlement management with zero ads',
+    ],
+  });
+
+  const howToJsonLd = buildHowToJsonLd({
+    name: 'How to Process and Archive Entire Playlists Online',
+    description:
+      'Step-by-step engineering walkthrough for converting and packaging up to 50 playlist tracks into a structured archive.',
+    path: '/tools/playlist-processing',
+    steps: [
+      {
+        name: 'Enter Playlist URL',
+        text: 'Paste the public or unlisted playlist URL to index all video tracks.',
+      },
+      {
+        name: 'Configure Audio/Video Format',
+        text: 'Select your preferred container and bitrate presets across the playlist items.',
+      },
+      {
+        name: 'Archive and Download',
+        text: 'Execute processing and receive a clean ZIP archive with zero-padded numbered filenames.',
+      },
     ],
   });
 
@@ -49,6 +72,10 @@ export default function PlaylistProcessingLayout({
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareAppJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(howToJsonLd) }}
       />
       <script
         type="application/ld+json"

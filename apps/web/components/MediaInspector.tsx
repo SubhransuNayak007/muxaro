@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Copy,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
@@ -51,42 +52,63 @@ interface AudioFormatChoice {
   label: string;
   description: string;
   badge?: string;
+  bitrate?: string;
 }
 
 const AUDIO_FORMATS: AudioFormatChoice[] = [
   {
     id: 'original',
-    label: 'Original audio',
-    description: 'Fastest option. Keeps the exact source audio without re-encoding.',
+    label: 'Original stream',
+    description: 'Direct stream-copy without re-encoding. Lossless quality and fastest speed.',
     badge: 'Fastest',
+    bitrate: 'Source bitrate',
   },
   {
     id: 'mp3',
-    label: 'MP3',
-    description: 'Plays reliably on phones, cars, and everyday speakers.',
-    badge: 'Most compatible',
+    label: 'MP3 320 kbps',
+    description: 'High-fidelity audio preset for phones, car stereos, and everyday players.',
+    badge: 'Universal',
+    bitrate: '320 kbps',
   },
   {
     id: 'm4a',
-    label: 'M4A',
-    description: 'Compact high-clarity audio ideal for Apple devices and mobile.',
+    label: 'M4A / AAC 256 kbps',
+    description: 'High-clarity compressed AAC preset optimal for Apple devices and mobile.',
+    badge: 'High Clarity',
+    bitrate: '256 kbps',
   },
   {
     id: 'opus',
-    label: 'Opus',
-    description: 'Smallest file size with clear voice and music reproduction.',
-  },
-  {
-    id: 'wav',
-    label: 'WAV',
-    description: 'Uncompressed audio ready for video editors and music apps.',
+    label: 'Opus 160 kbps',
+    description: 'Modern speech & music codec with superior audio fidelity at compact size.',
+    badge: 'Efficient',
+    bitrate: '160 kbps',
   },
   {
     id: 'flac',
-    label: 'FLAC',
-    description: 'Uncompressed-quality archival format with no added compression.',
+    label: 'FLAC Lossless',
+    description: 'Archival studio-grade lossless format with zero added compression.',
+    badge: 'Studio Master',
+    bitrate: 'Lossless',
+  },
+  {
+    id: 'wav',
+    label: 'WAV 24-bit',
+    description: 'Uncompressed raw audio ready for DAWs, editors, and production workflow.',
+    badge: 'Uncompressed',
+    bitrate: 'PCM 24-bit',
   },
 ];
+
+function formatCodecBadge(rawCodec?: string): string {
+  if (!rawCodec) return 'H.264';
+  const c = rawCodec.toLowerCase();
+  if (c.includes('av01') || c.includes('av1')) return 'AV1';
+  if (c.includes('vp9') || c.includes('vp09')) return 'VP9';
+  if (c.includes('hevc') || c.includes('hvc1') || c.includes('h265')) return 'HEVC';
+  if (c.includes('avc') || c.includes('h264')) return 'H.264';
+  return rawCodec.split('.')[0].toUpperCase();
+}
 
 function formatOptionSize(bytes: number | undefined, isEstimate: boolean): string | null {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes <= 0) return null;
@@ -605,9 +627,15 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
               </div>
             ) : (
               <>
-                <p className="text-sm text-content-secondary">
-                  Choose a quality supported by this video, or shrink the file size for sharing.
-                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-sm text-content-secondary">
+                    Select quality up to 8K. All video tiers include highest-fidelity audio auto-merged.
+                  </p>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                    <span>HQ Audio Auto-Merged (Up to 320 kbps)</span>
+                  </span>
+                </div>
 
                 {/* Scannable, Deduplicated Quality Selector List */}
                 <div
@@ -655,9 +683,15 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
                             {option.qualityName}
                           </span>
 
-                          {option.fpsBadge && (
+                          {/* Codec Badge */}
+                          <span className="px-2 py-0.5 rounded-md bg-surface-elevated border border-line text-[11px] font-mono font-medium text-content-secondary">
+                            {formatCodecBadge(option.codec)}
+                          </span>
+
+                          {/* FPS Badge */}
+                          {(option.fpsBadge || (option.fps && option.fps > 30)) && (
                             <span className="px-2 py-0.5 rounded-md bg-surface border border-line text-xs font-medium text-content-secondary">
-                              {option.fpsBadge}
+                              {option.fpsBadge || `${option.fps}fps`}
                             </span>
                           )}
 
@@ -666,6 +700,12 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
                               HDR
                             </span>
                           )}
+
+                          {/* HQ Audio Auto-Merged Tag */}
+                          <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium border border-emerald-500/20">
+                            <Sparkles className="w-2.5 h-2.5 text-emerald-500 shrink-0" aria-hidden="true" />
+                            <span>HQ Audio</span>
+                          </span>
 
                           {option.recommended && (
                             <span className="px-2 py-0.5 rounded-full bg-info-bg text-brand text-xs font-medium">
@@ -917,11 +957,18 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
                   >
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <span className="font-semibold text-sm text-content">{fmt.label}</span>
-                      {fmt.badge && (
-                        <span className="px-2 py-0.5 rounded-full bg-info-bg text-brand text-xs font-medium">
-                          {fmt.badge}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {fmt.bitrate && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-surface-elevated text-content-secondary border border-line">
+                            {fmt.bitrate}
+                          </span>
+                        )}
+                        {fmt.badge && (
+                          <span className="px-2 py-0.5 rounded-full bg-info-bg text-brand text-xs font-medium">
+                            {fmt.badge}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <p className="text-xs text-content-secondary leading-relaxed">
                       {fmt.description}
