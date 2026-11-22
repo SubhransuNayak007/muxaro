@@ -296,9 +296,9 @@ export default function Navbar() {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-40 w-full border-b border-line/70 bg-surface/85 backdrop-blur-md shadow-sm transition-colors"
+      className="sticky top-0 z-40 w-full border-b border-black/[0.06] dark:border-white/[0.08] bg-surface/85 backdrop-blur-xl shadow-xs transition-colors"
     >
-      <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+      <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-3">
         {/* Left: Brand Identity */}
         <div className="flex items-center shrink-0">
           <Link

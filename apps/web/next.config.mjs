@@ -12,6 +12,12 @@ const hasExternalBackend = Boolean(
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    serverComponentsExternalPackages: ['@distube/ytdl-core'],
+    outputFileTracingIncludes: {
+      '/api/**/*': ['./node_modules/@distube/ytdl-core/**/*'],
+    },
+  },
   images: {
     remotePatterns: [
       {

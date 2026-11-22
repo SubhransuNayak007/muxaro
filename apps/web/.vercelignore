@@ -1,0 +1,13 @@
+.next
+node_modules
+storage
+storage/**
+.turbo
+*.mp4
+*.mkv
+*.webm
+*.mp3
+*.m4a
+*.part
+*.ytdl
+*.log

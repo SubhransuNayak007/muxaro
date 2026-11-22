@@ -5,36 +5,24 @@ import Link from 'next/link';
 import { ProcessingJob, JobState } from '@/lib/types';
 import { formatBytes } from '@/lib/formatters';
 import { api, getApiBaseUrl } from '@/lib/api-client';
-import { detectPlatform, formatDisplayUrl } from '@/lib/url-utils';
+import { detectPlatform } from '@/lib/url-utils';
 import {
-  detectBackgroundDownloadSupport,
   getAutoDownloadPreference,
   setAutoDownloadPreference,
-  startBackgroundDownload,
   mapFriendlyError,
-  BackgroundDownloadCapabilities,
 } from '@/lib/background-download';
 import {
   CheckCircle2,
   Check,
-  Copy,
   Download,
   AlertCircle,
   XCircle,
-  Clock,
   FileVideo,
   FileAudio,
-  Loader2,
   RotateCcw,
-  ChevronDown,
-  ChevronUp,
   Play,
   EyeOff,
-  CloudDownload,
-  RefreshCw,
   Zap,
-  ExternalLink,
-  Terminal,
 } from 'lucide-react';
 
 export interface JobProgressProps {
@@ -48,17 +36,12 @@ const MAX_POLL_RETRIES = 15;
 const BASE_POLL_INTERVAL_MS = 2000;
 const MAX_BACKOFF_INTERVAL_MS = 10000;
 
-type ProcessingLane = 'instant' | 'smart' | 'power';
-
 type ExtendedProcessingJob = ProcessingJob & {
   jobId?: string;
   stageMessage?: string;
   errorMessage?: string;
   errorCode?: string;
   userMessage?: string;
-  processingLane?: ProcessingLane;
-  strategyLabel?: string;
-  losslessPreserved?: boolean;
   retentionMinutes?: number;
   etaSeconds?: number;
   speed?: string;
@@ -85,7 +68,10 @@ function isTerminalState(status: JobState | undefined): boolean {
   );
 }
 
-function normalizeContractStatus(rawStatusStr: string | undefined, defaultStatus: JobState = 'QUEUED'): JobState {
+function normalizeContractStatus(
+  rawStatusStr: string | undefined,
+  defaultStatus: JobState = 'QUEUED'
+): JobState {
   const s = String(rawStatusStr || '').toUpperCase();
   if (s === 'COMPLETED' || s === 'READY') return 'READY';
   if (s === 'FAILED') return 'FAILED';
@@ -107,68 +93,6 @@ function normalizeContractStatus(rawStatusStr: string | undefined, defaultStatus
   }
   if (s === 'CREATED' || s === 'QUEUED') return 'QUEUED';
   return defaultStatus;
-}
-
-function getFriendlyProgressMessage(
-  job: ExtendedProcessingJob,
-  isAudioOnly: boolean,
-  safeProgress: number
-): string {
-  const op = (job.operation || '').toLowerCase();
-  const isCompressing = op.includes('compress') || op === 'convert_format';
-
-  if (job.status === 'VERIFYING' || safeProgress >= 85) {
-    return 'Finalizing stream muxing…';
-  }
-  if (job.status === 'QUEUED' || job.status === 'CREATED') {
-    return 'Allocating stream copy slot…';
-  }
-  if (isAudioOnly) {
-    return 'Extracting lossless audio track…';
-  }
-  if (isCompressing) {
-    return 'Remuxing video streams…';
-  }
-  return 'Lossless stream copy in progress…';
-}
-
-function formatLaneLabel(lane?: ProcessingLane): string {
-  if (lane === 'instant') return 'Direct Fast-Path';
-  if (lane === 'smart') return 'Smart Stream';
-  if (lane === 'power') return 'Power Remux';
-  return 'Lossless Studio';
-}
-
-export const PROGRESS_STAGES = [
-  { key: 'preparing', label: 'Preparing', desc: 'Stream probe & manifest' },
-  { key: 'downloading', label: 'Downloading Streams', desc: 'Lossless DASH chunks' },
-  { key: 'merging', label: 'FFmpeg Muxing', desc: 'Direct stream copy (-c copy)' },
-  { key: 'ready', label: 'Ready', desc: 'Verified & ready to save' },
-] as const;
-
-export function computeStageIndex(job: ExtendedProcessingJob): number {
-  if (job.status === 'READY') return 3;
-  const rawStage = (job.progressStage || job.stageMessage || '').toLowerCase();
-  const progress = Number.isFinite(job.progress) ? job.progress : 0;
-
-  if (
-    rawStage.includes('merge') ||
-    rawStage.includes('ffmpeg') ||
-    rawStage.includes('mux') ||
-    rawStage.includes('transcode') ||
-    progress >= 75
-  ) {
-    return 2;
-  }
-  if (
-    rawStage.includes('download') ||
-    rawStage.includes('video') ||
-    rawStage.includes('audio') ||
-    progress >= 15
-  ) {
-    return 1;
-  }
-  return 0;
 }
 
 function mergeBackendPayload(
@@ -231,16 +155,6 @@ function mergeBackendPayload(
     errorMessage: errMsg,
     errorCode: errCode,
     userMessage: uMsg,
-    processingLane: raw.processingLane || prev.processingLane,
-    strategyLabel: raw.strategyLabel || prev.strategyLabel,
-    losslessPreserved:
-      typeof raw.losslessPreserved === 'boolean'
-        ? raw.losslessPreserved
-        : prev.losslessPreserved,
-    retentionMinutes:
-      typeof raw.retentionMinutes === 'number' && raw.retentionMinutes > 0
-        ? raw.retentionMinutes
-        : prev.retentionMinutes,
     etaSeconds:
       typeof raw.etaSeconds === 'number' ? raw.etaSeconds : prev.etaSeconds,
     speed: raw.speed || prev.speed,
@@ -271,27 +185,9 @@ export default function JobProgress({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [downloadInitiated, setDownloadInitiated] = useState<boolean>(false);
   const [autoDownloadEnabled, setAutoDownloadEnabled] = useState<boolean>(false);
-  const [autoDownloadTriggered, setAutoDownloadTriggered] =
-    useState<boolean>(false);
-  const [showDetails, setShowDetails] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
-  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(
-    initialJob.status === 'FAILED' || initialJob.status === 'REJECTED'
-  );
-  const [copiedHash, setCopiedHash] = useState<boolean>(false);
-  const [isDirectActive, setIsDirectActive] = useState<boolean>(false);
-  const [serverlessRoutingDetected, setServerlessRoutingDetected] =
-    useState<boolean>(false);
-  const [bgStatusMessage, setBgStatusMessage] = useState<string | null>(null);
-  const [bgCapabilities, setBgCapabilities] =
-    useState<BackgroundDownloadCapabilities>({
-      supported: false,
-      ready: false,
-      saveData: false,
-      note: 'Processing continues safely on our servers even if you leave this page. Completed files stay available in My Downloads.',
-    });
+  const [serverlessRoutingDetected, setServerlessRoutingDetected] = useState<boolean>(false);
 
-  const detailsId = useId();
   const autoDownloadId = useId();
   const jobRef = useRef<ExtendedProcessingJob>(job);
   const onJobUpdateRef = useRef(onJobUpdate);
@@ -303,41 +199,8 @@ export default function JobProgress({
     onJobUpdateRef.current = onJobUpdate;
   }, [onJobUpdate]);
 
-  // Auto-expand diagnostics drawer on failure
-  useEffect(() => {
-    if (job.status === 'FAILED' || job.status === 'REJECTED') {
-      setShowDiagnostics(true);
-    }
-  }, [job.status]);
-
-  // Read opt-in auto-download preference (default OFF) and detect Background Fetch support
   useEffect(() => {
     setAutoDownloadEnabled(getAutoDownloadPreference());
-    let mounted = true;
-    detectBackgroundDownloadSupport().then((caps) => {
-      if (mounted) {
-        setBgCapabilities(caps);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  // Detect MUXARO Direct companion bridge status
-  useEffect(() => {
-    function checkDirect() {
-      if (
-        typeof window !== 'undefined' &&
-        ((window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
-          document.documentElement.getAttribute('data-muxaro-direct') === 'active')
-      ) {
-        setIsDirectActive(true);
-      }
-    }
-    checkDirect();
-    window.addEventListener('muxaro:direct-ready', checkDirect);
-    return () => window.removeEventListener('muxaro:direct-ready', checkDirect);
   }, []);
 
   useEffect(() => {
@@ -352,28 +215,15 @@ export default function JobProgress({
     setCancelError(null);
     setRetryError(null);
     setShowPreview(false);
-    setShowDetails(false);
-    if (normalized.status === 'FAILED' || normalized.status === 'REJECTED') {
-      setShowDiagnostics(true);
-    } else {
-      setShowDiagnostics(false);
-    }
-    setBgStatusMessage(null);
     setServerlessRoutingDetected(false);
-    setAutoDownloadTriggered(autoDownloadedIdsRef.current.has(normalized.id));
   }, [initialJob]);
 
   const isTerminal = isTerminalState(job.status);
 
-  // Real-time SSE streaming from backend (/v1/jobs/:id/events or /api/v1/jobs/:id/events)
+  // Real-time SSE streaming from backend
   useEffect(() => {
-    if (!job.id || isTerminal) {
-      return;
-    }
-
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-      return;
-    }
+    if (!job.id || isTerminal) return;
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
 
     let es: EventSource | null = null;
     let cancelled = false;
@@ -387,11 +237,7 @@ export default function JobProgress({
         if (cancelled || !e.data) return;
         try {
           const payload = JSON.parse(e.data);
-          // CONTRACT STATE MAPPING:
-          // Active stages (DOWNLOADING_VIDEO, DOWNLOADING_AUDIO, MERGING, CONVERTING, PROBING, etc.)
-          // must map to 'PROCESSING', NOT 'QUEUED'!
           const nextStatus = normalizeContractStatus(payload.status, jobRef.current.status || 'PROCESSING');
-
           const rawProgress = Number(payload.progressPercent ?? payload.progress);
           const nextProgress = Number.isFinite(rawProgress)
             ? Math.max(0, Math.min(100, Math.round(rawProgress)))
@@ -429,9 +275,7 @@ export default function JobProgress({
           jobRef.current = updated;
           setJob(updated);
           onJobUpdateRef.current?.(updated);
-        } catch {
-          // Safe JSON parse fallback
-        }
+        } catch {}
       };
 
       es.addEventListener('progress', handleProgressEvent);
@@ -444,15 +288,12 @@ export default function JobProgress({
       });
 
       es.onerror = () => {
-        // Fall back to polling silently on SSE disconnection
         if (es) {
           es.close();
           es = null;
         }
       };
-    } catch {
-      // Fallback polling handles updates
-    }
+    } catch {}
 
     return () => {
       cancelled = true;
@@ -463,134 +304,53 @@ export default function JobProgress({
     };
   }, [job.id, isTerminal]);
 
-  // Serverless-Proof 2-second backend polling with backoff and tab-visibility pause
+  // Polling fallback
   useEffect(() => {
-    if (!job.id || isTerminal) {
-      return;
-    }
+    if (!job.id || isTerminal) return;
 
-    let active = true;
+    let timer: NodeJS.Timeout | null = null;
     let consecutiveFailures = 0;
-    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
 
-    const clearPending = () => {
-      if (timerId) {
-        clearTimeout(timerId);
-        timerId = null;
-      }
-    };
-
-    const scheduleNext = (delayMs: number) => {
-      if (!active) return;
-      clearPending();
-      if (
-        typeof document !== 'undefined' &&
-        document.visibilityState === 'hidden'
-      ) {
-        return;
-      }
-      timerId = setTimeout(pollOnce, delayMs);
-    };
-
-    const pollOnce = async () => {
-      if (!active) return;
-
+    async function poll() {
+      if (cancelled || !job.id) return;
       try {
         const raw = (await api.getJob(job.id)) as ExtendedProcessingJob;
-        if (!active) return;
-
-        if (!raw || !raw.status) {
-          throw new Error('Waiting for status update');
-        }
-
+        if (cancelled) return;
         consecutiveFailures = 0;
-        setServerlessRoutingDetected(false);
+        const nextJob = mergeBackendPayload(jobRef.current, raw);
+        jobRef.current = nextJob;
+        setJob(nextJob);
+        onJobUpdateRef.current?.(nextJob);
 
-        const merged = mergeBackendPayload(jobRef.current, raw);
-        jobRef.current = merged;
-        setJob(merged);
-        onJobUpdateRef.current?.(merged);
-
-        if (!isTerminalState(merged.status)) {
-          scheduleNext(BASE_POLL_INTERVAL_MS);
-        }
-      } catch (err: unknown) {
-        if (!active) return;
-        consecutiveFailures += 1;
-
-        const anyErr = err as any;
-        const is404 =
-          anyErr?.status === 404 ||
-          anyErr?.statusCode === 404 ||
-          String(anyErr?.message || '').includes('404') ||
-          String(anyErr?.message || '').toUpperCase().includes('NOT_FOUND') ||
-          String(anyErr?.code || '').toUpperCase().includes('NOT_FOUND');
-
-        if (is404) {
-          // SERVERLESS-PROOF PROGRESS:
-          // In distributed serverless environments (Vercel, Cloudflare, AWS Lambdas),
-          // polling can receive 404 due to multi-instance routing or in-memory persistence.
-          // DO NOT transition to 'failed'! Instead, retry with backoff and provide direct fallback download.
-          setServerlessRoutingDetected(true);
-          const backoffMs = Math.min(
-            MAX_BACKOFF_INTERVAL_MS,
-            Math.round(
-              BASE_POLL_INTERVAL_MS * Math.pow(1.2, Math.min(consecutiveFailures, 6))
-            )
+        if (!isTerminalState(nextJob.status)) {
+          const delay = Math.min(
+            BASE_POLL_INTERVAL_MS * Math.pow(1.2, consecutiveFailures),
+            MAX_BACKOFF_INTERVAL_MS
           );
-          scheduleNext(backoffMs);
-          return;
+          timer = setTimeout(poll, delay);
         }
-
-        if (consecutiveFailures >= MAX_POLL_RETRIES) {
-          // Never leave the user stuck on an unrecoverable failure.
-          // Transition with direct fallback download availability.
-          const fallbackMsg =
-            'Serverless routing in progress — stream available for direct save below.';
-          const failedJob: ExtendedProcessingJob = {
-            ...jobRef.current,
-            status: 'FAILED',
-            error: fallbackMsg,
-            userMessage: fallbackMsg,
-          };
-          jobRef.current = failedJob;
-          setJob(failedJob);
-          onJobUpdateRef.current?.(failedJob);
-          return;
+      } catch (err: any) {
+        if (cancelled) return;
+        consecutiveFailures++;
+        if (err?.status === 404) {
+          setServerlessRoutingDetected(true);
         }
-
-        const backoffMs = Math.min(
-          MAX_BACKOFF_INTERVAL_MS,
-          Math.round(
-            BASE_POLL_INTERVAL_MS *
-              Math.pow(1.35, Math.min(consecutiveFailures, 6))
-          )
-        );
-        scheduleNext(backoffMs);
+        if (consecutiveFailures < MAX_POLL_RETRIES) {
+          const delay = Math.min(
+            BASE_POLL_INTERVAL_MS * Math.pow(1.5, consecutiveFailures),
+            MAX_BACKOFF_INTERVAL_MS
+          );
+          timer = setTimeout(poll, delay);
+        }
       }
-    };
-
-    const handleVisibilityChange = () => {
-      if (!active) return;
-      if (document.visibilityState === 'visible') {
-        scheduleNext(200);
-      } else {
-        clearPending();
-      }
-    };
-
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', handleVisibilityChange);
     }
 
-    scheduleNext(500);
-
+    const initialDelay = setTimeout(poll, BASE_POLL_INTERVAL_MS);
     return () => {
-      active = false;
-      clearPending();
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      }
+      cancelled = true;
+      clearTimeout(initialDelay);
+      if (timer) clearTimeout(timer);
     };
   }, [job.id, isTerminal]);
 
@@ -600,7 +360,23 @@ export default function JobProgress({
     propSourceUrl ||
     '';
 
+  const isAudioOnly =
+    job.jobType === 'extract_audio' ||
+    ['mp3', 'flac', 'opus', 'aac', 'wav', 'm4a'].includes(
+      (job.targetFormat || '').toLowerCase()
+    );
+  const friendlyTitle =
+    job.inputTitle || (isAudioOnly ? 'Your audio' : 'Your video');
+  const displayFilename =
+    job.outputFilename ||
+    `${friendlyTitle}.${(
+      job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
+    ).toLowerCase()}`;
+
   const directFallbackUrl = useMemo(() => {
+    if (job.deliveryMode === 'zero-hop' && (job.directStreamUrl || job.downloadUrl)) {
+      return job.directStreamUrl || job.downloadUrl || '';
+    }
     if (job.downloadUrl && !job.downloadUrl.startsWith('#')) {
       return job.downloadUrl;
     }
@@ -616,9 +392,12 @@ export default function JobProgress({
       )}&format=${(job.targetFormat || 'mp4').toLowerCase()}`;
     }
     return '';
-  }, [job.downloadUrl, job.artifact, job.id, directTargetUrl, job.targetFormat]);
+  }, [job.deliveryMode, job.directStreamUrl, job.downloadUrl, job.artifact, job.id, directTargetUrl, job.targetFormat]);
 
   const resolvedDownloadUrl = useMemo(() => {
+    if (job.deliveryMode === 'zero-hop') {
+      return job.directStreamUrl || job.downloadUrl || directFallbackUrl || '';
+    }
     if (job.downloadUrl && !job.downloadUrl.startsWith('#')) {
       return job.downloadUrl;
     }
@@ -627,7 +406,7 @@ export default function JobProgress({
     }
     if (!job.id) return directFallbackUrl || '';
     return `/api/v1/jobs/${encodeURIComponent(job.id)}/download`;
-  }, [job.downloadUrl, job.artifact, job.id, directFallbackUrl]);
+  }, [job.deliveryMode, job.directStreamUrl, job.downloadUrl, job.artifact, job.id, directFallbackUrl]);
 
   const previewUrl = useMemo(() => {
     if (!resolvedDownloadUrl || resolvedDownloadUrl.startsWith('#')) {
@@ -638,7 +417,7 @@ export default function JobProgress({
       : `${resolvedDownloadUrl}?inline=1`;
   }, [resolvedDownloadUrl]);
 
-  // Opt-in automatic download ONLY when user explicitly enabled it (default OFF), once per job.id
+  // Opt-in automatic download ONLY when user explicitly enabled it
   useEffect(() => {
     if (
       autoDownloadEnabled &&
@@ -649,7 +428,6 @@ export default function JobProgress({
       !autoDownloadedIdsRef.current.has(job.id)
     ) {
       autoDownloadedIdsRef.current.add(job.id);
-      setAutoDownloadTriggered(true);
       try {
         const anchor = document.createElement('a');
         anchor.href = resolvedDownloadUrl;
@@ -658,13 +436,15 @@ export default function JobProgress({
         } else {
           anchor.setAttribute('download', '');
         }
+        if (job.deliveryMode === 'zero-hop') {
+          anchor.rel = 'noreferrer';
+          anchor.referrerPolicy = 'no-referrer';
+        }
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
-      } catch {
-        // Primary Download button always remains available below
-      }
+      } catch {}
     }
   }, [
     autoDownloadEnabled,
@@ -672,6 +452,7 @@ export default function JobProgress({
     job.id,
     job.outputFilename,
     resolvedDownloadUrl,
+    job.deliveryMode,
   ]);
 
   // Zero-hop Client Handover: trigger instant browser download directly from origin CDN
@@ -736,35 +517,26 @@ export default function JobProgress({
     setRetrying(true);
     setRetryError(null);
     try {
-      const apiWithRetry = api as typeof api & {
-        retryJob?: (jobId: string) => Promise<ProcessingJob>;
-      };
-
-      let raw: ExtendedProcessingJob;
-      if (typeof apiWithRetry.retryJob === 'function') {
-        raw = (await apiWithRetry.retryJob(job.id)) as ExtendedProcessingJob;
-      } else {
-        const response = await fetch(
-          `/api/v1/jobs/${encodeURIComponent(job.id)}/retry`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-            },
-          }
-        );
-        if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
-          throw new Error(
-            errBody?.error?.userMessage ||
-              errBody?.error?.message ||
-              `HTTP_${response.status}`
-          );
+      const response = await fetch(
+        `/api/v1/jobs/${encodeURIComponent(job.id)}/retry`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
         }
-        const json = await response.json();
-        raw = (json.data !== undefined ? json.data : json) as ExtendedProcessingJob;
+      );
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(
+          errBody?.error?.userMessage ||
+            errBody?.error?.message ||
+            `HTTP_${response.status}`
+        );
       }
+      const json = await response.json();
+      const raw = (json.data !== undefined ? json.data : json) as ExtendedProcessingJob;
 
       const nextJob: ExtendedProcessingJob = {
         ...mergeBackendPayload(jobRef.current, raw),
@@ -804,8 +576,11 @@ export default function JobProgress({
         } else {
           anchor.setAttribute('download', '');
         }
+        if (job.deliveryMode === 'zero-hop') {
+          anchor.rel = 'noreferrer';
+          anchor.referrerPolicy = 'no-referrer';
+        }
         anchor.target = '_blank';
-        anchor.rel = 'noopener noreferrer';
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();
@@ -813,43 +588,6 @@ export default function JobProgress({
       } catch {
         window.open(targetUrl, '_blank');
       }
-    }
-  };
-
-  const isAudioOnly =
-    job.jobType === 'extract_audio' ||
-    ['mp3', 'flac', 'opus', 'aac', 'wav', 'm4a'].includes(
-      (job.targetFormat || '').toLowerCase()
-    );
-  const friendlyTitle =
-    job.inputTitle || (isAudioOnly ? 'Your audio' : 'Your video');
-  const displayFilename =
-    job.outputFilename ||
-    `${friendlyTitle}.${(
-      job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
-    ).toLowerCase()}`;
-
-  const handleBackgroundDownload = async () => {
-    const targetUrl = resolvedDownloadUrl || directFallbackUrl;
-    if (!targetUrl || !job.id) return;
-    const result = await startBackgroundDownload({
-      id: job.id,
-      url: targetUrl,
-      title: friendlyTitle,
-      filename: displayFilename,
-      sizeBytes: job.outputSizeBytes,
-    });
-    setBgStatusMessage(result.message);
-  };
-
-  const handleCopyHash = async () => {
-    if (!job.checksumSha256) return;
-    try {
-      await navigator.clipboard.writeText(job.checksumSha256);
-      setCopiedHash(true);
-      setTimeout(() => setCopiedHash(false), 2200);
-    } catch {
-      // Ignore clipboard failure in restricted contexts
     }
   };
 
@@ -862,16 +600,9 @@ export default function JobProgress({
     ? Math.max(0, Math.min(100, Math.round(job.progress)))
     : 0;
 
-  const currentStageIdx = computeStageIndex(job);
-
   const formatUpper = (
     job.targetFormat || (isAudioOnly ? 'mp3' : 'mp4')
   ).toUpperCase();
-  const friendlyStatus = getFriendlyProgressMessage(
-    job,
-    isAudioOnly,
-    safeProgress
-  );
   const readyHeading = isAudioOnly
     ? 'Your audio is ready'
     : 'Your video is ready';
@@ -884,21 +615,14 @@ export default function JobProgress({
     : isAudioOnly
     ? 'Preview audio'
     : 'Preview video';
-  const copyHashLabel = copiedHash ? 'Copied' : 'Copy';
   const retryButtonLabel = retrying ? 'Retrying...' : 'Try again';
 
   const fileSizeLabel =
-    typeof job.outputSizeBytes === 'number' && job.outputSizeBytes > 0
+    typeof job.fileSizeBytes === 'number' && job.fileSizeBytes > 0
+      ? formatBytes(job.fileSizeBytes)
+      : typeof job.outputSizeBytes === 'number' && job.outputSizeBytes > 0
       ? formatBytes(job.outputSizeBytes)
       : '';
-  const retentionMinutes =
-    typeof job.retentionMinutes === 'number' && job.retentionMinutes > 0
-      ? Math.round(job.retentionMinutes)
-      : 60;
-  const checksumValue = job.checksumSha256 || '';
-  const checksumPreview = checksumValue
-    ? `${checksumValue.slice(0, 12)}…${checksumValue.slice(-8)}`
-    : '';
 
   // Telemetry Calculations for Clean Status Line
   const telemetryEtaSeconds = useMemo(() => {
@@ -948,8 +672,6 @@ export default function JobProgress({
     }
 
     const parts: string[] = [];
-
-    // Stage label
     const rawStage = (job.progressStage || job.stageMessage || job.stage || '').toLowerCase();
     if (safeProgress >= 90 || rawStage.includes('mux') || rawStage.includes('merge')) {
       parts.push('Muxing');
@@ -961,7 +683,6 @@ export default function JobProgress({
 
     parts.push(`${safeProgress}%`);
 
-    // Speed: show real speed ONLY if valid string exists and does NOT say 'Stream Copy' or 'copy'
     if (job.speed) {
       const cleanSpeed = job.speed.replace(/^speed:\s*/i, '').trim();
       if (
@@ -973,7 +694,6 @@ export default function JobProgress({
       }
     }
 
-    // ETA: show only once numeric progress > 0 arrives AND eta is valid
     if (telemetryEtaSeconds > 0) {
       parts.push(`${telemetryEtaSeconds}s left`);
     }
@@ -1011,19 +731,10 @@ export default function JobProgress({
       raw.includes('login_required') ||
       raw.includes('restricted') ||
       raw.includes('verification') ||
-      raw.includes('cloud servers') ||
-      raw.includes('confirm you') ||
       raw.includes('captcha') ||
-      raw.includes('po_token') ||
-      raw.includes('player_client') ||
       raw.includes('private') ||
       raw.includes('403') ||
-      raw.includes('429') ||
-      raw.includes('rate') ||
-      raw.includes('limit') ||
-      raw.includes('challenge') ||
-      raw.includes('rate-limited') ||
-      raw.includes('muxaro direct')
+      raw.includes('429')
     );
   }, [job]);
 
@@ -1033,10 +744,10 @@ export default function JobProgress({
       className="w-full bg-surface border border-line rounded-2xl shadow-card p-5 sm:p-6 text-content transition-colors"
       style={{ overflowX: 'clip' }}
     >
-      {/* 1. In-Progress View: Clean 3-Row Linear/Raycast/Cobalt Style */}
+      {/* 1. In-Progress View: Clean 3-Row Linear/Hallmark Layout */}
       {!isTerminal && (
         <div className="space-y-4">
-          {/* Top Row: Thumbnail/minimal media icon + Title + short domain on left; single MP4 · 1080p pill + quiet Cancel button on right */}
+          {/* Row 1: Icon + Title + short domain on left; single format pill + Cancel button on right */}
           <div className="flex items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-elevated border border-line shrink-0 text-content">
@@ -1073,7 +784,7 @@ export default function JobProgress({
             </div>
           </div>
 
-          {/* Middle Row: Single 4px high-contrast progress bar */}
+          {/* Row 2: Single 4px high-contrast progress bar */}
           <div
             className="w-full h-1 rounded-full bg-line/60 overflow-hidden relative"
             role="progressbar"
@@ -1094,7 +805,7 @@ export default function JobProgress({
             )}
           </div>
 
-          {/* Bottom Row: Single crisp status string on left + compact Auto-download toggle on right */}
+          {/* Row 3: Single crisp status string on left + compact Auto-download toggle on right */}
           <div className="flex items-center justify-between gap-3 text-xs">
             <div className="text-content-secondary font-mono truncate">
               {statusString}
@@ -1130,7 +841,7 @@ export default function JobProgress({
           </div>
 
           {/* Direct Stream Available Fallback (if serverless instance routing detected) */}
-          {(serverlessRoutingDetected || isDirectActive) && (
+          {serverlessRoutingDetected && (
             <div className="p-3 rounded-xl border border-line bg-surface-elevated flex items-center justify-between gap-3 text-xs">
               <span className="text-content-secondary truncate">
                 Direct stream connection available
@@ -1138,6 +849,8 @@ export default function JobProgress({
               <a
                 href={resolvedDownloadUrl || directFallbackUrl}
                 download={job.outputFilename || true}
+                rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
+                referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
                 onClick={triggerBrowserSave}
                 className="font-semibold text-content hover:underline shrink-0"
               >
@@ -1216,8 +929,10 @@ export default function JobProgress({
           {/* Primary CTA + Secondary Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
             <a
-              href={resolvedDownloadUrl}
+              href={job.deliveryMode === 'zero-hop' ? (job.directStreamUrl || job.downloadUrl || resolvedDownloadUrl) : resolvedDownloadUrl}
               download={job.outputFilename || true}
+              rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
+              referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
               onClick={triggerBrowserSave}
               className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-xs cursor-pointer select-none"
             >
@@ -1362,6 +1077,8 @@ export default function JobProgress({
                 <a
                   href={resolvedDownloadUrl || directFallbackUrl}
                   download={job.outputFilename || true}
+                  rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
+                  referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
                   onClick={triggerBrowserSave}
                   className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
                 >
@@ -1400,6 +1117,8 @@ export default function JobProgress({
                 <a
                   href={resolvedDownloadUrl || directFallbackUrl}
                   download={job.outputFilename || true}
+                  rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
+                  referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
                   onClick={triggerBrowserSave}
                   className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
                 >

@@ -20,6 +20,7 @@ import os from 'node:os';
 import { sanitizeFilename } from './security-validator.ts';
 import { muxMedia, extractAudio, transcodeVideo } from './ffmpeg-muxer.ts';
 import type { JobStatus, JobError } from './contracts.ts';
+import { extractPlatformMedia } from './platform-extractors.ts';
 
 export interface CreateJobParams {
   sourceUrl: string;
@@ -840,21 +841,17 @@ class JobManager {
     url: string,
     signal: AbortSignal
   ): Promise<{ mediaUrl: string; title?: string; mimeType?: string; contentLength?: number; deliveryMode?: 'zero-hop' | 'tunnel' } | null> {
-    // 1. Try external multi-platform extractor module
+    // 1. Try external multi-platform extractor module (statically imported for Vercel/Webpack bundling)
     try {
-      const extModule = './platform-extractors';
-      const mod: any = await import(extModule).catch(() => null);
-      if (mod && typeof mod.extractPlatformMedia === 'function') {
-        const extracted = await mod.extractPlatformMedia(url, { signal });
-        if (extracted?.mediaUrl || extracted?.url || extracted?.streamUrl) {
-          return {
-            mediaUrl: extracted.mediaUrl || extracted.url || extracted.streamUrl,
-            title: extracted.title,
-            mimeType: extracted.mimeType,
-            contentLength: extracted.contentLength,
-            deliveryMode: extracted.deliveryMode || 'tunnel',
-          };
-        }
+      const extracted = await extractPlatformMedia(url, { signal });
+      if (extracted?.mediaUrl || extracted?.url || extracted?.streamUrl) {
+        return {
+          mediaUrl: extracted.mediaUrl || extracted.url || extracted.streamUrl,
+          title: extracted.title,
+          mimeType: extracted.mimeType,
+          contentLength: extracted.contentLength,
+          deliveryMode: extracted.deliveryMode || 'tunnel',
+        };
       }
     } catch {}
 
@@ -960,43 +957,44 @@ class JobManager {
           if (selectedFormat.contentLength) {
             job.fileSizeBytes = parseInt(selectedFormat.contentLength, 10);
           }
-        }
 
-        // 2. Download the real stream to finalPath
-        job.progress = 65;
-        this.notify(job);
+          // 2. Download the real stream to finalPath directly from Google Video CDN
+          job.progress = 65;
+          this.notify(job);
 
-        const filterCriteria = isAudioOnly
-          ? { hasAudio: true, hasVideo: false }
-          : { hasVideo: true };
-
-        const dlStream = await ytdl.download(job.sourceUrl, {
-          filter: filterCriteria,
-          quality: isAudioOnly ? 'highestaudio' : 'highest',
-        });
-
-        const out = fs.createWriteStream(finalPath);
-        await new Promise<void>((resolve, reject) => {
-          dlStream.pipe(out);
-          dlStream.on('error', (err: any) => {
-            out.destroy();
-            reject(err);
-          });
-          out.on('error', reject);
-          out.on('finish', () => resolve());
-
-          signal.addEventListener(
-            'abort',
-            () => {
-              dlStream.destroy();
-              out.destroy();
-              reject(new Error('Operation aborted'));
+          const streamRes = await fetch(selectedFormat.url, {
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             },
-            { once: true }
-          );
-        });
+            signal,
+          });
 
-        downloaded = true;
+          if (streamRes.ok && streamRes.body) {
+            const { Readable } = await import('node:stream');
+            const out = fs.createWriteStream(finalPath);
+            const readable = Readable.fromWeb(streamRes.body as any);
+
+            await new Promise<void>((resolve, reject) => {
+              readable.pipe(out);
+              readable.on('error', reject);
+              out.on('error', reject);
+              out.on('finish', () => resolve());
+
+              signal.addEventListener(
+                'abort',
+                () => {
+                  try { readable.destroy(); } catch {}
+                  try { out.destroy(); } catch {}
+                  reject(new Error('Operation aborted'));
+                },
+                { once: true }
+              );
+            });
+
+            downloaded = true;
+          }
+        }
       } catch (ytErr) {
         console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);
       }

@@ -30,6 +30,9 @@ export interface ExtractorResult extends Omit<MediaAnalysisResult, 'durationSeco
     isPermitted: boolean;
     rightsBasis: string;
   };
+  directStreamUrl?: string;
+  directMimeType?: string;
+  deliveryMode?: 'zero-hop' | 'tunnel';
 }
 
 export function detectMediaPlatform(rawUrl: string): SupportedPlatform {
@@ -934,7 +937,9 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
   let thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
   let resolvedDuration = 180;
 
-  // 1. Try @distube/ytdl-core first for complete metadata & real duration
+  let rawYtdlFormats: any[] = [];
+
+  // 1. Try @distube/ytdl-core first for complete metadata, real duration & all formats
   try {
     const { Ytdl } = await import('@distube/ytdl-core');
     const ytdl = new Ytdl();
@@ -952,6 +957,9 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
       if (info.videoDetails.lengthSeconds) {
         resolvedDuration = Number(info.videoDetails.lengthSeconds) || 180;
       }
+    }
+    if (Array.isArray(info.formats) && info.formats.length > 0) {
+      rawYtdlFormats = info.formats;
     }
   } catch {
     // 2. Fallback to oEmbed API
@@ -975,6 +983,195 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
   }
 
   const id = `yt_${videoId}_${Date.now()}`;
+
+  // If raw formats are available from @distube/ytdl-core, map ALL formats (8K down to 144p)!
+  if (rawYtdlFormats.length > 0) {
+    const videoFormatMap = new Map<string, VideoFormatOption>();
+    const videoStreamMap = new Map<string, MediaStream>();
+
+    const rawAudioList = rawYtdlFormats.filter((f: any) => f.hasAudio && !f.hasVideo && f.url);
+    const bestAac = rawAudioList.find((f: any) => (f.container === 'mp4' || String(f.codecs || '').includes('mp4a'))) || rawAudioList[0];
+
+    const audioFormats: AudioFormatOption[] = [
+      {
+        id: 'a_mp3',
+        sourceAudioFormatId: bestAac ? String(bestAac.itag) : '140',
+        label: 'MP3 High Quality',
+        format: 'mp3',
+        bitrateLabel: '320 kbps',
+        estimatedBytes: Math.round((320000 * resolvedDuration) / 8),
+      },
+      {
+        id: 'a_flac',
+        sourceAudioFormatId: bestAac ? String(bestAac.itag) : '140',
+        label: 'Lossless FLAC',
+        format: 'flac',
+        bitrateLabel: 'Studio Quality',
+        estimatedBytes: Math.round((900000 * resolvedDuration) / 8),
+      },
+      {
+        id: 'a_m4a',
+        sourceAudioFormatId: bestAac ? String(bestAac.itag) : '140',
+        label: 'AAC Audio (M4A)',
+        format: 'm4a',
+        bitrateLabel: '256 kbps',
+        estimatedBytes: Math.round((256000 * resolvedDuration) / 8),
+      },
+    ];
+
+    const audioStreams: MediaStream[] = [];
+    rawAudioList.forEach((a: any, idx: number) => {
+      audioStreams.push({
+        streamIndex: 100 + idx,
+        streamType: 'audio',
+        codec: String(a.codecs || 'aac').split('.')[0],
+        bitrateKbps: Math.round((a.bitrate || a.audioBitrate || 128000) / 1000),
+        formatId: String(a.itag),
+        sampleRateHz: 48000,
+        channels: 2,
+        channelLayout: 'stereo',
+        estimatedSizeBytes: a.contentLength ? parseInt(a.contentLength, 10) : Math.round(((a.bitrate || 128000) * resolvedDuration) / 8),
+        sizeIsEstimate: !a.contentLength,
+        recommended: idx === 0,
+        isNativeLossless: true,
+        isStreamCopyCandidate: true,
+        transcodeRequired: false,
+        notes: `${a.container || 'm4a'} audio track`,
+        url: a.url,
+      });
+    });
+
+    const vFormats = rawYtdlFormats.filter((f: any) => f.hasVideo && f.height && f.height > 0 && f.url);
+    for (const f of vFormats) {
+      const height = Number(f.height);
+      const width = Number(f.width || Math.round((height * 16) / 9));
+      const fps = f.fps ? Math.round(f.fps) : 30;
+      const vcodecRaw = String(f.codecs || f.videoCodec || 'h264').toLowerCase();
+      const vcodec = vcodecRaw.split('.')[0];
+      const sourceContainer = f.container || (vcodec.includes('vp9') || vcodec.includes('av01') ? 'webm' : 'mp4');
+
+      const isHdr = Boolean(
+        /hdr|colorInfo/i.test(JSON.stringify(f.colorInfo || '')) ||
+        /vp09\.02|av01\.0\.\d+m\.10/i.test(vcodecRaw)
+      );
+
+      const resLabel = resolveResolutionLabel(height, width);
+      const resTier = resolveResolutionTier(height);
+      const tbr = f.bitrate ? Math.round(f.bitrate / 1000) : (height >= 4320 ? 45000 : height >= 2160 ? 25000 : height >= 1440 ? 12000 : height >= 1080 ? 5000 : 2500);
+
+      let estimatedBytes = f.contentLength ? parseInt(f.contentLength, 10) : 0;
+      if (!estimatedBytes && resolvedDuration > 0 && tbr > 0) {
+        estimatedBytes = Math.round((tbr * 1000 * resolvedDuration) / 8);
+      }
+      if (estimatedBytes && !f.hasAudio && bestAac?.contentLength) {
+        estimatedBytes += parseInt(bestAac.contentLength, 10);
+      }
+
+      const dedupeKey = `${resTier}_${fps >= 50 ? 60 : 30}_${isHdr ? 'hdr' : 'sdr'}_${sourceContainer}`;
+      const badge = resolveQualityBadge(height, fps, isHdr);
+
+      const videoOpt: VideoFormatOption = {
+        id: `v_${f.itag}`,
+        videoFormatId: String(f.itag),
+        pairedAudioFormatId: bestAac ? String(bestAac.itag) : '140',
+        label: resLabel,
+        resolutionHeight: height,
+        width,
+        fps,
+        vcodec,
+        acodec: bestAac ? String(bestAac.codecs || 'aac').split('.')[0] : 'aac',
+        container: sourceContainer,
+        targetContainer: sourceContainer === 'webm' ? 'webm' : 'mp4',
+        isHdr,
+        requiresMerge: !f.hasAudio,
+        estimatedBytes,
+        bitrateKbps: tbr,
+        badge,
+      };
+
+      const streamOpt: MediaStream = {
+        streamIndex: 0,
+        streamType: 'video',
+        codec: vcodec,
+        bitrateKbps: tbr,
+        formatId: String(f.itag),
+        width,
+        height,
+        resolutionLabel: resTier,
+        frameRate: fps,
+        fps,
+        hdr: isHdr,
+        estimatedSizeBytes: estimatedBytes,
+        sizeIsEstimate: !f.contentLength,
+        recommended: height === 1080 || height === 2160,
+        isNativeLossless: true,
+        isStreamCopyCandidate: true,
+        transcodeRequired: false,
+        notes: f.hasAudio ? 'Progressive stream' : 'Adaptive DASH stream (lossless copy)',
+        url: f.url,
+      };
+
+      const existing = videoFormatMap.get(dedupeKey);
+      if (!existing || (videoOpt.bitrateKbps || 0) > (existing.bitrateKbps || 0)) {
+        videoFormatMap.set(dedupeKey, videoOpt);
+        videoStreamMap.set(dedupeKey, streamOpt);
+      }
+    }
+
+    const sortedVideoFormats = Array.from(videoFormatMap.values()).sort((a, b) => {
+      if (b.resolutionHeight !== a.resolutionHeight) return b.resolutionHeight - a.resolutionHeight;
+      if (b.fps !== a.fps) return b.fps - a.fps;
+      return (b.bitrateKbps || 0) - (a.bitrateKbps || 0);
+    });
+
+    const sortedVideoStreams = Array.from(videoStreamMap.values()).sort((a, b) => {
+      if ((b.height || 0) !== (a.height || 0)) return (b.height || 0) - (a.height || 0);
+      return (b.fps || 0) - (a.fps || 0);
+    });
+
+    sortedVideoStreams.forEach((s, idx) => { s.streamIndex = idx; });
+
+    const maxResTier = sortedVideoFormats[0]?.resolutionHeight >= 4320 ? '8K Ultra HD'
+      : sortedVideoFormats[0]?.resolutionHeight >= 2160 ? '4K Ultra HD'
+      : sortedVideoFormats[0]?.resolutionHeight >= 1440 ? '1440p Quad HD'
+      : '1080p Full HD';
+
+    return {
+      id,
+      assetId: id,
+      analyzedAt: new Date().toISOString(),
+      platform: 'youtube',
+      mediaType: 'video',
+      title,
+      uploader,
+      author: uploader,
+      uploaderUrl,
+      durationSeconds: resolvedDuration,
+      thumbnailUrl,
+      sourceUrl,
+      originalUrl: sourceUrl,
+      container: 'mp4',
+      fileSizeBytes: sortedVideoFormats[0]?.estimatedBytes || 45000000,
+      maxResolutionLabel: maxResTier,
+      videoFormats: sortedVideoFormats,
+      audioFormats,
+      videoStreams: sortedVideoStreams,
+      audioStreams,
+      streams: [...sortedVideoStreams, ...audioStreams],
+      availableFormats: {
+        videoResolutions: sortedVideoFormats.map(v => v.label),
+        audioCodecs: ['mp3', 'flac', 'm4a'],
+      },
+      rightsCheck: {
+        isPermitted: true,
+        rightsBasis: 'Public media stream inspection',
+      },
+      permitted: true,
+      rightsNote: 'Publicly accessible media stream',
+      directStreamUrl: sortedVideoStreams[0]?.url,
+      directMimeType: sortedVideoStreams[0]?.codec?.includes('vp9') ? 'video/webm' : 'video/mp4',
+    };
+  }
 
   const videoFormats: VideoFormatOption[] = [
     {

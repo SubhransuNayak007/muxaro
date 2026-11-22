@@ -64,14 +64,6 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/dock"
-                  className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
-                >
-                  Dock
-                </Link>
-              </li>
-              <li>
-                <Link
                   href="/credits"
                   className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
                 >
