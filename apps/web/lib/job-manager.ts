@@ -930,7 +930,9 @@ class JobManager {
     if (isYouTube) {
       try {
         const { Ytdl, Client } = await import('@distube/ytdl-core');
+        const ytCookie = process.env.YOUTUBE_COOKIE?.trim();
         const ytdl = new Ytdl({
+          cookie: ytCookie || undefined,
           clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
         });
 
@@ -1011,8 +1013,21 @@ class JobManager {
 
           downloaded = true;
         }
-      } catch (ytErr) {
+      } catch (ytErr: any) {
         console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);
+        if (ytErr?.code === 'BOT_CHECK' || ytErr?.message?.includes('Sign in to confirm you’re not a bot')) {
+          const botMsg = 'YouTube requires session verification on cloud servers (BotGuard check). To enable YouTube downloads on Vercel, configure the YOUTUBE_COOKIE environment variable, or run MUXARO locally.';
+          job.status = 'failed';
+          job.stage = 'FAILED';
+          job.stageMessage = botMsg;
+          job.error = {
+            code: 'ERR_YOUTUBE_BOT_CHECK',
+            message: botMsg,
+            retryable: false,
+          };
+          this.notify(job);
+          return;
+        }
       }
     } else if (job.sourceUrl.startsWith('http://') || job.sourceUrl.startsWith('https://')) {
       try {

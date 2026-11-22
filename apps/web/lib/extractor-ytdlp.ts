@@ -942,7 +942,9 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
   // 1. Try @distube/ytdl-core first for complete metadata, real duration & all formats
   try {
     const { Ytdl, Client } = await import('@distube/ytdl-core');
+    const ytCookie = process.env.YOUTUBE_COOKIE?.trim();
     const ytdl = new Ytdl({
+      cookie: ytCookie || undefined,
       clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
     });
     const info = await ytdl.getInfo(sourceUrl);

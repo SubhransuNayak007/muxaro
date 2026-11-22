@@ -74,7 +74,9 @@ export async function GET(
   if (!localFileValid && job?.sourceUrl && /(?:youtube\.com|youtu\.be)/i.test(job.sourceUrl)) {
     try {
       const { Ytdl, Client } = await import('@distube/ytdl-core');
+      const ytCookie = process.env.YOUTUBE_COOKIE?.trim();
       const ytdl = new Ytdl({
+        cookie: ytCookie || undefined,
         clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
       });
       const info = await ytdl.getInfo(job.sourceUrl);
