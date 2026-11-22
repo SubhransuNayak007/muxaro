@@ -1,5 +1,5 @@
 /**
- * Project MUXARO - Source Adapters Master Test Runner
+ * Project Garuda / Muxaro - Source Adapters Master Test Runner
  * 
  * Executes all unit test suites in packages/source-adapters/tests/
  */
@@ -16,12 +16,21 @@ const testFiles = [
   'ssrf-filter.test.ts',
   'rights-validator.test.ts',
   'direct-adapter.test.ts',
+  'ipv6-rotator.test.ts',
+  'streaming-manifest-resolver.test.ts',
+  'youtube-adapter.test.ts',
   'youtube-permitted-adapter.test.ts',
+  'innertube-client-matrix.test.ts',
+  'n-sig-solver.test.ts',
+  'potoken-pool.test.ts',
+  'tiktok-adapter.test.ts',
+  'instagram-adapter.test.ts',
+  'twitter-adapter.test.ts',
   'adapter-registry.test.ts',
 ];
 
 console.log('=====================================================');
-console.log('MUXARO SOURCE ADAPTERS - MASTER TEST SUITE');
+console.log('PROJECT GARUDA SOURCE ADAPTERS - MASTER TEST SUITE');
 console.log('=====================================================\n');
 
 let failedCount = 0;

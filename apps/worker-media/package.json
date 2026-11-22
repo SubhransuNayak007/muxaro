@@ -1,0 +1,77 @@
+{
+  "name": "@muxaro/worker-media",
+  "version": "1.0.0",
+  "description": "MUXARO Media Processing Platform - Multi-Lane FFmpeg Stream Pipeline & BullMQ Worker Fleet",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./stream-pipeline": {
+      "types": "./dist/stream-pipeline.d.ts",
+      "import": "./dist/stream-pipeline.js",
+      "default": "./src/stream-pipeline.ts"
+    },
+    "./eco-mode": {
+      "types": "./dist/eco-mode.d.ts",
+      "import": "./dist/eco-mode.js",
+      "default": "./src/eco-mode.ts"
+    },
+    "./batch-zipper": {
+      "types": "./dist/batch-zipper.d.ts",
+      "import": "./dist/batch-zipper.js",
+      "default": "./src/batch-zipper.ts"
+    },
+    "./cleanup-worker": {
+      "types": "./dist/cleanup-worker.d.ts",
+      "import": "./dist/cleanup-worker.js",
+      "default": "./src/cleanup-worker.ts"
+    },
+    "./heartbeat": {
+      "types": "./dist/heartbeat.d.ts",
+      "import": "./dist/heartbeat.js",
+      "default": "./src/heartbeat.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "keywords": [
+    "muxaro",
+    "media-worker",
+    "ffmpeg",
+    "bullmq",
+    "stream-pipeline",
+    "r2",
+    "s3",
+    "eco-mode",
+    "zero-copy"
+  ],
+  "author": "Muxaro Core Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@aws-sdk/lib-storage": "^3.750.0",
+    "@muxaro/db": "link:../../packages/db",
+    "@muxaro/shared": "link:../../packages/shared",
+    "archiver": "^7.0.1",
+    "bullmq": "^5.41.0",
+    "drizzle-orm": "^0.39.0",
+    "ioredis": "^5.5.0",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

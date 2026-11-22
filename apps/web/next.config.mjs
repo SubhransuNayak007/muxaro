@@ -1,22 +1,37 @@
 /** @type {import('next').NextConfig} */
 const isCloudflarePages = process.env.CLOUDFLARE_PAGES === '1';
 
-const candidateOrigin = (
-  process.env.API_INTERNAL_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  'http://127.0.0.1:4000'
-)
-  .trim()
-  .replace(/\/+$/, '')
-  .replace(/\/api\/v1$/i, '');
-
-const isDeadHost = /api\.muxaro\.app|muxaro-api\.internal/i.test(candidateOrigin);
-const rawApiOrigin = isDeadHost ? 'http://127.0.0.1:4000' : candidateOrigin;
+const externalApiUrl = process.env.API_INTERNAL_URL?.trim();
+const hasExternalBackend = Boolean(
+  externalApiUrl &&
+  !externalApiUrl.includes('127.0.0.1') &&
+  !externalApiUrl.includes('localhost') &&
+  !/api\.muxaro\.app|muxaro-api\.internal/i.test(externalApiUrl)
+);
 
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**.ytimg.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.youtube.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.cdninstagram.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.tiktokcdn.com',
+      },
+    ],
+  },
   ...(isCloudflarePages
     ? {
         output: 'export',
@@ -25,14 +40,18 @@ const nextConfig = {
         },
       }
     : {
-        async rewrites() {
-          return [
-            {
-              source: '/api/v1/:path*',
-              destination: `${rawApiOrigin}/api/v1/:path*`,
-            },
-          ];
-        },
+        ...(hasExternalBackend
+          ? {
+              async rewrites() {
+                return [
+                  {
+                    source: '/api/v1/:path*',
+                    destination: `${externalApiUrl}/api/v1/:path*`,
+                  },
+                ];
+              },
+            }
+          : {}),
       }),
 };
 

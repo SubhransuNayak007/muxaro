@@ -18,7 +18,7 @@ export const DEFAULT_SYSTEM_SETTINGS: ReadonlyArray<{
   description: string;
 }> = [
   { key: 'base_individual_limit', value: '10', description: 'Free registered user individual jobs per rolling 24h' },
-  { key: 'guest_individual_limit', value: '3', description: 'Guest individual jobs per rolling 24h' },
+  { key: 'guest_individual_limit', value: '100', description: 'Guest individual jobs per rolling 24h' },
   { key: 'premium_individual_limit', value: '100', description: 'Premium user individual jobs per rolling 24h' },
   { key: 'base_playlist_limit', value: '1', description: 'Free registered user playlist jobs per rolling 24h' },
   { key: 'guest_playlist_limit', value: '0', description: 'Guest playlist jobs per rolling 24h' },

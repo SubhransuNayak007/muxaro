@@ -220,9 +220,10 @@ export default function Navbar() {
   const navLinks = [
     { href: '/', label: 'Home' },
     { href: '/tools', label: 'Tools' },
-    { href: '/dashboard', label: 'My Downloads' },
-    { href: '/credits', label: 'Usage' },
-    { href: '/account', label: 'Account' },
+    { href: '/downloads', label: 'Downloads' },
+    { href: '/usage', label: 'Usage' },
+    { href: '/status', label: 'Status' },
+    { href: '/credits', label: 'Credits' },
   ];
 
   const isLinkActive = useCallback(
@@ -348,7 +349,7 @@ export default function Navbar() {
               width: `${sliderStyle.width}px`,
               opacity: mounted ? sliderStyle.opacity : 0,
               transition: hasPositioned
-                ? 'transform 320ms cubic-bezier(0.16, 1, 0.3, 1), width 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease'
+                ? 'transform 320ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease'
                 : 'opacity 180ms ease',
             }}
             aria-hidden="true"
@@ -381,13 +382,13 @@ export default function Navbar() {
         </nav>
 
         {/* Right: Auth Controls, Live Credits, Lightweight Mode & Theme Switcher */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 min-h-[36px]">
           {/* Signed-in: Live Credits Badge + Account Menu */}
           {mounted && authenticated && user ? (
             <>
               <Link
                 href="/credits"
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-line bg-surface-muted hover:border-brand-violet transition-colors active:opacity-90 text-xs whitespace-nowrap group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 h-9 rounded-full border border-line bg-surface-muted hover:border-brand-violet transition-colors active:opacity-90 text-xs whitespace-nowrap group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
                 title="View your available credits and daily limits"
                 aria-label={creditsAriaLabel}
               >
@@ -403,7 +404,7 @@ export default function Navbar() {
                   />
                 ) : (
                   <span className="font-medium text-content-secondary group-hover:text-content transition-colors">
-                    Usage
+                    Credits
                   </span>
                 )}
               </Link>
@@ -417,7 +418,7 @@ export default function Navbar() {
                   aria-haspopup="menu"
                   aria-controls="navbar-account-menu"
                   aria-label={`Account menu for ${user.publicUserId}`}
-                  className="inline-flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-full border border-line bg-surface hover:bg-surface-muted hover:border-brand-violet transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                  className="inline-flex items-center gap-2 pl-1.5 pr-2.5 h-9 rounded-full border border-line bg-surface hover:bg-surface-muted hover:border-brand-violet transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
                 >
                   {isSafeAvatarUrl(user.avatarUrl) ? (
                     <img
@@ -473,13 +474,13 @@ export default function Navbar() {
                         <span>Account</span>
                       </Link>
                       <Link
-                        href="/dashboard"
+                        href="/downloads"
                         role="menuitem"
                         onClick={() => setAccountMenuOpen(false)}
                         className="flex items-center gap-2.5 px-3.5 py-2 text-sm text-content-secondary hover:text-content hover:bg-surface-muted transition-colors focus-visible:outline-none focus-visible:bg-surface-muted focus-visible:text-content"
                       >
                         <Download className="w-4 h-4 shrink-0" aria-hidden="true" />
-                        <span>My Downloads</span>
+                        <span>Downloads</span>
                       </Link>
                       <Link
                         href="/credits"
@@ -489,7 +490,7 @@ export default function Navbar() {
                       >
                         <span className="flex items-center gap-2.5">
                           <Zap className="w-4 h-4 shrink-0" aria-hidden="true" />
-                          <span>Usage</span>
+                          <span>Credits</span>
                         </span>
                         {creditsDisplay && (
                           <span className="text-xs font-semibold text-content tabular-nums">
@@ -528,41 +529,59 @@ export default function Navbar() {
             </>
           ) : !mounted || authLoading ? (
             <span
-              className="hidden sm:inline-block h-8 w-24 rounded-full bg-surface-muted"
+              className="hidden sm:inline-block h-9 w-[190px] rounded-xl bg-surface-muted/60 animate-pulse"
               aria-hidden="true"
             />
           ) : (
-            /* Signed-out: Clean Sign in + Create free account buttons */
-            <div className="hidden sm:flex items-center gap-2">
+            /* Signed-out: Clean Sign in + Create free account buttons with fixed slot width */
+            <div className="hidden sm:flex items-center gap-2 min-w-[190px] justify-end">
               <Link
                 href="/login"
-                className="px-3 py-1.5 text-sm font-medium rounded-lg text-content-secondary hover:text-content hover:bg-surface-muted transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                className="px-3 py-1.5 h-9 flex items-center text-sm font-medium rounded-lg text-content-secondary hover:text-content hover:bg-surface-muted transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
               >
                 Sign in
               </Link>
               <Link
                 href="/register"
-                className="px-3.5 py-1.5 text-xs font-semibold rounded-full muxaro-btn-primary whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                className="px-3.5 py-1.5 h-9 flex items-center text-xs font-semibold rounded-xl muxaro-btn-primary whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
               >
                 Create free account
               </Link>
             </div>
           )}
 
-          {/* Lightweight Mode Toggle (reduces animations for older devices & slow networks) */}
+          {/* Eco Mode / Reduced Motion Toggle */}
           <button
             type="button"
             onClick={toggleLightweight}
-            title="Lightweight mode: reduces animations for older devices & slow networks"
-            aria-label={lightweightLabel}
-            aria-pressed={mounted ? isLightweightActive : undefined}
-            className={`p-2 rounded-lg border transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+            title={
               isLightweightActive
-                ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content'
+                ? 'Eco mode active (reduced motion and battery saving). Click to turn off.'
+                : 'Eco mode (reduced motion): limits background animations and conserves CPU & battery.'
+            }
+            aria-label={
+              isLightweightActive
+                ? 'Eco mode active. Click to turn off.'
+                : 'Enable Eco mode for reduced motion'
+            }
+            aria-pressed={mounted ? isLightweightActive : undefined}
+            className={`h-9 min-w-[36px] sm:min-w-[102px] shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-medium transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+              isLightweightActive
+                ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
                 : 'border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content'
             }`}
           >
-            <Feather className="w-4 h-4" aria-hidden="true" />
+            <Feather className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span className="hidden sm:inline">Eco mode</span>
+            <span
+              className={`text-[10px] font-semibold px-1 py-0.2 rounded font-mono ${
+                isLightweightActive
+                  ? 'bg-brand-violet text-white'
+                  : 'bg-surface-elevated text-content-secondary'
+              }`}
+            >
+              {isLightweightActive ? 'On' : 'Off'}
+            </span>
           </button>
 
           {/* Theme Switcher Button */}
@@ -572,7 +591,7 @@ export default function Navbar() {
             title={mounted && isDark ? 'Switch to light theme' : 'Switch to dark theme'}
             aria-label={mounted && isDark ? 'Switch to light theme' : 'Switch to dark theme'}
             aria-pressed={mounted ? isDark : undefined}
-            className="p-2 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="w-9 h-9 shrink-0 flex items-center justify-center rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           >
             {mounted && isDark ? (
               <Sun className="w-4 h-4 text-warning" aria-hidden="true" />
@@ -589,7 +608,7 @@ export default function Navbar() {
             aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-nav-drawer"
-            className="lg:hidden p-2 rounded-lg border border-line bg-surface text-content hover:bg-surface-muted transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="w-9 h-9 shrink-0 flex items-center justify-center lg:hidden rounded-lg border border-line bg-surface text-content hover:bg-surface-muted transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
           >
             {mobileMenuOpen ? (
               <X className="w-5 h-5" aria-hidden="true" />
@@ -707,7 +726,7 @@ export default function Navbar() {
                 <Link
                   href="/register"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="flex items-center justify-center py-2 px-3 rounded-full muxaro-btn-primary text-xs font-semibold whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+                  className="flex items-center justify-center py-2 px-3 rounded-xl muxaro-btn-primary text-xs font-semibold whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
                 >
                   Create free account
                 </Link>
@@ -715,18 +734,22 @@ export default function Navbar() {
             )}
 
             <div className="flex items-center justify-between px-1 pt-1">
-              <span className="text-xs font-medium text-content-secondary">Lightweight mode</span>
+              <div className="flex flex-col">
+                <span className="text-xs font-medium text-content">Eco mode</span>
+                <span className="text-[11px] text-content-secondary">Reduced motion & battery saving</span>
+              </div>
               <button
                 type="button"
                 onClick={toggleLightweight}
                 aria-pressed={mounted ? isLightweightActive : undefined}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
+                aria-label="Toggle Eco mode"
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-medium transition-colors active:opacity-90 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${
                   isLightweightActive
-                    ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content'
+                    ? 'border-brand-violet bg-info-bg text-brand-violet dark:text-content font-semibold'
                     : 'border-line bg-surface-muted text-content-secondary hover:text-content'
                 }`}
               >
-                <Feather className="w-3 h-3" aria-hidden="true" />
+                <Feather className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>{isLightweightActive ? 'On' : 'Off'}</span>
               </button>
             </div>

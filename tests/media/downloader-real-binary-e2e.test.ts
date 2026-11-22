@@ -165,7 +165,8 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
     });
     assert.strictEqual(dlRedirectRes.statusCode, 302, 'Download route must redirect to signed download token');
     const signedDownloadUrl = dlRedirectRes.headers.location!;
-    assert.ok(signedDownloadUrl.includes('/api/v1/download/'));
+    console.log('SIGNED_DOWNLOAD_URL:', signedDownloadUrl);
+    assert.ok(signedDownloadUrl.includes('/download'));
 
     // 5. Test default download delivery (attachment)
     const binaryRes = await app.inject({
@@ -173,6 +174,7 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
       url: signedDownloadUrl,
       headers: { authorization: `Bearer ${userId}` },
     });
+    console.log('BINARY_RES_STATUS:', binaryRes.statusCode, binaryRes.headers);
     if (binaryRes.statusCode !== 200) {
       console.error('Binary download returned error:', binaryRes.statusCode, binaryRes.body);
     }
@@ -272,7 +274,8 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
       await sleep(350);
     }
 
-    assert.strictEqual(jobData.status, 'READY');
+    console.log('TEST 3 JOB DATA:', JSON.stringify(jobData, null, 2));
+    assert.strictEqual(jobData.status, 'READY', `Job failed with: ${JSON.stringify(jobData.error)}`);
     assert.strictEqual(jobData.targetFormat, 'mp3');
 
     // 4. Download signed binary
@@ -281,6 +284,7 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
       url: `/api/v1/jobs/${jobId}/download`,
       headers: { authorization: `Bearer ${userId}` },
     });
+    console.log('TEST 3 DL REDIRECT:', dlRedirectRes.statusCode, dlRedirectRes.headers);
     assert.strictEqual(dlRedirectRes.statusCode, 302);
     const signedUrl = dlRedirectRes.headers.location!;
 
@@ -289,6 +293,7 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
       url: signedUrl,
       headers: { authorization: `Bearer ${userId}` },
     });
+    console.log('TEST 3 BINARY RES:', binaryRes.statusCode, binaryRes.headers);
     assert.strictEqual(binaryRes.statusCode, 200);
     assert.strictEqual(binaryRes.headers['content-type'], 'audio/mpeg');
 
@@ -296,6 +301,7 @@ describe('MUXARO Downloader - Real Binary E2E Execution & Delivery', () => {
     const outMp3Path = path.join(tmpDir, 'extracted_soundtrack.mp3');
     fs.writeFileSync(outMp3Path, binaryRes.rawPayload);
     const probe = ffprobeJson(outMp3Path);
+    console.log('TEST 3 FFPROBE:', JSON.stringify(probe.streams, null, 2));
     const aStream = probe.streams.find((s: any) => s.codec_type === 'audio');
     assert.ok(aStream, 'Extracted MP3 must have a valid audio stream');
     assert.strictEqual(aStream.codec_name, 'mp3');

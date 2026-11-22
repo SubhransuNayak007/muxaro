@@ -1,6 +1,6 @@
-# MUXARO Infrastructure & Deployment Guide
+# MUXARO Infrastructure & Production Cloud Systems Guide
 
-This directory houses containerization manifests, local and staging orchestration, database initialization scripts, health check utilities, and Terraform Infrastructure-as-Code (IaC) blueprints for Project MUXARO.
+This directory houses containerization manifests, multi-service local/staging orchestration, Kubernetes autoscaling (KEDA) policies, Cloudflare edge streaming workers, Cloudflare R2 bucket lifecycle configurations, Prometheus metrics scrapers, and k6 load-testing suites for Project MUXARO.
 
 ---
 
@@ -8,104 +8,115 @@ This directory houses containerization manifests, local and staging orchestratio
 
 ```
 infra/
-├── .env.example              # Environment variables template for containers
-├── docker-compose.yml        # Multi-service local/staging orchestration
-├── Dockerfile.web            # Multi-stage production container for Next.js Web
-├── Dockerfile.api            # Multi-stage production container for Fastify API
-├── Dockerfile.media          # Hardened Debian container with FFmpeg & FFprobe
+├── .env.example                     # Environment variables template for containers
+├── docker-compose.yml               # Complete multi-service orchestration (Part 8.1)
+├── Dockerfile.api                   # Multi-stage Fastify 5 REST & SSE API Gateway container
+├── Dockerfile.worker-analyse        # Multi-stage lightweight metadata extraction worker
+├── Dockerfile.worker-media          # Multi-stage FFmpeg transcoder & packager (Node 22, Tini, muxaro UID 10001)
+├── Dockerfile.web                   # Multi-stage Next.js frontend container
 ├── scripts/
-│   ├── init-db.sql           # PostgreSQL 16 relational schema & seed migrations
-│   ├── init-minio.sh         # MinIO S3 bucket provisioning & lifecycle rules
-│   ├── run-migrations.sh     # Automated migration runner script
-│   └── healthcheck.sh        # Multi-service HTTP & endpoint health validator
-└── terraform/
-    ├── versions.tf           # Terraform & AWS/Cloudflare provider constraints
-    ├── variables.tf          # Configurable parameters (VPC, instance types, sizing)
-    ├── terraform.tfvars.example # Production example variables
-    ├── main.tf               # Root module orchestrating all child modules
-    ├── outputs.tf            # ALB DNS, RDS endpoint, SQS URLs, S3 bucket names
-    └── modules/
-        ├── networking/       # Multi-AZ VPC (Public, App, Worker, Data subnets)
-        ├── alb/              # Application Load Balancer with HTTPS redirect
-        ├── ecs/              # ECS Fargate Cluster, Task Definitions & Services
-        ├── workers/          # EC2 Spot Transcoder Autoscaling Group + NVMe mount
-        ├── sqs/              # SQS Job Distribution Queue & Dead-Letter Queue
-        ├── s3/               # Ephemeral Uploads & Processed Artifacts Buckets
-        ├── database/         # RDS PostgreSQL 16 Multi-AZ Cluster
-        ├── redis/            # ElastiCache Redis 7 Replication Group
-        └── cloudflare/       # Edge DNS, WAF rate limiting, SSL Strict & Caching
+│   ├── init-db.sql                  # PostgreSQL 16 relational schema (pgcrypto, users, jobs, ledgers)
+│   ├── init-minio.sh                # MinIO S3 bucket provisioning & prefix lifecycle initialization
+│   ├── run-migrations.sh            # Automated database migration runner script
+│   └── healthcheck.sh               # Multi-service HTTP & endpoint health validator
+├── k8s/
+│   ├── keda-transcode.yaml          # KEDA ScaledObject for lane:transcode (Depth: 2, Min: 1, Max: 40)
+│   └── keda-fast-io.yaml            # KEDA ScaledObject for lane:fast-io (Depth: 10, Min: 1, Max: 20)
+├── r2/
+│   └── lifecycle.json               # Cloudflare R2 prefix retention rules (60m, 24h, multipart abort)
+├── cloudflare/
+│   ├── download-worker.ts           # Edge worker verifying HMAC-SHA256 tokens & streaming R2 with Range support
+│   ├── worker-env.d.ts              # Ambient TypeScript definitions for Cloudflare Workers & R2
+│   ├── tsconfig.json                # Strict TypeScript configuration for edge workers
+│   └── wrangler.toml                # Cloudflare Worker deployment manifest
+├── k6/
+│   └── load-test.js                 # k6 load testing suite for /v1/analyse, SSE stability, and downloads
+├── prometheus/
+│   └── prometheus.yml               # Prometheus scrape configurations for API, workers & datastores
+└── terraform/                       # Terraform Infrastructure-as-Code (AWS + Cloudflare)
 ```
 
 ---
 
-## 2. Quickstart: Local Orchestration with Docker Compose
+## 2. Local & Staging Orchestration (Docker Compose)
 
-### Prerequisites
-- Docker Engine 24.0+ and Docker Compose v2.20+
-- At least 4 GB of available host RAM
+### Services Orchestrated:
+1. **`muxaro-postgres`** (PostgreSQL 16): Database with `pgcrypto` extension for atomic credit reservation, user accounts, and ledger tracking.
+2. **`muxaro-redis`** (Redis 7): In-memory store for sliding-window rate limiting, token buckets, and BullMQ queues (`lane:fast-io`, `lane:transcode`, `lane:batch`, `lane:analyse`).
+3. **`muxaro-minio`** (MinIO S3): High-performance S3/R2 emulation store.
+4. **`muxaro-minio-init`**: Automated provisioning creating buckets (`muxaro-uploads`, `muxaro-artifacts`, `muxaro-scratch`) and applying lifecycle rules.
+5. **`muxaro-api`**: Fastify 5 REST & SSE API Gateway (port `4000`).
+6. **`muxaro-worker-analyse`**: Lightweight metadata & stream analysis worker (port `5001`).
+7. **`muxaro-worker-media`**: FFmpeg transcoding & packaging worker (port `5000`).
+8. **`muxaro-prometheus`**: Metrics collector and telemetry scraper (port `9090`).
 
-### Step 1: Initialize Environment
+### Running the Stack:
 ```bash
+# Copy environment variables
 cp infra/.env.example infra/.env
-```
 
-### Step 2: Start All Infrastructure Services
-```bash
-docker compose -f infra/docker-compose.yml up -d
-```
+# Launch all infrastructure services
+docker compose -f infra/docker-compose.yml up -d --build
 
-This launches and health-checks 6 interconnected services:
-1. `muxaro-postgres`: PostgreSQL 16 on port `5432` with auto-applied `init-db.sql`.
-2. `muxaro-redis`: Redis 7 on port `6379` with `volatile-lru` memory cap.
-3. `muxaro-minio`: MinIO S3 object store on ports `9000` (API) and `9001` (Web Console).
-4. `muxaro-minio-init`: Automated bucket creator (`muxaro-uploads`, `muxaro-artifacts`, `muxaro-scratch`).
-5. `muxaro-api`: Fastify API microservice on port `4000`.
-6. `muxaro-media-worker`: FFmpeg/FFprobe media transcoder on port `5000`.
-7. `muxaro-web`: Next.js 14 frontend web application on port `3000`.
-
-### Step 3: Verify Service Health
-Run the automated multi-service health checker:
-```bash
-sh infra/scripts/healthcheck.sh
+# Inspect logs
+docker compose -f infra/docker-compose.yml logs -f
 ```
 
 ---
 
-## 3. Production Cloud Deployment with Terraform
+## 3. Kubernetes Autoscaling via KEDA (Part 8.2)
 
-The production infrastructure follows a defense-in-depth, zero-trust cloud architecture:
-```
-Cloudflare Edge (WAF/DDoS) ➔ AWS ALB ➔ ECS Fargate (Web & API) ➔ AWS SQS ➔ EC2 Spot Transcoders ➔ AWS S3
-                                                 ├── RDS PostgreSQL 16 (Multi-AZ)
-                                                 └── ElastiCache Redis 7 (Multi-AZ)
-```
+### `lane:transcode` (Heavy CPU Video Transcoding)
+- **Target Queue Depth:** 2 pending jobs per pod
+- **Min Replicas:** 1
+- **Max Replicas:** 40
+- **Scale-Up Policy:** 100% capacity boost within 15 seconds
+- **Scale-Down Stabilization:** 300 seconds to protect active video encodings
+- **Manifest:** `infra/k8s/keda-transcode.yaml`
 
-### Deployment Instructions:
-1. Navigate to the terraform directory:
-   ```bash
-   cd infra/terraform
-   ```
-2. Create and configure variables:
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   # Populate aws_region, domain_name, cloudflare_api_token, cloudflare_zone_id
-   ```
-3. Initialize Terraform providers and backend:
-   ```bash
-   terraform init
-   ```
-4. Review the infrastructure execution plan:
-   ```bash
-   terraform plan -out=tfplan
-   ```
-5. Apply the plan:
-   ```bash
-   terraform apply tfplan
-   ```
+### `lane:fast-io` (Lossless Remuxing & Audio Extraction)
+- **Target Queue Depth:** 10 pending jobs per pod
+- **Min Replicas:** 1
+- **Max Replicas:** 20
+- **Scale-Down Stabilization:** 120 seconds
+- **Manifest:** `infra/k8s/keda-fast-io.yaml`
 
 ---
 
-## 4. Capacity Engineering & Sizing Reference
+## 4. Cloudflare R2 Storage Lifecycle Configuration (Part 8.3)
 
-For the comprehensive mathematical modeling of **100,000 Concurrent Active Users (CCU)**, including API RPS, Little's Law queue backlog calculations, EC2 Spot worker fleet sizing, and monthly cost optimization, refer to:
-[docs/CAPACITY_PLAN.md](file:///d:/yt%20doenlord/docs/CAPACITY_PLAN.md).
+`infra/r2/lifecycle.json` defines lifecycle policies:
+- `outputs/60m/`: Guest media outputs expire after 60 minutes (3600 seconds)
+- `uploads/60m/`: Guest raw upload chunks expire after 60 minutes
+- `outputs/24h/`: Authenticated user processed downloads expire after 24 hours (86400 seconds)
+- `AbortMultipartUpload`: Aborts incomplete multipart uploads abandoned for >24 hours
+
+---
+
+## 5. Cloudflare Download Worker (Part 6.3)
+
+`infra/cloudflare/download-worker.ts` deploys to Cloudflare Workers to serve processed files directly from Cloudflare R2 with:
+- **HMAC-SHA256 Token Verification:** Validates `?exp=...&sig=...&fn=...` in constant time.
+- **HTTP Range Requests (RFC 7233):** Supports `Range: bytes=` with `206 Partial Content` responses for streaming players and resumable downloads.
+- **Zero Egress Fees:** Direct native integration between Cloudflare Workers and R2.
+
+Deploy with Wrangler:
+```bash
+cd infra/cloudflare
+npx wrangler deploy
+```
+
+---
+
+## 6. Performance Benchmarks with k6 (Part 8.4)
+
+Run the automated performance test against local or staging endpoints:
+```bash
+k6 run --env API_BASE_URL=http://localhost:4000 --env DOWNLOAD_BASE_URL=http://localhost:8787 infra/k6/load-test.js
+```
+
+### Benchmark SLAs Validated:
+- `/v1/analyse` P95 latency < 500ms (cached) and < 2500ms (uncached)
+- Failure rate < 1.00%
+- SSE stream stability with 99.9% event delivery
+- Download TTFB P95 < 200ms

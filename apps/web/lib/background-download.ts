@@ -269,33 +269,187 @@ export function mapFriendlyError(
   return 'We could not finish processing this file. Please try again.';
 }
 
+let isDirectBridgeVerified = false;
+
+/**
+ * Sends a ping message to trigger a handshake response from the MUXARO Direct companion userscript or bridge.
+ */
+export function pingMuxaroDirect(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
+  } catch {
+    // Ignore postMessage transmission failures in sandboxed contexts
+  }
+}
+
+// Proactive ping-pong detection and bridge verification setup on module load
+if (typeof window !== 'undefined') {
+  try {
+    window.addEventListener('message', (e: MessageEvent) => {
+      try {
+        if (e.source !== window) return;
+        if (e.origin && e.origin !== 'null' && e.origin !== window.location.origin) return;
+        if (e.data && typeof e.data === 'object' && e.data.type === 'MUXARO_DIRECT_READY') {
+          isDirectBridgeVerified = true;
+          window.dispatchEvent(
+            new CustomEvent('muxaro:direct-ready', {
+              detail: {
+                version: typeof e.data.version === 'string' ? e.data.version : '1.0.0',
+                active: true,
+              },
+            })
+          );
+        }
+      } catch {
+        // Safe guard against foreign origin or malformed objects
+      }
+    });
+
+    window.addEventListener('muxaro:direct-ready', () => {
+      isDirectBridgeVerified = true;
+    });
+
+    // Proactively ping userscript upon module load
+    pingMuxaroDirect();
+  } catch {
+    // Browser environment initialization guard
+  }
+}
+
+/**
+ * Helper to initiate detection with ping-pong handshake and optional callback when active.
+ * Returns a teardown cleanup function.
+ */
+export function initiateDirectDetection(onActive?: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  let notified = false;
+  const notify = () => {
+    if (notified) return;
+    notified = true;
+    onActive?.();
+  };
+
+  // Immediate check if already detected or verified
+  if (isMuxaroDirectActive()) {
+    notify();
+  }
+
+  const handleMessage = (e: MessageEvent) => {
+    try {
+      if (e.source !== window) return;
+      if (e.origin && e.origin !== 'null' && e.origin !== window.location.origin) return;
+      if (e.data && typeof e.data === 'object' && e.data.type === 'MUXARO_DIRECT_READY') {
+        isDirectBridgeVerified = true;
+        notify();
+      }
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleCustomEvent = () => {
+    isDirectBridgeVerified = true;
+    notify();
+  };
+
+  window.addEventListener('message', handleMessage);
+  window.addEventListener('muxaro:direct-ready', handleCustomEvent);
+
+  pingMuxaroDirect();
+
+  return () => {
+    window.removeEventListener('message', handleMessage);
+    window.removeEventListener('muxaro:direct-ready', handleCustomEvent);
+  };
+}
+
 /**
  * Detects whether the MUXARO Direct companion userscript or bridge is active in the current browser window.
+ * Checks window global, DOM attributes/dataset, and verified message-bridge state.
  */
 export function isMuxaroDirectActive(): boolean {
   if (typeof window === 'undefined') return false;
-  return (
-    (window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
-    (typeof document !== 'undefined' &&
-      document.documentElement.getAttribute('data-muxaro-direct') === 'active')
-  );
+
+  if (isDirectBridgeVerified) {
+    return true;
+  }
+
+  if ((window as any).__MUXARO_DIRECT_ACTIVE__ === true) {
+    isDirectBridgeVerified = true;
+    return true;
+  }
+
+  if (typeof document !== 'undefined' && document.documentElement) {
+    const el = document.documentElement;
+    if (
+      el.getAttribute('data-muxaro-direct') === 'active' ||
+      el.dataset?.muxaroDirect === 'active'
+    ) {
+      isDirectBridgeVerified = true;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
  * Dispatches a client-side streaming download event to the MUXARO Direct bridge,
  * triggering direct residential downloading through the browser sandbox.
+ * Dispatches both CustomEvent and window.postMessage for maximum sandbox compatibility.
  */
 export function triggerMuxaroDirectDownload(streamUrl: string, filename?: string): boolean {
-  if (typeof window === 'undefined' || !streamUrl) return false;
+  if (typeof window === 'undefined' || !streamUrl || typeof streamUrl !== 'string') return false;
+  const trimmedUrl = streamUrl.trim();
+  const isHttp = /^https?:\/\//i.test(trimmedUrl);
+  const isSameOriginBlob =
+    trimmedUrl.startsWith('blob:') &&
+    typeof window !== 'undefined' &&
+    trimmedUrl.startsWith(`blob:${window.location.origin}/`);
+
+  if (!isHttp && !isSameOriginBlob) {
+    return false;
+  }
+
   try {
+    const safeFilename = (filename || 'media_download.mp4')
+      .replace(/[\r\n\0]/g, '')
+      .replace(/[/\\?%*:|"<>]/g, '_')
+      .replace(/\.\.+/g, '.')
+      .trim() || 'media_download.mp4';
+
+    const detail = {
+      streamUrl: trimmedUrl,
+      filename: safeFilename,
+    };
+
+    // 1. Dispatch CustomEvent for DOM-shared userscripts
     window.dispatchEvent(
       new CustomEvent('muxaro:direct-download', {
-        detail: {
-          streamUrl,
-          filename: filename || 'media_download.mp4',
-        },
+        detail,
       })
     );
+
+    const targetOrigin =
+      typeof window !== 'undefined' && window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : '*';
+
+    // 2. Dispatch window.postMessage for isolated sandboxes / content scripts with safe targetOrigin
+    window.postMessage(
+      {
+        type: 'MUXARO_DIRECT_DOWNLOAD',
+        streamUrl: trimmedUrl,
+        filename: safeFilename,
+        detail,
+      },
+      targetOrigin
+    );
+
     return true;
   } catch {
     return false;

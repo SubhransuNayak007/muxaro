@@ -1996,8 +1996,19 @@ export class QueueService extends EventEmitter {
         const safeFormatId =
           job.formatId && /^[a-zA-Z0-9_+\-\/]+$/.test(job.formatId) ? job.formatId : null;
 
+        const is4K8K = Boolean(
+          (targetHeight && targetHeight >= 2160) ||
+          (job.targetResolution && /^(?:4k|8k|2160p?|4320p?)/i.test(job.targetResolution))
+        );
+        const isRedditOrFacebook = Boolean(
+          remoteMediaUrl && /(?:reddit\.com|redd\.it|facebook\.com|fb\.watch)/i.test(remoteMediaUrl)
+        );
+
         let formatSelector: string;
-        if (safeFormatId) {
+        if (isRedditOrFacebook) {
+          // Rule: Reddit/Facebook HD: bestvideo+bestaudio/best so audio is never dropped
+          formatSelector = 'bestvideo+bestaudio/best';
+        } else if (safeFormatId) {
           formatSelector = safeFormatId.includes('+') ? safeFormatId : `${safeFormatId}+bestaudio/best`;
         } else if (targetHeight) {
           formatSelector =
@@ -2033,7 +2044,34 @@ export class QueueService extends EventEmitter {
         }
 
         const downloadedExt = path.extname(downloaded).toLowerCase().replace(/^\./, '');
-        if (job.operation === 'CONVERT_FORMAT' || job.operation === 'TRANSCODE_VIDEO' || job.streamCopy === false) {
+        if (is4K8K) {
+          // Rule: NEVER re-encode 4K/8K video (-c:v copy)
+          if (downloadedExt !== targetExt) {
+            reportProgress(84, 'TRANSFORMING', `Lossless 8K remuxing into ${targetExt.toUpperCase()}`);
+            const remuxedPath = path.join(jobDir, `final.${targetExt}`);
+            const ffmpegArgs = [
+              '-y',
+              '-hide_banner',
+              '-loglevel', 'error',
+              '-i', downloaded,
+              '-c:v', 'copy',
+            ];
+            if (targetExt === 'mkv' || targetExt === 'webm') {
+              // MKV/WebM: -c copy
+              ffmpegArgs.push('-c:a', 'copy');
+            } else {
+              // MP4 at 4K/8K: -c:v copy -c:a aac -b:a 192k -movflags +faststart
+              ffmpegArgs.push('-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart');
+            }
+            ffmpegArgs.push(remuxedPath);
+            await this.runTrackedProcess(job, 'ffmpeg', ffmpegArgs);
+            actualLosslessPreserved = true;
+            finalFilePath = remuxedPath;
+          } else {
+            actualLosslessPreserved = true;
+            finalFilePath = downloaded;
+          }
+        } else if (job.operation === 'CONVERT_FORMAT' || job.operation === 'TRANSCODE_VIDEO' || job.streamCopy === false) {
           reportProgress(78, 'TRANSFORMING', `Compressing video to ${targetExt.toUpperCase()}`);
           const dlProbe = await verifyMediaWithFfprobe(downloaded).catch(() => ({
             durationSeconds: undefined,

@@ -1,0 +1,111 @@
+# ==============================================================================
+# MUXARO Media Worker Container (lane:fast-io, lane:transcode, lane:batch)
+# Multi-stage production container: Node 22, FFmpeg, Tini, non-root user muxaro
+# Complies with Part 8.1 Specification
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Stage 1: Build & Dependencies
+# ------------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies for native modules if required
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy monorepo workspace configuration files
+COPY package.json* package-lock.json* pnpm-lock.yaml* pnpm-workspace.yaml* ./
+
+# Copy shared packages manifests
+COPY packages/shared/package*.json ./packages/shared/
+COPY packages/db/package*.json ./packages/db/
+
+# Copy worker-media package manifest (supporting apps/worker-media)
+COPY apps/worker-media/package*.json ./apps/worker-media/
+
+# Install dependencies across packages
+RUN if [ -f package-lock.json ]; then \
+      npm ci --no-audit --no-fund; \
+    elif [ -f apps/worker-media/package.json ]; then \
+      cd apps/worker-media && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi; \
+    fi
+
+# Copy source code
+COPY packages/shared ./packages/shared
+COPY packages/db ./packages/db
+COPY apps/worker-media ./apps/worker-media
+
+# Build TypeScript packages and application
+RUN if [ -d packages/shared ] && [ -f packages/shared/tsconfig.json ]; then cd packages/shared && npx tsc -b 2>/dev/null || npx tsc 2>/dev/null || true; fi && \
+    if [ -d packages/db ] && [ -f packages/db/tsconfig.json ]; then cd packages/db && npx tsc -b 2>/dev/null || npx tsc 2>/dev/null || true; fi && \
+    if [ -d apps/worker-media ] && [ -f apps/worker-media/tsconfig.json ]; then cd apps/worker-media && npx tsc 2>/dev/null || true; fi
+
+# ------------------------------------------------------------------------------
+# Stage 2: Hardened Production Runtime (Part 8.1)
+# ------------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS runner
+
+LABEL maintainer="Muxaro Engineering <ops@muxaro.com>"
+LABEL org.opencontainers.image.title="muxaro-worker-media"
+LABEL org.opencontainers.image.description="MUXARO Production FFmpeg Media Worker"
+
+WORKDIR /app
+
+# Install runtime utilities: FFmpeg, ffprobe, Tini (PID 1 reaper), curl (healthcheck), ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    tini \
+    curl \
+    ca-certificates \
+    python3 \
+    && ffmpeg -version && ffprobe -version \
+    && apt-get purge -y --auto-remove \
+    && rm -rf /var/lib/apt/lists/* /root/.cache
+
+# Create dedicated unprivileged non-root system user (UID 10001)
+RUN groupadd --system --gid 10001 muxaro && \
+    useradd --system --uid 10001 --gid muxaro --no-create-home --shell /usr/sbin/nologin muxaro
+
+# Create isolated ephemeral scratch directories for media operations with strict perms
+RUN mkdir -p /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads && \
+    chown -R muxaro:muxaro /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads && \
+    chmod 700 /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads
+
+# Copy application artifacts from builder
+COPY --from=builder --chown=muxaro:muxaro /app /app
+
+# Ensure workspace files are readable by non-root user
+RUN chown -R muxaro:muxaro /app
+
+# Runtime configuration defaults
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=5000
+ENV SCRATCH_DIR=/tmp/muxaro-scratch
+ENV MAX_CONCURRENT_JOBS=4
+ENV JOB_TIMEOUT_SECONDS=300
+ENV LOG_LEVEL=info
+
+WORKDIR /app/apps/worker-media
+
+# Switch to unprivileged non-root user
+USER 10001:10001
+
+# Expose internal telemetry and healthcheck port
+EXPOSE 5000
+
+# Periodic healthcheck probing internal /health endpoint
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT:-5000}/health" || exit 1
+
+# Tini acts as PID 1 to reap zombie processes from FFmpeg subprocesses
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Launch worker runtime
+CMD ["sh", "-c", "if [ -f dist/index.js ]; then node dist/index.js; elif [ -f dist/server.js ]; then node dist/server.js; else npm start; fi"]

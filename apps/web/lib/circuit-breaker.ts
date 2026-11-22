@@ -218,8 +218,28 @@ class CircuitBreaker {
    * Classify any error into rich, actionable feedback.
    */
   public classifyError(err: unknown, endpoint?: string): ClassifiedError {
-    const rawMsg = err instanceof Error ? err.message : String(err || '');
     const errObj = (err && typeof err === 'object') ? (err as Record<string, unknown>) : {};
+    let rawMsg = '';
+    if (err instanceof Error && typeof err.message === 'string') {
+      rawMsg = err.message;
+    } else if (typeof errObj.message === 'string') {
+      rawMsg = errObj.message;
+    } else if (typeof errObj.userMessage === 'string') {
+      rawMsg = errObj.userMessage;
+    } else if (typeof errObj.error === 'string') {
+      rawMsg = errObj.error;
+    } else if (errObj.error && typeof errObj.error === 'object') {
+      const innerErr = errObj.error as Record<string, unknown>;
+      if (typeof innerErr.userMessage === 'string') {
+        rawMsg = innerErr.userMessage;
+      } else if (typeof innerErr.message === 'string') {
+        rawMsg = innerErr.message;
+      }
+    } else if (typeof err === 'string') {
+      rawMsg = err;
+    }
+
+    rawMsg = rawMsg.replace(/\[object\s+Object\]/gi, '').trim();
     const status = typeof errObj.status === 'number' ? errObj.status : undefined;
 
     // Check for offline browser

@@ -20,6 +20,10 @@ import type {
 import { UnsupportedSourceError } from './errors.ts';
 import { DirectMediaAdapter } from './direct-adapter.ts';
 import { YouTubePermittedAdapter } from './youtube-permitted-adapter.ts';
+import { YouTubeAdapter } from './youtube-adapter.ts';
+import { TikTokAdapter } from './tiktok-adapter.ts';
+import { InstagramAdapter } from './instagram-adapter.ts';
+import { TwitterAdapter } from './twitter-adapter.ts';
 import { AbuseDetector } from './rights-validator.ts';
 
 export interface RegisteredAdapterEntry {
@@ -30,10 +34,27 @@ export interface RegisteredAdapterEntry {
 export class SourceAdapterRegistry {
   private readonly adapters: RegisteredAdapterEntry[] = [];
 
-  constructor() {
+  constructor(registerExtended: boolean = false) {
+    if (registerExtended) {
+      this.register(new YouTubeAdapter(), 110);
+      this.register(new TikTokAdapter(), 90);
+      this.register(new InstagramAdapter(), 80);
+      this.register(new TwitterAdapter(), 70);
+    }
     // Default registration order: specific third-party portal adapters first, direct media fallback second
     this.register(new YouTubePermittedAdapter(), 100);
     this.register(new DirectMediaAdapter(), 10);
+  }
+
+  /**
+   * Registers all extended social/video reverse-engineered protocol adapters
+   */
+  public registerExtendedProtocols(): this {
+    this.register(new YouTubeAdapter(), 110);
+    this.register(new TikTokAdapter(), 90);
+    this.register(new InstagramAdapter(), 80);
+    this.register(new TwitterAdapter(), 70);
+    return this;
   }
 
   /**
@@ -116,6 +137,11 @@ export class SourceAdapterRegistry {
  * Singleton default registry pre-configured with standard MUXARO adapters
  */
 export const defaultAdapterRegistry = new SourceAdapterRegistry();
+
+/**
+ * Singleton extended registry pre-configured with all reverse-engineered protocol adapters
+ */
+export const extendedAdapterRegistry = new SourceAdapterRegistry(true);
 
 /**
  * Convenience function to inspect a media URL using the default registry

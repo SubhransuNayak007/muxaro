@@ -65,10 +65,26 @@ export default function Footer() {
               </li>
               <li>
                 <Link
-                  href="/dashboard"
+                  href="/downloads"
                   className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
                 >
-                  My Downloads
+                  Downloads
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/usage"
+                  className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
+                >
+                  Usage
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/status"
+                  className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
+                >
+                  Status
                 </Link>
               </li>
               <li>
@@ -76,7 +92,7 @@ export default function Footer() {
                   href="/credits"
                   className="hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded"
                 >
-                  Usage & Limits
+                  Credits
                 </Link>
               </li>
               <li>

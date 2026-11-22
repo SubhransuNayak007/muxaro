@@ -12,8 +12,8 @@
   --muxaro-indigo: #6558F5;
   --muxaro-blue: #4677ff;
   --muxaro-cyan: #36d6d1;
-  --muxaro-gradient-primary: linear-gradient(135deg, #6558F5 0%, #4677ff 50%, #36d6d1 100%);
-  --muxaro-gradient-hover: linear-gradient(135deg, #5345E7 0%, #3b6bee 50%, #2cc5c0 100%);
+  --muxaro-gradient-primary: linear-gradient(180deg, #6558F5 0%, #4f46e5 100%);
+  --muxaro-gradient-hover: linear-gradient(180deg, #5345E7 0%, #4338CA 100%);
   --muxaro-gradient-subtle: linear-gradient(135deg, rgba(101, 88, 245, 0.08) 0%, rgba(70, 119, 255, 0.08) 100%);
   
   /* Light Theme (Clean Violet & Alex Reji SaaS Canvas) */
@@ -26,9 +26,9 @@
   --muxaro-border-subtle: #f0f2f7;
   --muxaro-border-focus: #6558F5;
 
-  --muxaro-text-primary: #171A2B;
-  --muxaro-text-secondary: #5e667e;
-  --muxaro-text-tertiary: #666e85;
+  --muxaro-text-primary: #0F172A;
+  --muxaro-text-secondary: #475569;
+  --muxaro-text-tertiary: #64748B;
   
   /* Status Semantics */
   --muxaro-success: #10b981;
@@ -88,9 +88,9 @@
   --dark-border: #23293d;
   --dark-border-subtle: #1a1f2e;
   --dark-border-focus: #695bff;
-  --dark-text-primary: #f5f7fc;
-  --dark-text-secondary: #9aa8be;
-  --dark-text-tertiary: #7887a2;
+  --dark-text-primary: #F8FAFC;
+  --dark-text-secondary: #94A3B8;
+  --dark-text-tertiary: #64748B;
   --dark-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --dark-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
   --dark-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
@@ -402,7 +402,7 @@ h2 {
   outline-offset: 2px;
 }
 
-/* Crisp single focus ring on text and search inputs (no browser outline, subtle 3px shadow) */
+/* Crisp single focus ring and guaranteed high-contrast typography on text and search inputs */
 input[type="text"],
 input[type="email"],
 input[type="password"],
@@ -413,6 +413,46 @@ textarea,
 select,
 .muxaro-input {
   outline: none !important;
+  color: var(--muxaro-text-primary);
+  background-color: var(--muxaro-bg-surface);
+}
+
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="url"],
+.dark input[type="number"],
+.dark input[type="search"],
+.dark textarea,
+.dark select,
+.dark .muxaro-input,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="url"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="search"],
+[data-theme="dark"] textarea,
+[data-theme="dark"] select,
+[data-theme="dark"] .muxaro-input {
+  color: var(--dark-text-primary);
+  background-color: var(--dark-bg-surface);
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--muxaro-text-primary);
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover, 
+.dark input:-webkit-autofill:focus,
+[data-theme="dark"] input:-webkit-autofill,
+[data-theme="dark"] input:-webkit-autofill:hover, 
+[data-theme="dark"] input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--dark-text-primary);
 }
 
 input[type="text"]:focus,
@@ -475,27 +515,43 @@ a:active {
   -webkit-text-fill-color: transparent;
 }
 
-/* Primary Gradient Button */
+/* Primary Brand Action Button (Unified 12px High-Craft Language) */
 .muxaro-btn-primary,
 .btn-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   background-image: var(--muxaro-gradient-primary);
   color: var(--muxaro-btn-fg);
   font-weight: 600;
-  border-radius: var(--muxaro-radius-sm);
-  box-shadow: var(--muxaro-shadow-btn);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(101, 88, 245, 0.24);
   transition: opacity 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  cursor: pointer;
+  user-select: none;
 }
 
 .muxaro-btn-primary:hover,
 .btn-brand:hover {
-  opacity: 0.95;
+  opacity: 0.98;
   transform: translateY(-1px);
-  box-shadow: var(--muxaro-shadow-btn-hover);
+  box-shadow: 0 4px 14px rgba(101, 88, 245, 0.32);
 }
 
 .muxaro-btn-primary:active,
 .btn-brand:active {
-  transform: translateY(0);
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
+}
+
+.muxaro-btn-primary:disabled,
+.btn-brand:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* Subtle card styling */
@@ -628,34 +684,39 @@ a:active {
   will-change: opacity, transform;
 }
 
-/* Action Circle Button (Solid Brand) */
+/* Action CTA Button (Unified with 12px High-Craft Language) */
 .deepseek-action-circle,
 .muxaro-action-circle {
-  width: 44px;
-  height: 44px;
-  border-radius: 9999px;
-  background-color: var(--muxaro-indigo);
+  min-height: 42px;
+  padding: 0.5rem 1.125rem;
+  border-radius: 12px;
+  background-image: var(--muxaro-gradient-primary);
   color: var(--muxaro-btn-fg);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--muxaro-shadow-btn);
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, background-color 160ms ease;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(101, 88, 245, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 160ms ease, opacity 160ms ease;
   flex-shrink: 0;
-  border: none;
   cursor: pointer;
+  user-select: none;
 }
 
 .deepseek-action-circle:hover,
 .muxaro-action-circle:hover {
-  background-color: var(--muxaro-action-circle-hover);
-  transform: scale(1.04);
-  box-shadow: var(--muxaro-shadow-btn-hover);
+  opacity: 0.98;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(101, 88, 245, 0.32);
 }
 
 .deepseek-action-circle:active,
 .muxaro-action-circle:active {
-  transform: scale(0.96);
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.1);
 }
 
 .deepseek-action-circle:disabled,
@@ -663,6 +724,7 @@ a:active {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+  box-shadow: none;
 }
 
 /* Quick Action Pills */

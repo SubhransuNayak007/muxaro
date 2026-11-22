@@ -2,14 +2,6 @@ import React from 'react';
 import Link from 'next/link';
 import { Home, Compass } from 'lucide-react';
 
-export const metadata = {
-  title: '404 - Page Not Found — MUXARO',
-  description: 'The requested page could not be found.',
-  robots: {
-    index: false,
-    follow: false,
-  },
-};
 
 export default function NotFound() {
   return (

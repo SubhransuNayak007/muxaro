@@ -4,7 +4,8 @@ import React, { useEffect, useState, useMemo, useRef, useId } from 'react';
 import Link from 'next/link';
 import { ProcessingJob, JobState } from '@/lib/types';
 import { formatBytes } from '@/lib/formatters';
-import { api } from '@/lib/api-client';
+import { api, getApiBaseUrl } from '@/lib/api-client';
+import { detectPlatform, formatDisplayUrl } from '@/lib/url-utils';
 import {
   detectBackgroundDownloadSupport,
   getAutoDownloadPreference,
@@ -32,6 +33,7 @@ import {
   CloudDownload,
   RefreshCw,
   Zap,
+  Sparkles,
   ExternalLink,
 } from 'lucide-react';
 
@@ -263,6 +265,100 @@ export default function JobProgress({
   }, [initialJob]);
 
   const isTerminal = isTerminalState(job.status);
+
+  // Real-time SSE streaming from backend (/v1/jobs/:id/events or /api/v1/jobs/:id/events)
+  useEffect(() => {
+    if (!job.id || isTerminal) {
+      return;
+    }
+
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
+      return;
+    }
+
+    let es: EventSource | null = null;
+    let cancelled = false;
+
+    try {
+      const apiBase = getApiBaseUrl();
+      const sseUrl = `${apiBase}/jobs/${encodeURIComponent(job.id)}/events`;
+      es = new EventSource(sseUrl, { withCredentials: true });
+
+      const handleProgressEvent = (e: MessageEvent) => {
+        if (cancelled || !e.data) return;
+        try {
+          const payload = JSON.parse(e.data);
+          const rawStatus = String(payload.status || '').toUpperCase();
+          const nextStatus: JobState =
+            rawStatus === 'COMPLETED' || rawStatus === 'READY'
+              ? 'READY'
+              : rawStatus === 'PROCESSING'
+              ? 'PROCESSING'
+              : rawStatus === 'FAILED'
+              ? 'FAILED'
+              : rawStatus === 'CANCELLED'
+              ? 'CANCELLED'
+              : 'QUEUED';
+
+          const rawProgress = Number(payload.progressPercent ?? payload.progress);
+          const nextProgress = Number.isFinite(rawProgress)
+            ? Math.max(0, Math.min(100, Math.round(rawProgress)))
+            : nextStatus === 'READY'
+            ? 100
+            : jobRef.current.progress;
+
+          const updated: ExtendedProcessingJob = {
+            ...jobRef.current,
+            status: nextStatus,
+            progress: nextProgress,
+            progressStage:
+              payload.message ||
+              payload.stageMessage ||
+              payload.stage ||
+              (nextStatus === 'READY' ? 'Ready to download' : jobRef.current.progressStage),
+            downloadUrl: payload.downloadUrl || jobRef.current.downloadUrl,
+            outputFilename: payload.filename || payload.outputFilename || jobRef.current.outputFilename,
+            outputSizeBytes: payload.sizeBytes ?? payload.outputSizeBytes ?? jobRef.current.outputSizeBytes,
+            error: payload.errorMessage || jobRef.current.error,
+            errorMessage: payload.errorMessage || jobRef.current.errorMessage,
+            errorCode: payload.errorCode || jobRef.current.errorCode,
+          };
+          jobRef.current = updated;
+          setJob(updated);
+          onJobUpdateRef.current?.(updated);
+        } catch {
+          // Safe JSON parse fallback
+        }
+      };
+
+      es.addEventListener('progress', handleProgressEvent);
+      es.addEventListener('done', (e: MessageEvent) => {
+        handleProgressEvent(e);
+        if (es) {
+          es.close();
+          es = null;
+        }
+      });
+
+      es.onerror = () => {
+        // Fall back to polling silently on SSE disconnection
+        if (es) {
+          es.close();
+          es = null;
+        }
+      };
+    } catch {
+      // Fallback polling handles updates
+    }
+
+    return () => {
+      cancelled = true;
+      if (es) {
+        es.close();
+        es = null;
+      }
+    };
+  }, [job.id, isTerminal]);
 
   // Polite 2-second backend polling with backoff and tab-visibility pause
   useEffect(() => {
@@ -612,7 +708,7 @@ export default function JobProgress({
     ? `/tools/direct-helper?url=${encodeURIComponent(directTargetUrl)}`
     : '/tools/direct-helper';
 
-  const isBotBlocked = useMemo(() => {
+  const isRateLimitedOrChallenged = useMemo(() => {
     const errorStr =
       typeof job.error === 'string'
         ? job.error
@@ -634,14 +730,28 @@ export default function JobProgress({
       raw.includes('player_client') ||
       raw.includes('private') ||
       raw.includes('403') ||
+      raw.includes('429') ||
+      raw.includes('rate') ||
+      raw.includes('limit') ||
+      raw.includes('challenge') ||
+      raw.includes('rate-limited') ||
       raw.includes('muxaro direct')
     );
   }, [job]);
+
+  const platformInfo = useMemo(() => {
+    return directTargetUrl ? detectPlatform(directTargetUrl) : null;
+  }, [directTargetUrl]);
+
+  const displayUrl = useMemo(() => {
+    return directTargetUrl ? formatDisplayUrl(directTargetUrl, 44) : '';
+  }, [directTargetUrl]);
 
   return (
     <section
       aria-label="Media progress"
       className="w-full bg-surface border border-line rounded-2xl shadow-md p-5 sm:p-6 text-content"
+      style={{ overflowX: 'clip' }}
     >
       {/* In-Progress View */}
       {!isTerminal && (
@@ -659,22 +769,46 @@ export default function JobProgress({
                 )}
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-bold text-content truncate">
-                  {friendlyTitle}
-                </h3>
-                <p className="text-xs text-content-secondary flex items-center gap-1.5 mt-0.5">
-                  <Loader2
-                    className="w-3.5 h-3.5 motion-safe:animate-spin text-brand flex-shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>{friendlyStatus}</span>
-                </p>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-content truncate">
+                    {friendlyTitle}
+                  </h3>
+                  {platformInfo && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-surface-elevated text-brand border border-line-subtle flex-shrink-0">
+                      {platformInfo.name}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-content-secondary mt-0.5">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Loader2
+                      className="w-3.5 h-3.5 motion-safe:animate-spin text-brand flex-shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{friendlyStatus}</span>
+                  </span>
+                  {displayUrl && (
+                    <span className="text-content-muted font-mono text-[11px] truncate max-w-[180px] sm:max-w-[280px]">
+                      • {displayUrl}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
-            <span className="mono-metric text-sm font-semibold text-content flex-shrink-0">
-              {hasRealProgress ? `${safeProgress}%` : 'Starting'}
-            </span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-elevated text-xs font-semibold text-brand border border-line-subtle">
+                {formatUpper}
+              </span>
+              {!isAudioOnly && job.targetResolution && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-elevated text-xs font-medium text-content-secondary border border-line-subtle">
+                  {job.targetResolution}
+                </span>
+              )}
+              <span className="mono-metric text-sm font-semibold text-content pl-1">
+                {hasRealProgress ? `${safeProgress}%` : 'Starting'}
+              </span>
+            </div>
           </div>
 
           {/* Honest Progress Bar: calm indeterminate state while queued/0%, scaleX once backend reports % */}
@@ -706,8 +840,8 @@ export default function JobProgress({
           </div>
 
           {cancelError && (
-            <div className="p-3 rounded-lg bg-error-bg text-error text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            <div className="p-3 rounded-xl bg-surface-elevated border border-line text-content-secondary text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
               <span>{cancelError}</span>
             </div>
           )}
@@ -1042,42 +1176,70 @@ export default function JobProgress({
       {/* Failed / Rejected View with Real Retry & Resilient Fallbacks */}
       {(job.status === 'FAILED' || job.status === 'REJECTED') && (
         <div className="space-y-4">
-          {isBotBlocked ? (
-            /* Dedicated High-Contrast YouTube Bot Check / MUXARO Direct Callout */
-            <div className="rounded-xl border border-brand/30 bg-surface-elevated p-5 sm:p-6 space-y-4 shadow-sm">
+          {isRateLimitedOrChallenged ? (
+            /* Calm, Neutral Transition to MUXARO Direct (No Scary Red Banner) */
+            <div className="rounded-2xl border border-brand/25 bg-surface-elevated p-5 sm:p-6 space-y-4 shadow-sm">
               <div className="flex items-start gap-3.5">
                 <div className="w-10 h-10 rounded-xl bg-brand/10 border border-brand/20 text-brand flex items-center justify-center flex-shrink-0 mt-0.5">
                   <Zap className="w-5 h-5" aria-hidden="true" />
                 </div>
-                <div className="space-y-1 min-w-0 flex-1">
+                <div className="space-y-1.5 min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-brand/10 text-brand border border-brand/20">
-                      Residential Bypass Available
+                      Browser Streaming Available
                     </span>
+                    {platformInfo && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface text-content-secondary border border-line-subtle">
+                        {platformInfo.name}
+                      </span>
+                    )}
                     {isDirectActive && (
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-success-bg text-success border border-success/20">
                         <span className="w-1.5 h-1.5 rounded-full bg-success motion-safe:animate-pulse" />
-                        Direct Active
+                        Direct Ready
                       </span>
                     )}
                   </div>
-                  <h3 className="text-base sm:text-lg font-bold text-content pt-0.5">
-                    YouTube Bot Check Blocked Cloud Processing
+                  <h3 className="text-base sm:text-lg font-bold text-content leading-snug">
+                    Cloud servers are rate-limited for this stream — switch to MUXARO Direct to stream it via your browser.
                   </h3>
                   <p className="text-xs sm:text-sm text-content-secondary leading-relaxed">
-                    YouTube blocks datacenter IPs from streaming this media. With{' '}
-                    <strong className="text-content font-semibold">MUXARO Direct</strong>,
-                    the video streams directly through your residential connection with zero cloud restrictions and maximum speed.
+                    Client-side browser streaming for direct, full-speed transfers of authorized, user-owned, and Creative Commons media directly to your device with zero cloud rate limits.
                   </p>
                 </div>
               </div>
 
-              {directTargetUrl && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-line-subtle text-xs text-content-secondary font-mono truncate">
-                  <span className="text-content-muted font-sans font-medium flex-shrink-0">Target:</span>
-                  <span className="truncate">{directTargetUrl}</span>
+              {/* Instant Link & Stream Feedback Confirmation */}
+              <div className="p-3.5 rounded-xl bg-surface border border-line-subtle space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {isAudioOnly ? (
+                      <FileAudio className="w-4 h-4 text-brand flex-shrink-0" aria-hidden="true" />
+                    ) : (
+                      <FileVideo className="w-4 h-4 text-brand flex-shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="font-semibold text-content truncate" title={friendlyTitle}>
+                      {friendlyTitle}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="px-2 py-0.5 rounded bg-surface-elevated font-semibold text-brand text-[11px] border border-line-subtle">
+                      {formatUpper}
+                    </span>
+                    {job.targetResolution && (
+                      <span className="px-2 py-0.5 rounded bg-surface-elevated text-content-secondary text-[11px] border border-line-subtle">
+                        {job.targetResolution}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              )}
+                {directTargetUrl && (
+                  <div className="flex items-center gap-2 text-[11px] text-content-muted font-mono truncate">
+                    <span className="font-sans font-medium text-content-secondary flex-shrink-0">Source:</span>
+                    <span className="truncate">{directTargetUrl}</span>
+                  </div>
+                )}
+              </div>
 
               {/* Primary 1-Click Action */}
               <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -1086,21 +1248,21 @@ export default function JobProgress({
                   className="muxaro-btn-primary flex-1 inline-flex items-center justify-center gap-2 px-6 py-3.5 min-h-[44px] text-sm sm:text-base font-semibold shadow-sm active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-surface cursor-pointer text-center"
                 >
                   <Zap className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
-                  <span>Download with MUXARO Direct</span>
+                  <span>Stream with MUXARO Direct</span>
                 </Link>
 
                 <Link
                   href={directHelperHref}
                   className="inline-flex items-center justify-center gap-1.5 px-4 py-3.5 min-h-[44px] rounded-xl border border-line bg-surface text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand text-center"
                 >
-                  <span>How MUXARO Direct works</span>
+                  <span>About Direct Streaming</span>
                   <ExternalLink className="w-3.5 h-3.5 text-content-muted flex-shrink-0" aria-hidden="true" />
                 </Link>
               </div>
 
               {retryError && (
-                <div className="p-3 rounded-lg bg-error-bg text-error text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                <div className="p-3 rounded-lg bg-surface-elevated border border-line text-content-secondary text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
                   <span>{retryError}</span>
                 </div>
               )}
@@ -1134,11 +1296,11 @@ export default function JobProgress({
               </div>
             </div>
           ) : (
-            /* Standard Non-Bot Failure State */
+            /* Standard Non-Challenged Failure State (Calm, Neutral) */
             <div className="space-y-4">
-              <div className="p-4 sm:p-5 rounded-xl bg-surface-elevated border border-line flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-xl bg-error-bg text-error flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <AlertCircle className="w-5 h-5" aria-hidden="true" />
+              <div className="p-4 sm:p-5 rounded-2xl bg-surface-elevated border border-line flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-surface border border-line text-content-secondary flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <AlertCircle className="w-5 h-5 text-warning" aria-hidden="true" />
                 </div>
                 <div className="space-y-1 min-w-0 flex-1">
                   <h3 className="text-sm sm:text-base font-semibold text-content">
@@ -1151,8 +1313,8 @@ export default function JobProgress({
               </div>
 
               {retryError && (
-                <div className="p-3 rounded-lg bg-error-bg text-error text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                <div className="p-3 rounded-lg bg-surface-elevated border border-line text-content-secondary text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-warning flex-shrink-0" aria-hidden="true" />
                   <span>{retryError}</span>
                 </div>
               )}

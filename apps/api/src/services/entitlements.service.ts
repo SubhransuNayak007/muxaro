@@ -189,7 +189,7 @@ export class EntitlementsService {
    */
   public getPolicy(db: DatabaseSync = getDb()): QuotaPolicy {
     return {
-      guestIndividualLimit: Math.max(0, getNumericSetting('guest_individual_limit', 3, db)),
+      guestIndividualLimit: Math.max(0, getNumericSetting('guest_individual_limit', 100, db)),
       guestPlaylistLimit: Math.max(0, getNumericSetting('guest_playlist_limit', 0, db)),
       guestMaxConcurrent: Math.max(1, getNumericSetting('guest_max_concurrent', 1, db)),
       freeIndividualLimit: Math.max(1, getNumericSetting('base_individual_limit', 10, db)),

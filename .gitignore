@@ -19,6 +19,14 @@ service-account*.json
 *credentials*.json
 
 # MUXARO Local Runtime Data, Ephemeral Media Artifacts & Uploads
+**/storage/
+**/.storage/
+storage/
+*.mp4
+*.mkv
+*.webm
+*.part
+*.ytdl
 .muxaro-data/
 .muxaro-artifacts/
 .muxaro-uploads/
@@ -56,6 +64,9 @@ node_modules/
 .pnp.*
 
 # Build Outputs (Next.js, Cloudflare Pages Static Export, TypeScript)
+dump.rdb
+.swarm/
+.tools/
 .next/
 apps/web/.next/
 apps/web/out/

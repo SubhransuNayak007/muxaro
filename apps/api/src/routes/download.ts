@@ -101,12 +101,12 @@ export const downloadRoutes: FastifyPluginAsync = async (fastify) => {
     // Strict IDOR Defense on signed download delivery:
     // 1. Artifact owner must match token payload userId
     if (artifact.ownerUserId && artifact.ownerUserId !== payload.userId) {
-      return reply.code(403).send({
+      return reply.code(404).send({
         success: false,
         error: {
-          code: 'ERR_FORBIDDEN',
-          message: 'Download token owner mismatch',
-          userMessage: 'You do not have permission to download this file.',
+          code: 'ERR_NOT_FOUND',
+          message: 'Media artifact is not available or has expired',
+          userMessage: mapHumanFriendlyError('ERR_ARTIFACT_NOT_FOUND'),
         },
         requestId,
       });
@@ -128,12 +128,12 @@ export const downloadRoutes: FastifyPluginAsync = async (fastify) => {
         requestId,
       })
     ) {
-      return reply.code(403).send({
+      return reply.code(404).send({
         success: false,
         error: {
-          code: 'ERR_FORBIDDEN',
-          message: 'Access denied to another account download',
-          userMessage: 'You do not have permission to download this file.',
+          code: 'ERR_NOT_FOUND',
+          message: 'Media artifact is not available or has expired',
+          userMessage: mapHumanFriendlyError('ERR_ARTIFACT_NOT_FOUND'),
         },
         requestId,
       });

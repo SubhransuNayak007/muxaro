@@ -26,24 +26,13 @@ import {
 } from 'lucide-react';
 import HeroWaveLines from '@/components/HeroWaveLines';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
+import HeroOmnibox from '@/components/HeroOmnibox';
+import AdaptiveMediaCard from '@/components/AdaptiveMediaCard';
 import { api } from '@/lib/api-client';
 import { useDeviceMode } from '@/lib/device-mode';
 import { useAuth } from '@/lib/auth-context';
 import { trackEvent } from '@/lib/analytics';
 import { MediaManifest, ProcessingJob, JobState } from '@/lib/types';
-
-// Dynamic code splitting for heavy interactive islands to preserve fast LCP
-const MediaInspector = dynamic(() => import('@/components/MediaInspector'), {
-  ssr: false,
-  loading: () => (
-    <div className="muxaro-card rounded-2xl p-8 mt-8 text-center flex flex-col items-center justify-center gap-3">
-      <Loader2 className="w-6 h-6 text-brand-violet motion-safe:animate-spin" aria-hidden="true" />
-      <span className="text-sm font-medium text-content-secondary">
-        Analysing your media…
-      </span>
-    </div>
-  ),
-});
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
   ssr: false,
@@ -61,30 +50,34 @@ const CAPABILITIES = [
   {
     href: '/tools/media-converter',
     title: 'Convert Video',
-    description: 'Switch between MP4, MOV, MKV, and WebM cleanly.',
+    description: 'Switch between video formats cleanly with zero quality degradation.',
     icon: Film,
     accentClass: 'bg-interactive text-brand-violet dark:text-content',
+    formats: ['MP4', 'MKV', 'WebM', 'MOV'],
   },
   {
     href: '/tools/audio-extractor',
     title: 'Extract Audio',
-    description: 'Save audio from any video as MP3 or music files.',
+    description: 'Save studio-quality audio from any video with customizable bitrates.',
     icon: Music,
     accentClass: 'bg-info-bg text-brand-blue dark:text-content',
+    formats: ['MP3', 'FLAC', 'WAV', 'AAC'],
   },
   {
     href: '/tools/audio-video-merger',
     title: 'Merge Video & Audio',
-    description: 'Combine a video clip with your own audio track.',
+    description: 'Combine high-res video streams with custom audio or commentary tracks.',
     icon: Layers,
     accentClass: 'bg-success-bg text-success',
+    formats: ['MP4', 'MKV', 'WebM', 'WAV'],
   },
   {
     href: '/tools/playlist-batch',
     title: 'Batch & Playlists',
-    description: 'Process multiple links or files into one download.',
+    description: 'Process full playlists or multi-file batches into a single archive.',
     icon: ListVideo,
     accentClass: 'bg-interactive text-brand-violet dark:text-content',
+    formats: ['MP4', 'MKV', 'MP3', 'ZIP'],
   },
 ] as const;
 
@@ -199,7 +192,7 @@ export default function HomePage() {
     trackEvent('media_inspect_started', { source_type: 'url' });
 
     try {
-      const data = await api.inspectMedia(trimmed);
+      const data = await api.probeUrl(trimmed);
       setManifest(data);
       trackEvent('media_inspect_succeeded', {
         source_type: 'url',
@@ -207,10 +200,10 @@ export default function HomePage() {
         audio_options: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
       });
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'We could not analyse that link. Please check the URL and try again.';
+      let message = err instanceof Error ? err.message : '';
+      if (!message || message === '[object Object]' || message.includes('[object Object]')) {
+        message = 'We could not analyse that link. Please check the URL and try again.';
+      }
       setErrorMessage(message);
       setLastFailedAction({ type: 'url', url: trimmed });
       trackEvent('media_inspect_failed', { source_type: 'url' });
@@ -415,16 +408,16 @@ export default function HomePage() {
 
         <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
           {/* Hero Header */}
-          <div className="text-center max-w-3xl mx-auto mb-8 sm:mb-10">
-            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-content tracking-tight leading-[1.12] mb-4">
-              Your media,{' '}
+          <div className="text-center max-w-3xl mx-auto mb-6 sm:mb-8">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-content tracking-tight leading-[1.12] mb-3">
+              Multi-Platform URL Downloader{' '}
               <span className="muxaro-text-gradient block sm:inline">
-                ready in seconds.
+                up to 8K
               </span>
             </h1>
 
             <p className="text-base sm:text-lg text-content-secondary max-w-2xl mx-auto leading-relaxed">
-              Convert video formats, extract high-fidelity audio, and remux streams with zero quality loss.
+              Download video, extract lossless audio, and archive carousels from 8+ platforms with zero quality loss.
             </p>
           </div>
 
@@ -449,17 +442,17 @@ export default function HomePage() {
                     View progress
                   </button>
                   <Link
-                    href="/dashboard"
+                    href="/downloads"
                     className="px-3 py-1.5 rounded-lg border border-line text-content-secondary text-xs font-medium hover:text-content hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                   >
-                    My Downloads
+                    Downloads
                   </Link>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Alex Reji & Untitled UI Clean Media Workspace Card */}
+          {/* Clean Media Workspace Card */}
           <div className="max-w-3xl mx-auto">
             {activeJob ? (
               /* Stage 1: Active Job Progress (Single Stage Container) */
@@ -476,79 +469,23 @@ export default function HomePage() {
                 }}
               />
             ) : manifest ? (
-              /* Stage 2: Media Inspector & Options */
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3 px-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-bg text-success text-xs font-semibold shrink-0">
-                      <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Link ready</span>
-                    </span>
-                    <span className="text-xs text-content-secondary truncate max-w-[220px] sm:max-w-md font-mono">
-                      {manifest.sourceUrl || url}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManifest(null);
-                      setUrl('');
-                      setErrorMessage(null);
-                      setLastFailedAction(null);
-                      window.setTimeout(() => urlInputRef.current?.focus(), 50);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-medium text-content-secondary hover:text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Paste another link</span>
-                  </button>
-                </div>
-
-                <MediaInspector
-                  manifest={manifest}
-                  onJobStarted={(job) => {
-                    setActiveJob(job);
-                  }}
-                />
-              </div>
-            ) : inspecting ? (
-              /* Stage 3: Animated Analyzing Progress State */
-              <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
-                <div className="py-10 px-4 text-center space-y-4">
-                  <div className="w-14 h-14 rounded-2xl bg-interactive text-brand-violet dark:text-content mx-auto flex items-center justify-center shadow-xs">
-                    <Loader2 className="w-7 h-7 motion-safe:animate-spin text-brand" aria-hidden="true" />
-                  </div>
-                  <div className="space-y-1.5 max-w-md mx-auto">
-                    <h3 className="text-base sm:text-lg font-bold text-content">
-                      Analyzing media link…
-                    </h3>
-                    <p className="text-xs sm:text-sm font-mono text-content-secondary truncate px-3 py-1.5 rounded-lg bg-surface border border-line">
-                      {url}
-                    </p>
-                    <p className="text-xs text-content-muted pt-1">
-                      Extracting video resolutions, audio streams, and available formats…
-                    </p>
-                  </div>
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInspecting(false);
-                        setErrorMessage(null);
-                      }}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-content-secondary hover:text-content border border-line hover:bg-surface-muted transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Cancel</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
+              /* Stage 2: Adaptive Media Result Stage */
+              <AdaptiveMediaCard
+                manifest={manifest}
+                onReset={() => {
+                  setManifest(null);
+                  setUrl('');
+                  setErrorMessage(null);
+                  setLastFailedAction(null);
+                }}
+                onJobStarted={(job) => {
+                  setActiveJob(job);
+                }}
+              />
             ) : (
-              /* Stage 4: Clean Input Card (Paste a link | Upload a file) */
+              /* Stage 3: SSR-First Hero Omnibox & Mode Switcher */
               <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
-                {/* Alex Reji Segmented Input Mode Tabs */}
+                {/* Segmented Input Mode Tabs */}
                 <div
                   role="tablist"
                   aria-label="Choose how to add media"
@@ -581,89 +518,18 @@ export default function HomePage() {
                   </button>
                 </div>
 
-                {/* Panel 1: Paste a Link */}
+                {/* Panel 1: Paste a Link with SSR-First Hero Omnibox */}
                 {activeTab === 'link' ? (
                   <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
-                    <form onSubmit={handleSubmit} className="space-y-3">
-                      <div className="relative">
-                        <Link2
-                          className="w-4 h-4 text-content-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                          aria-hidden="true"
-                        />
-                        <input
-                          ref={urlInputRef}
-                          type="text"
-                          inputMode="url"
-                          value={url}
-                          onFocus={() => setInputFocused(true)}
-                          onBlur={() => setInputFocused(false)}
-                          onChange={(e) => setUrl(e.target.value)}
-                          onPaste={handleInputPaste}
-                          placeholder="Paste a video or audio link (YouTube, Vimeo, direct media URL)…"
-                          aria-label="Media link"
-                          className="w-full pl-10 pr-28 py-3.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm sm:text-base font-sans transition-colors duration-150"
-                        />
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                          {url.trim().length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setUrl('');
-                                setErrorMessage(null);
-                                urlInputRef.current?.focus();
-                              }}
-                              aria-label="Clear link input"
-                              className="p-1.5 rounded-lg text-content-muted hover:text-content hover:bg-interactive transition-colors"
-                              title="Clear"
-                            >
-                              <X className="w-3.5 h-3.5" aria-hidden="true" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={handleClipboardPaste}
-                            aria-label="Paste link from clipboard"
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-brand bg-interactive hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                          >
-                            {pastedFeedback ? (
-                              <Check className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                            ) : (
-                              <ClipboardPaste className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                            )}
-                            <span className="whitespace-nowrap">{pasteLabel}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Bottom Action Strip with clean circular action button */}
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <div className="flex items-center gap-2 text-xs text-content-secondary">
-                          <span className="inline-flex items-center gap-1.5">
-                            <ShieldCheck className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
-                            <span className="hidden sm:inline">Permission-verified media</span>
-                            <span className="sm:hidden">Verified media</span>
-                          </span>
-                          <span className="text-content-muted">•</span>
-                          <span>Auto-deletes in 60m</span>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="submit"
-                            disabled={inspecting || !url.trim()}
-                            className="muxaro-action-circle"
-                            title={inspecting ? 'Analysing link...' : 'Analyse media'}
-                            aria-label={inspecting ? 'Analysing media link' : 'Analyse media link'}
-                          >
-                            {inspecting ? (
-                              <Loader2 className="w-5 h-5 motion-safe:animate-spin" aria-hidden="true" />
-                            ) : (
-                              <ArrowUp className="w-5 h-5" aria-hidden="true" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    </form>
+                    <HeroOmnibox
+                      url={url}
+                      onUrlChange={setUrl}
+                      onSubmit={(targetUrl) => {
+                        void inspectTargetUrl(targetUrl);
+                      }}
+                      probing={inspecting}
+                      onFocusChange={setInputFocused}
+                    />
                   </div>
                 ) : (
                   /* Panel 2: Upload a File */
@@ -848,7 +714,7 @@ export default function HomePage() {
               <div className="flex items-start sm:items-center gap-2.5 text-sm text-content min-w-0">
                 <Sparkles className="w-4 h-4 text-brand-violet shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
                 <span>
-                  Sign in to save history, get priority processing, and receive 10 daily jobs.
+                  Create a free account for higher file-size caps, batch playlist downloads, and 24-hr cloud history.
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -866,6 +732,55 @@ export default function HomePage() {
                 >
                   Create free account
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Free Account Value Proposition (Higher file-size caps, batch playlists, 24-hr cloud history) */}
+        {!authLoading && !authenticated && !manifest && !activeJob && (
+          <div className="max-w-3xl mx-auto mt-2 mb-8">
+            <div className="rounded-2xl border border-line bg-surface p-4 sm:p-5 shadow-xs">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-line/60">
+                <div className="flex items-center gap-2 text-xs font-semibold text-content-secondary">
+                  <Sparkles className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                  <span>Free account benefits</span>
+                </div>
+                <Link
+                  href="/register"
+                  className="text-xs font-semibold text-brand-violet hover:underline inline-flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet rounded"
+                >
+                  <span>Create free account</span>
+                </Link>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-interactive text-brand-violet flex items-center justify-center shrink-0 mt-0.5">
+                    <UploadCloud className="w-4 h-4" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-content">Higher file-size caps</p>
+                    <p className="text-[11px] text-content-secondary leading-snug">Process large media files up to 4 GB with priority queue allocation.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-info-bg text-brand-blue flex items-center justify-center shrink-0 mt-0.5">
+                    <ListVideo className="w-4 h-4" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-content">Batch playlists</p>
+                    <p className="text-[11px] text-content-secondary leading-snug">Download complete YouTube or Vimeo playlists into a single archive.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-success-bg text-success flex items-center justify-center shrink-0 mt-0.5">
+                    <Clock className="w-4 h-4" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-content">24-hr cloud history</p>
+                    <p className="text-[11px] text-content-secondary leading-snug">Instant re-downloads and resumable transfer links across all devices.</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -898,6 +813,16 @@ export default function HomePage() {
                   <p className="text-sm text-content-secondary leading-relaxed">
                     {item.description}
                   </p>
+                  <div className="mt-4 pt-3.5 border-t border-line/60 flex flex-wrap gap-1.5 items-center">
+                    {item.formats.map((fmt) => (
+                      <span
+                        key={fmt}
+                        className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-interactive text-content-secondary border border-line/60 group-hover:border-brand-violet/40 transition-colors duration-150"
+                      >
+                        {fmt}
+                      </span>
+                    ))}
+                  </div>
                 </Link>
               );
             })}

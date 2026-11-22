@@ -5,6 +5,7 @@
   Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
   X-Permitted-Cross-Domain-Policies: none
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.ytimg.com https://*.youtube.com https://*.googlevideo.com https://i.ytimg.com; media-src 'self' blob: data: https://*.googlevideo.com https://*.youtube.com; connect-src 'self' https://*.pages.dev https://*.googlevideo.com https://*.youtube.com https://*.ytimg.com blob: data: http://127.0.0.1:* http://localhost:*; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self';
 
 /_next/static/*
   Cache-Control: public, max-age=31536000, immutable

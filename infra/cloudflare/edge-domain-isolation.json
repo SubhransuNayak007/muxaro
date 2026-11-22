@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json.schemastore.org/cloudflare-rulesets.json",
+  "domain": "muxaro-usercontent.com",
+  "description": "Edge Download Domain Isolation Specification for Muxaro User Content",
+  "purpose": "Isolate untrusted user-generated and downloaded media artifacts to an isolated origin with strict anti-XSS headers",
+  "zone_settings": {
+    "ssl": "strict",
+    "always_use_https": "on",
+    "min_tls_version": "1.2",
+    "brotli": "on",
+    "http2": "on",
+    "http3": "on"
+  },
+  "dns_records": [
+    {
+      "name": "download",
+      "type": "CNAME",
+      "value": "muxaro-download-worker.workers.dev",
+      "proxied": true,
+      "ttl": 1
+    },
+    {
+      "name": "*",
+      "type": "CNAME",
+      "value": "muxaro-download-worker.workers.dev",
+      "proxied": true,
+      "ttl": 1
+    }
+  ],
+  "response_headers_transform_rule": {
+    "name": "Muxaro User Content Anti-XSS Isolation",
+    "expression": "(http.host eq \"muxaro-usercontent.com\" or http.host matches r\".*\\.muxaro-usercontent\\.com\")",
+    "description": "Mandatory anti-XSS, anti-sniff, and sandboxed headers for all user downloads",
+    "headers": [
+      {
+        "name": "Content-Type",
+        "operation": "set",
+        "value": "application/octet-stream",
+        "rationale": "Prevents browsers from executing user content as HTML, SVG, XML, or script"
+      },
+      {
+        "name": "Content-Disposition",
+        "operation": "set",
+        "value": "attachment",
+        "rationale": "Forces browser file download dialog and prohibits inline execution"
+      },
+      {
+        "name": "X-Content-Type-Options",
+        "operation": "set",
+        "value": "nosniff",
+        "rationale": "Prevents MIME-sniffing bypasses in modern browsers"
+      },
+      {
+        "name": "Content-Security-Policy",
+        "operation": "set",
+        "value": "sandbox; default-src 'none'",
+        "rationale": "Restricts script execution, forms, popups, and plugin execution even if rendered"
+      },
+      {
+        "name": "X-Frame-Options",
+        "operation": "set",
+        "value": "DENY",
+        "rationale": "Prohibits framing inside iframes to defeat clickjacking"
+      },
+      {
+        "name": "Referrer-Policy",
+        "operation": "set",
+        "value": "no-referrer",
+        "rationale": "Prevents download URLs and HMAC signature query tokens from leaking via Referer"
+      },
+      {
+        "name": "Cross-Origin-Resource-Policy",
+        "operation": "set",
+        "value": "cross-origin",
+        "rationale": "Permits authenticated cross-origin download requests while preserving isolation"
+      },
+      {
+        "name": "Cross-Origin-Opener-Policy",
+        "operation": "set",
+        "value": "same-origin",
+        "rationale": "Isolates the browsing context group"
+      }
+    ]
+  }
+}

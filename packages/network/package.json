@@ -1,0 +1,59 @@
+{
+  "name": "@muxaro/network",
+  "version": "1.0.0",
+  "description": "Project Garuda Sovereign Network & Edge Acceleration - Outbound IPv6 Swarm, Direct 302 Tunneling, and Parallel Range Streaming",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./ipv6-subnet-agent": {
+      "types": "./dist/ipv6-subnet-agent.d.ts",
+      "import": "./dist/ipv6-subnet-agent.js",
+      "default": "./src/ipv6-subnet-agent.ts"
+    },
+    "./direct-302-tunnel": {
+      "types": "./dist/direct-302-tunnel.d.ts",
+      "import": "./dist/direct-302-tunnel.js",
+      "default": "./src/direct-302-tunnel.ts"
+    },
+    "./parallel-chunk-stream": {
+      "types": "./dist/parallel-chunk-stream.d.ts",
+      "import": "./dist/parallel-chunk-stream.js",
+      "default": "./src/parallel-chunk-stream.ts"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./src/types.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types tests/run-all-tests.ts"
+  },
+  "keywords": [
+    "garuda",
+    "network",
+    "edge",
+    "ipv6-swarm",
+    "direct-tunnel",
+    "parallel-chunk-streaming",
+    "ixp-peering"
+  ],
+  "author": "Project Garuda Sovereign Network Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "undici": "^8.12.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "fastify": "^5.12.8",
+    "typescript": "^5.7.3"
+  }
+}

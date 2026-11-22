@@ -13,7 +13,7 @@ import {
   EntitlementsEngine,
   InMemoryEntitlementStore,
   QuotaExceededError,
-} from '../../packages/entitlements/src/index.ts';
+} from '../../packages/entitlements/dist/index.js';
 
 describe('Quota Race Condition - Thundering Herd Contention', () => {
   let engine: EntitlementsEngine;

@@ -25,7 +25,8 @@ import {
 } from 'lucide-react';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
-import { api } from '@/lib/api-client';
+import { api, extractDisplayError } from '@/lib/api-client';
+export { extractDisplayError };
 import {
   normalizeVideoOptions,
   normalizeAudioOptions,
@@ -226,7 +227,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
     try {
       if (compressEnabled) {
         const job = await api.createJob({
-          mediaAssetId: manifest.id || undefined,
+          mediaAssetId: manifest.isLocalUpload ? manifest.id : undefined,
           sourceUrl: manifest.sourceUrl || undefined,
           jobType: 'transcode_video',
           operation: 'CONVERT_FORMAT',
@@ -241,7 +242,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
         const useStreamCopy =
           selectedVideo.isStreamCopyCandidate && targetContainer === 'mp4';
         const job = await api.createJob({
-          mediaAssetId: manifest.id || undefined,
+          mediaAssetId: manifest.isLocalUpload ? manifest.id : undefined,
           sourceUrl: manifest.sourceUrl || undefined,
           jobType: 'transcode_video',
           operation: useStreamCopy ? 'REMUX_STREAM_COPY' : 'TRANSCODE_VIDEO',
@@ -254,7 +255,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
         onJobStarted(job);
       }
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not start video processing.');
+      setErrorMsg(extractDisplayError(err, 'Could not start video processing.'));
     } finally {
       setSubmitting(false);
     }
@@ -278,7 +279,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
         : selectedAudioFormat;
 
       const job = await api.createJob({
-        mediaAssetId: manifest.id || undefined,
+        mediaAssetId: manifest.isLocalUpload ? manifest.id : undefined,
         sourceUrl: manifest.sourceUrl || undefined,
         jobType: 'extract_audio',
         operation: 'EXTRACT_AUDIO',
@@ -289,7 +290,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
       });
       onJobStarted(job);
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not start audio extraction.');
+      setErrorMsg(extractDisplayError(err, 'Could not start audio extraction.'));
     } finally {
       setSubmitting(false);
     }
@@ -306,7 +307,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
       setSeparateAudioUrl('');
       setMergeAudioSource('separate');
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not upload the separate audio file.');
+      setErrorMsg(extractDisplayError(err, 'Could not upload the separate audio file.'));
     } finally {
       setUploadingAudio(false);
     }
@@ -327,7 +328,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
     setErrorMsg(null);
     try {
       const job = await api.createJob({
-        mediaAssetId: manifest.id || undefined,
+        mediaAssetId: manifest.isLocalUpload ? manifest.id : undefined,
         sourceUrl: manifest.sourceUrl || undefined,
         audioAssetId: mergeAudioSource === 'separate' ? separateAudioAssetId || undefined : undefined,
         audioUrl:
@@ -347,7 +348,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
       });
       onJobStarted(job);
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Could not start merging your files.');
+      setErrorMsg(extractDisplayError(err, 'Could not start merging your files.'));
     } finally {
       setSubmitting(false);
     }

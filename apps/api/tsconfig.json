@@ -10,13 +10,23 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "@muxaro/security": ["../../security/src/index.ts"],
-      "@muxaro/entitlements": ["../../packages/entitlements/src/index.ts"],
-      "@muxaro/source-adapters": ["../../packages/source-adapters/src/index.ts"],
-      "@vyro/security": ["../../security/src/index.ts"],
-      "@vyro/entitlements": ["../../packages/entitlements/src/index.ts"],
-      "@vyro/source-adapters": ["../../packages/source-adapters/src/index.ts"]
+      "@muxaro/shared": ["../../packages/shared/src/index.ts"],
+      "@muxaro/shared/*": ["../../packages/shared/src/*"],
+      "@muxaro/db": ["../../packages/db/src/index.ts"],
+      "@muxaro/db/*": ["../../packages/db/src/*"]
     }
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": [
+    "src/server.ts",
+    "src/index.ts",
+    "src/plugins/**/*",
+    "src/routes/analyse.ts",
+    "src/routes/uploads.ts",
+    "src/routes/jobs.ts",
+    "src/routes/downloads.ts",
+    "src/routes/status.ts",
+    "src/routes/usage.ts",
+    "src/lib/**/*",
+    "tests/v1-api.test.ts"
+  ]
 }

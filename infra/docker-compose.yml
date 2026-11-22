@@ -1,32 +1,40 @@
 # ==============================================================================
-# MUXARO Local & Staging Orchestration Environment
-# Fully orchestrated: Next.js Web, Fastify API, FFmpeg Media Worker,
-# PostgreSQL 16, Redis 7, MinIO (S3 Object Store)
+# MUXARO Production-Grade Multi-Service Orchestration Environment
+# Services:
+#   - postgres:       PostgreSQL 16 with pgcrypto extension enabled
+#   - redis:          Redis 7 in-memory cache, rate limiter & BullMQ broker
+#   - minio:          MinIO high-performance S3/R2 emulation store
+#   - minio-init:     Automated bucket provisioning & lifecycle configuration
+#   - api:            Fastify 5 REST & SSE API Gateway
+#   - worker-analyse: BullMQ lane:analyse metadata extraction worker
+#   - worker-media:   BullMQ multi-lane (fast-io, transcode, batch) FFmpeg worker
+#   - prometheus:     Prometheus monitoring & metrics scraper
 # ==============================================================================
 
 version: '3.9'
 
 networks:
-  frontend-net:
+  muxaro-net:
     driver: bridge
-  backend-net:
-    driver: bridge
-  data-net:
-    driver: bridge
+    name: muxaro-network
 
 volumes:
   postgres_data:
+    name: muxaro_postgres_data
     driver: local
   redis_data:
+    name: muxaro_redis_data
     driver: local
   minio_data:
+    name: muxaro_minio_data
     driver: local
   scratch_data:
+    name: muxaro_scratch_data
     driver: local
 
 services:
   # ----------------------------------------------------------------------------
-  # Database Tier: PostgreSQL 16
+  # 1. Database Tier: PostgreSQL 16 with pgcrypto
   # ----------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
@@ -38,11 +46,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-muxaro_secure_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
     ports:
-      - "${POSTGRES_EXTERNAL_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
-      - data-net
+      - muxaro-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-muxaro_user} -d ${POSTGRES_DB:-muxaro_db}"]
       interval: 5s
@@ -51,7 +59,7 @@ services:
       start_period: 5s
 
   # ----------------------------------------------------------------------------
-  # In-Memory Cache & Message Broker: Redis 7
+  # 2. Broker & Cache Tier: Redis 7
   # ----------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
@@ -66,9 +74,9 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6379}:6379"
     networks:
-      - data-net
+      - muxaro-net
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-muxaro_redis_secret}", "ping"]
       interval: 5s
@@ -77,7 +85,7 @@ services:
       start_period: 3s
 
   # ----------------------------------------------------------------------------
-  # S3-Compatible Object Storage: MinIO
+  # 3. Object Storage Tier: MinIO (S3 / Cloudflare R2 Emulation)
   # ----------------------------------------------------------------------------
   minio:
     image: minio/minio:RELEASE.2024-05-10T01-41-38Z
@@ -90,10 +98,10 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     networks:
-      - data-net
+      - muxaro-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
@@ -101,7 +109,9 @@ services:
       retries: 5
       start_period: 5s
 
-  # Automated MinIO Bucket Initializer
+  # ----------------------------------------------------------------------------
+  # 4. Storage Provisioner: MinIO Bucket & Lifecycle Initializer
+  # ----------------------------------------------------------------------------
   minio-init:
     image: minio/mc:latest
     container_name: muxaro-minio-init
@@ -110,15 +120,16 @@ services:
         condition: service_healthy
     volumes:
       - ./scripts/init-minio.sh:/init-minio.sh:ro
+      - ./r2/lifecycle.json:/lifecycle.json:ro
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     entrypoint: ["/bin/sh", "/init-minio.sh"]
     networks:
-      - data-net
+      - muxaro-net
 
   # ----------------------------------------------------------------------------
-  # API Tier: Fastify REST Service
+  # 5. API Tier: Fastify 5 REST & SSE Gateway
   # ----------------------------------------------------------------------------
   api:
     build:
@@ -140,35 +151,69 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-muxaro_user}:${POSTGRES_PASSWORD:-muxaro_secure_password}@postgres:5432/${POSTGRES_DB:-muxaro_db}
       REDIS_URL: redis://:${REDIS_PASSWORD:-muxaro_redis_secret}@redis:6379/0
       S3_ENDPOINT: http://minio:9000
-      S3_REGION: us-east-1
+      S3_REGION: auto
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       S3_BUCKET_UPLOADS: muxaro-uploads
       S3_BUCKET_ARTIFACTS: muxaro-artifacts
       S3_FORCE_PATH_STYLE: "true"
-      MEDIA_WORKER_URL: http://media-worker:5000
+      DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:-muxaro_dev_download_signing_secret_hmac_sha256}
+      DOWNLOAD_WORKER_URL: ${DOWNLOAD_WORKER_URL:-http://localhost:8787}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      RATE_LIMIT_ENABLED: "true"
+      TRUST_PROXY: "true"
     ports:
       - "${API_PORT:-4000}:4000"
     networks:
-      - frontend-net
-      - backend-net
-      - data-net
+      - muxaro-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:4000/health || curl -f http://127.0.0.1:4000/api/v1/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4000/health || curl -fsS http://127.0.0.1:4000/v1/status || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
 
   # ----------------------------------------------------------------------------
-  # Media Processing Tier: FFmpeg Worker
+  # 6. Worker Tier: Analyse Worker (BullMQ lane:analyse)
   # ----------------------------------------------------------------------------
-  media-worker:
+  worker-analyse:
     build:
       context: ..
-      dockerfile: infra/Dockerfile.media
-    container_name: muxaro-media-worker
+      dockerfile: infra/Dockerfile.worker-analyse
+    container_name: muxaro-worker-analyse
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 5001
+      HOST: 0.0.0.0
+      DATABASE_URL: postgres://${POSTGRES_USER:-muxaro_user}:${POSTGRES_PASSWORD:-muxaro_secure_password}@postgres:5432/${POSTGRES_DB:-muxaro_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-muxaro_redis_secret}@redis:6379/0
+      BULLMQ_CONCURRENCY: 30
+      LOG_LEVEL: info
+    ports:
+      - "${WORKER_ANALYSE_PORT:-5001}:5001"
+    networks:
+      - muxaro-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # 7. Worker Tier: Media Worker (lane:fast-io, lane:transcode, lane:batch)
+  # ----------------------------------------------------------------------------
+  worker-media:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker-media
+    container_name: muxaro-worker-media
     restart: unless-stopped
     depends_on:
       postgres:
@@ -187,50 +232,37 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-muxaro_user}:${POSTGRES_PASSWORD:-muxaro_secure_password}@postgres:5432/${POSTGRES_DB:-muxaro_db}
       REDIS_URL: redis://:${REDIS_PASSWORD:-muxaro_redis_secret}@redis:6379/0
       S3_ENDPOINT: http://minio:9000
-      S3_REGION: us-east-1
+      S3_REGION: auto
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       S3_BUCKET_UPLOADS: muxaro-uploads
       S3_BUCKET_ARTIFACTS: muxaro-artifacts
       S3_FORCE_PATH_STYLE: "true"
+      DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:-muxaro_dev_download_signing_secret_hmac_sha256}
       MAX_CONCURRENT_JOBS: 4
-      JOB_TIMEOUT_SECONDS: 120
+      JOB_TIMEOUT_SECONDS: 300
+      LOG_LEVEL: info
     ports:
-      - "${MEDIA_WORKER_PORT:-5000}:5000"
+      - "${WORKER_MEDIA_PORT:-5000}:5000"
     networks:
-      - backend-net
-      - data-net
+      - muxaro-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:5000/health"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
 
   # ----------------------------------------------------------------------------
-  # Frontend Web Tier: Next.js 14
+  # 8. Observability: Prometheus Metrics Collector
   # ----------------------------------------------------------------------------
-  web:
-    build:
-      context: ..
-      dockerfile: infra/Dockerfile.web
-    container_name: muxaro-web
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: muxaro-prometheus
     restart: unless-stopped
-    depends_on:
-      api:
-        condition: service_healthy
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3000
-      HOSTNAME: 0.0.0.0
-      NEXT_PUBLIC_API_URL: http://api:4000
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     networks:
-      - frontend-net
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/api/health || curl -f http://127.0.0.1:3000/ || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      - muxaro-net

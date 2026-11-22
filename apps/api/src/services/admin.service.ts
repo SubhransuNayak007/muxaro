@@ -53,7 +53,7 @@ interface SettingSpec {
 
 const SETTING_SPECS: readonly SettingSpec[] = [
   { dbKey: 'base_individual_limit', camelKey: 'baseIndividualLimit', aliases: ['baseVideoAllowance'], type: 'number', min: 1, max: 1000, defaultValue: 10, description: 'Free registered user individual jobs per rolling 24h' },
-  { dbKey: 'guest_individual_limit', camelKey: 'guestIndividualLimit', aliases: ['guestDailyAllowance'], type: 'number', min: 0, max: 100, defaultValue: 3, description: 'Guest individual jobs per rolling 24h' },
+  { dbKey: 'guest_individual_limit', camelKey: 'guestIndividualLimit', aliases: ['guestDailyAllowance'], type: 'number', min: 0, max: 1000, defaultValue: 100, description: 'Guest individual jobs per rolling 24h' },
   { dbKey: 'premium_individual_limit', camelKey: 'premiumIndividualLimit', aliases: ['premiumVideoAllowance'], type: 'number', min: 1, max: 10000, defaultValue: 100, description: 'Premium user individual jobs per rolling 24h' },
   { dbKey: 'base_playlist_limit', camelKey: 'basePlaylistLimit', aliases: ['playlistAllowance'], type: 'number', min: 0, max: 100, defaultValue: 1, description: 'Free registered user playlist jobs per rolling 24h' },
   { dbKey: 'guest_playlist_limit', camelKey: 'guestPlaylistLimit', type: 'number', min: 0, max: 50, defaultValue: 0, description: 'Guest playlist jobs per rolling 24h' },

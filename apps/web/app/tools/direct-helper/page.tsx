@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, Suspense, useId } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, useId, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -22,9 +22,19 @@ import {
   AlertCircle,
   FileVideo,
   FileAudio,
+  Clock,
+  XCircle,
+  Gauge,
 } from 'lucide-react';
 import { normalizeMediaUrl, formatDisplayUrl, detectPlatform } from '@/lib/url-utils';
-import { isMuxaroDirectActive, triggerMuxaroDirectDownload } from '@/lib/background-download';
+import {
+  isMuxaroDirectActive,
+  triggerMuxaroDirectDownload,
+  pingMuxaroDirect,
+} from '@/lib/background-download';
+import { api } from '@/lib/api-client';
+import { MediaManifest } from '@/lib/types';
+import { formatBytes, formatDuration } from '@/lib/formatters';
 
 function DirectHelperSkeleton() {
   return (
@@ -43,10 +53,26 @@ function DirectHelperContent() {
   const [targetUrl, setTargetUrl] = useState<string>('');
   const [inputValue, setInputValue] = useState<string>('');
   const [isCompanionActive, setIsCompanionActive] = useState<boolean>(false);
+  const [companionVersion, setCompanionVersion] = useState<string>('v1.0.0');
   const [checking, setChecking] = useState<boolean>(true);
   const [selectedFormat, setSelectedFormat] = useState<'mp4' | 'mp3'>('mp4');
+  const [selectedQuality, setSelectedQuality] = useState<string>('best');
+  const [manifest, setManifest] = useState<MediaManifest | null>(null);
+  const [inspecting, setInspecting] = useState<boolean>(false);
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'streaming' | 'completed' | 'error'>('idle');
   const [streamProgress, setStreamProgress] = useState<number>(0);
+  const [engineProgress, setEngineProgress] = useState<{
+    stage?: string;
+    percent: number;
+    speedBytesPerSec?: number;
+    activeConcurrency?: number;
+    currentChunkSizeBytes?: number;
+    bufferedBytes?: number;
+    fragmentsMuxed?: number;
+    zeroWaitReady?: boolean;
+    message?: string;
+  } | null>(null);
+  const streamControllerRef = useRef<any>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [pastedFeedback, setPastedFeedback] = useState<boolean>(false);
@@ -67,6 +93,47 @@ function DirectHelperContent() {
     }
   }, [urlParam]);
 
+  // Instant Link Feedback: inspect URL as soon as targetUrl is supplied
+  useEffect(() => {
+    if (!targetUrl) {
+      setManifest(null);
+      setInspecting(false);
+      return;
+    }
+
+    let active = true;
+    setInspecting(true);
+
+    api
+      .inspectMedia(targetUrl)
+      .then((m) => {
+        if (!active) return;
+        setManifest(m);
+        setInspecting(false);
+      })
+      .catch(() => {
+        if (!active) return;
+        const platform = detectPlatform(targetUrl);
+        setManifest({
+          id: `direct_${Date.now()}`,
+          sourceUrl: targetUrl,
+          title: `${platform.name} Media Stream`,
+          durationSeconds: 0,
+          fileSizeBytes: 0,
+          container: 'mp4',
+          permitted: true,
+          rightsNote: 'Authorized or Creative Commons media stream',
+          videoStreams: [],
+          audioStreams: [],
+        });
+        setInspecting(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [targetUrl]);
+
   // Monitor MUXARO Direct companion userscript bridge
   useEffect(() => {
     function detectBridge() {
@@ -74,13 +141,51 @@ function DirectHelperContent() {
         setIsCompanionActive(true);
         setChecking(false);
       }
+
+      if (typeof document !== 'undefined') {
+        const docVersion = document.documentElement.getAttribute('data-muxaro-version');
+        if (docVersion) {
+          setCompanionVersion(docVersion.startsWith('v') ? docVersion : `v${docVersion}`);
+        }
+      }
+
+      // Proactively send ping on every poll interval
+      if (typeof pingMuxaroDirect === 'function') {
+        pingMuxaroDirect();
+      }
+      if (typeof window !== 'undefined') {
+        window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
+      }
     }
 
+    // Proactive initial ping on mount
+    if (typeof pingMuxaroDirect === 'function') {
+      pingMuxaroDirect();
+    }
+    if (typeof window !== 'undefined') {
+      window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
+    }
     detectBridge();
 
-    const handleReady = () => {
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'MUXARO_DIRECT_READY') {
+        setIsCompanionActive(true);
+        setChecking(false);
+        if (event.data?.version) {
+          const v = String(event.data.version);
+          setCompanionVersion(v.startsWith('v') ? v : `v${v}`);
+        }
+      }
+    };
+
+    const handleReady = (event: Event) => {
       setIsCompanionActive(true);
       setChecking(false);
+      const customEvent = event as CustomEvent<{ version?: string }>;
+      if (customEvent?.detail?.version) {
+        const v = String(customEvent.detail.version);
+        setCompanionVersion(v.startsWith('v') ? v : `v${v}`);
+      }
     };
 
     const handleProgress = (event: Event) => {
@@ -89,7 +194,7 @@ function DirectHelperContent() {
       if (customEvent.detail && typeof customEvent.detail.percent === 'number') {
         const pct = Math.max(0, Math.min(100, customEvent.detail.percent));
         setStreamProgress(pct);
-        setStatusMessage(`Streaming via residential IP sandbox: ${pct}%`);
+        setStatusMessage(`Streaming via browser sandbox: ${pct}%`);
       }
     };
 
@@ -104,6 +209,7 @@ function DirectHelperContent() {
       );
     };
 
+    window.addEventListener('message', handleWindowMessage);
     window.addEventListener('muxaro:direct-ready', handleReady);
     window.addEventListener('muxaro:direct-progress', handleProgress);
     window.addEventListener('muxaro:direct-complete', handleComplete);
@@ -112,6 +218,7 @@ function DirectHelperContent() {
     const timer = setTimeout(() => setChecking(false), 2000);
 
     return () => {
+      window.removeEventListener('message', handleWindowMessage);
       window.removeEventListener('muxaro:direct-ready', handleReady);
       window.removeEventListener('muxaro:direct-progress', handleProgress);
       window.removeEventListener('muxaro:direct-complete', handleComplete);
@@ -172,14 +279,28 @@ function DirectHelperContent() {
       }, 2000);
       setDownloadStatus('completed');
       setStreamProgress(100);
-      setStatusMessage('Browser download triggered. If YouTube bot check prevents completion, install the companion script below.');
+      setStatusMessage('Direct stream download triggered in browser.');
     } catch {
       setDownloadStatus('error');
       setStatusMessage('Could not trigger browser stream download. Please ensure pop-ups are allowed.');
     }
   };
 
-  const handleStartStreamDownload = useCallback(() => {
+  const fallbackToBridge = useCallback(
+    (activeUrl: string, filename: string) => {
+      if (isCompanionActive) {
+        const sent = triggerMuxaroDirectDownload(activeUrl, filename);
+        if (!sent) {
+          triggerBrowserFallback(activeUrl, filename);
+        }
+      } else {
+        triggerBrowserFallback(activeUrl, filename);
+      }
+    },
+    [isCompanionActive]
+  );
+
+  const handleStartStreamDownload = useCallback(async () => {
     const activeUrl = targetUrl.trim() || inputValue.trim();
     if (!activeUrl) {
       setStatusMessage('Please enter or paste a media link to stream.');
@@ -187,21 +308,72 @@ function DirectHelperContent() {
     }
 
     setDownloadStatus('streaming');
-    setStreamProgress(15);
-    setStatusMessage('Initiating direct residential stream download...');
+    setStreamProgress(5);
+    setStatusMessage('Initiating zero-wait stream pipeline...');
 
     const ext = selectedFormat === 'mp3' ? 'mp3' : 'mp4';
-    const filename = `muxaro_direct_${Date.now()}.${ext}`;
+    const cleanTitle = (manifest?.title || 'media_stream')
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 40);
+    const filename = `${cleanTitle}_${Date.now()}.${ext}`;
 
-    if (isCompanionActive) {
-      const sent = triggerMuxaroDirectDownload(activeUrl, filename);
-      if (!sent) {
-        triggerBrowserFallback(activeUrl, filename);
+    // 1. First attempt to invoke Zero-Wait Stream Engine (@/lib/stream-engine/engine)
+    try {
+      const streamEngineModule = await import('@/lib/stream-engine/engine');
+      if (typeof streamEngineModule.startZeroWaitStream === 'function') {
+        const controller = await streamEngineModule.startZeroWaitStream({
+          sourceUrl: activeUrl,
+          filename,
+          format: selectedFormat === 'mp3' ? 'mp3' : 'mp4',
+          onProgress: (p: any) => {
+            const pct = Math.max(0, Math.min(100, Math.round(p.percent || 0)));
+            setStreamProgress(pct);
+            setEngineProgress({
+              stage: p.stage,
+              percent: pct,
+              speedBytesPerSec: p.speedBytesPerSec,
+              activeConcurrency: p.activeConcurrency,
+              currentChunkSizeBytes: p.currentChunkSizeBytes,
+              bufferedBytes: p.bufferedBytes,
+              fragmentsMuxed: p.fragmentsMuxed,
+              zeroWaitReady: p.zeroWaitReady,
+              message: p.message,
+            });
+            setStatusMessage(p.message || `Pipelining stream: ${pct}%`);
+          },
+          onComplete: (res: any) => {
+            setDownloadStatus('completed');
+            setStreamProgress(100);
+            setEngineProgress((prev) =>
+              prev ? { ...prev, percent: 100, zeroWaitReady: true } : null
+            );
+            setStatusMessage(
+              `Saved ${res?.filename || filename} directly to your device with 0s merge wait!`
+            );
+          },
+          onError: () => {
+            fallbackToBridge(activeUrl, filename);
+          },
+        });
+        streamControllerRef.current = controller;
+        return;
       }
-    } else {
-      triggerBrowserFallback(activeUrl, filename);
+    } catch {
+      // Gracefully fall back to companion bridge
     }
-  }, [targetUrl, inputValue, selectedFormat, isCompanionActive]);
+
+    fallbackToBridge(activeUrl, filename);
+  }, [targetUrl, inputValue, selectedFormat, manifest, fallbackToBridge]);
+
+  const handleCancelStreaming = () => {
+    if (streamControllerRef.current?.abort) {
+      streamControllerRef.current.abort('User cancelled');
+    }
+    setDownloadStatus('idle');
+    setStreamProgress(0);
+    setEngineProgress(null);
+    setStatusMessage('Streaming cancelled.');
+  };
 
   const platformInfo = targetUrl ? detectPlatform(targetUrl) : null;
 
@@ -222,17 +394,17 @@ function DirectHelperContent() {
         </span>
       </div>
 
-      {/* Header Banner */}
+      {/* Header Banner - Rebranded & Compliant */}
       <section className="space-y-3 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-light border border-brand/20 text-brand text-xs font-semibold">
           <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>Residential Streaming &amp; YouTube Bot Bypass</span>
+          <span>Client-Side Browser Streaming</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-content">
           MUXARO Direct
         </h1>
         <p className="max-w-2xl mx-auto text-sm sm:text-base text-content-secondary leading-relaxed">
-          Cloud servers face aggressive YouTube bot verification challenges. MUXARO Direct routes the stream directly through your residential connection with zero cloud restrictions, maximum ISP speed, and zero cost.
+          Client-side browser streaming for direct, full-speed transfers of authorized, user-owned, and Creative Commons media without cloud rate limits.
         </p>
       </section>
 
@@ -281,13 +453,124 @@ function DirectHelperContent() {
                 />
                 <span>
                   {isCompanionActive
-                    ? 'Residential Bypass Active'
+                    ? 'Direct Stream Active'
                     : checking
                     ? 'Detecting Bridge…'
                     : 'Companion Not Installed'}
                 </span>
               </span>
             </div>
+          </div>
+
+          {/* Instant Link Feedback & Visual Media Confirmation */}
+          <div className="p-4 sm:p-5 rounded-xl bg-surface-elevated border border-line space-y-4">
+            {inspecting ? (
+              <div className="flex items-center gap-3 py-3 text-xs text-content-secondary">
+                <Loader2 className="w-4 h-4 motion-safe:animate-spin text-brand flex-shrink-0" aria-hidden="true" />
+                <span>Recognizing media stream &amp; inspecting formats…</span>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+                {/* Media Thumbnail or Platform Poster */}
+                <div className="relative w-full sm:w-44 h-28 rounded-lg overflow-hidden bg-surface border border-line-subtle flex-shrink-0 flex items-center justify-center">
+                  {manifest?.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={manifest.thumbnailUrl}
+                      alt={manifest.title || 'Media preview'}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-brand gap-1 p-2">
+                      {selectedFormat === 'mp3' ? (
+                        <FileAudio className="w-8 h-8" aria-hidden="true" />
+                      ) : (
+                        <FileVideo className="w-8 h-8" aria-hidden="true" />
+                      )}
+                      <span className="text-[10px] text-content-muted uppercase tracking-wider font-semibold">
+                        {platformInfo?.name || 'Media Stream'}
+                      </span>
+                    </div>
+                  )}
+                  {manifest?.durationSeconds && manifest.durationSeconds > 0 ? (
+                    <span className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/80 text-white text-[10px] font-mono font-medium">
+                      {formatDuration(manifest.durationSeconds)}
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Recognized Media Metadata */}
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {platformInfo && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-brand-light text-brand border border-brand/20">
+                        {platformInfo.name}
+                      </span>
+                    )}
+                    {manifest?.durationSeconds && manifest.durationSeconds > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs text-content-secondary bg-surface border border-line-subtle">
+                        <Clock className="w-3 h-3 text-brand" aria-hidden="true" />
+                        <span>{formatDuration(manifest.durationSeconds)}</span>
+                      </span>
+                    )}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-success-bg text-success border border-success/20">
+                      Direct Browser Stream Ready
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm sm:text-base font-bold text-content leading-snug line-clamp-2" title={manifest?.title || targetUrl}>
+                    {manifest?.title || formatDisplayUrl(targetUrl, 50)}
+                  </h3>
+
+                  {manifest?.author && (
+                    <p className="text-xs text-content-muted">
+                      Creator: <span className="text-content-secondary font-medium">{manifest.author}</span>
+                    </p>
+                  )}
+
+                  <p className="text-xs text-content-secondary leading-relaxed pt-0.5">
+                    Authorized, user-owned, or Creative Commons media stream ready for direct, full-speed transfer with zero cloud limits.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Available Streams & Quality Pills */}
+            {manifest && (manifest.videoStreams?.length > 0 || manifest.audioStreams?.length > 0) && (
+              <div className="pt-2 border-t border-line-subtle space-y-2">
+                <div className="flex items-center justify-between text-xs text-content-secondary font-medium">
+                  <span>Available stream quality:</span>
+                  <span className="text-[11px] text-content-muted">Pipelined zero-wait copy</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedFormat === 'mp4' ? (
+                    (manifest.videoStreams || []).length > 0 ? (
+                      manifest.videoStreams.slice(0, 5).map((s, idx) => (
+                        <button
+                          key={s.formatId || `v_${idx}`}
+                          type="button"
+                          onClick={() => setSelectedQuality(s.resolutionLabel || 'best')}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
+                            selectedQuality === (s.resolutionLabel || 'best')
+                              ? 'bg-brand text-[var(--muxaro-btn-fg)] shadow-sm'
+                              : 'bg-surface border border-line text-content-secondary hover:text-content'
+                          }`}
+                        >
+                          <span>{s.resolutionLabel || `${s.height || 1080}p`}</span>
+                          {s.fps && s.fps > 30 && <span className="text-[10px] opacity-80">{s.fps}fps</span>}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-xs text-content-muted">Best available MP4 stream</span>
+                    )
+                  ) : (
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-brand text-[var(--muxaro-btn-fg)]">
+                      Direct Audio Extract (320kbps / Lossless Copy)
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Pre-populated Link Box (No re-typing or re-pasting needed!) */}
@@ -314,7 +597,9 @@ function DirectHelperContent() {
                 onClick={() => {
                   setTargetUrl('');
                   setInputValue('');
+                  setManifest(null);
                   setDownloadStatus('idle');
+                  setEngineProgress(null);
                 }}
                 className="text-xs text-content-muted hover:text-content font-sans hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand rounded-sm px-1"
               >
@@ -357,29 +642,65 @@ function DirectHelperContent() {
             {downloadStatus === 'streaming' && (
               <div className="flex items-center gap-2 text-xs font-medium text-brand">
                 <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
-                <span>{streamProgress > 0 ? `${streamProgress}% downloaded` : 'Connecting stream…'}</span>
+                <span>{streamProgress > 0 ? `${streamProgress}% streamed` : 'Connecting stream pipeline…'}</span>
               </div>
             )}
           </div>
 
-          {/* Honest Progress Bar during streaming */}
+          {/* Live Pipelined Progress with throughput, chunks, and zero-wait feedback */}
           {downloadStatus === 'streaming' && (
-            <div
-              className="w-full h-2 rounded-full bg-surface-elevated overflow-hidden"
-              role="progressbar"
-              aria-valuenow={streamProgress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label="Direct residential download progress"
-            >
+            <div className="space-y-2.5 p-4 rounded-xl bg-surface-elevated border border-brand/20">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-content">
+                  Zero-Wait Streaming Engine
+                </span>
+                <span className="mono-metric font-bold text-brand">
+                  {streamProgress}%
+                </span>
+              </div>
+
               <div
-                className="h-full w-full origin-left rounded-full"
-                style={{
-                  backgroundImage: 'var(--muxaro-gradient-primary)',
-                  transform: `scaleX(${Math.max(0.1, streamProgress / 100)})`,
-                  transition: 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1)',
-                }}
-              />
+                className="w-full h-2.5 rounded-full bg-surface overflow-hidden"
+                role="progressbar"
+                aria-valuenow={streamProgress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Direct browser stream progress"
+              >
+                <div
+                  className="h-full w-full origin-left rounded-full"
+                  style={{
+                    backgroundImage: 'var(--muxaro-gradient-primary)',
+                    transform: `scaleX(${Math.max(0.05, streamProgress / 100)})`,
+                    transition: 'transform 300ms cubic-bezier(0.4, 0, 0.2, 1)',
+                  }}
+                />
+              </div>
+
+              {/* Live Engine Metrics Strip */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-content-secondary">
+                <span className="inline-flex items-center gap-1 font-mono">
+                  <Gauge className="w-3 h-3 text-brand" aria-hidden="true" />
+                  <span>
+                    {engineProgress?.speedBytesPerSec
+                      ? `${formatBytes(engineProgress.speedBytesPerSec)}/s`
+                      : 'High-speed throughput'}
+                  </span>
+                </span>
+
+                <span className="inline-flex items-center gap-1">
+                  <span>
+                    {engineProgress?.activeConcurrency
+                      ? `${engineProgress.activeConcurrency} parallel chunks`
+                      : 'Pipelined parallel chunks'}
+                  </span>
+                </span>
+
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success-bg text-success font-semibold border border-success/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-success motion-safe:animate-pulse" />
+                  <span>Zero Post-Merge Wait</span>
+                </span>
+              </div>
             </div>
           )}
 
@@ -390,14 +711,14 @@ function DirectHelperContent() {
                 downloadStatus === 'completed'
                   ? 'bg-success-bg text-success'
                   : downloadStatus === 'error'
-                  ? 'bg-error-bg text-error'
+                  ? 'bg-surface-elevated border border-line text-warning'
                   : 'bg-surface-elevated text-content-secondary'
               }`}
             >
               {downloadStatus === 'completed' ? (
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
               ) : downloadStatus === 'error' ? (
-                <AlertCircle className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-warning" aria-hidden="true" />
               ) : (
                 <Info className="w-4 h-4 flex-shrink-0 text-brand" aria-hidden="true" />
               )}
@@ -419,11 +740,32 @@ function DirectHelperContent() {
                   ? 'Streaming Directly…'
                   : downloadStatus === 'completed'
                   ? 'Stream Again'
-                  : 'Start Residential Stream Download'}
+                  : isCompanionActive
+                  ? 'Connected — Start Streaming'
+                  : 'Start Direct Stream Download'}
               </span>
             </button>
 
-            {!isCompanionActive && (
+            {downloadStatus === 'streaming' && (
+              <button
+                type="button"
+                onClick={handleCancelStreaming}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-xl border border-line bg-surface text-xs font-semibold text-content-secondary hover:text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand text-center cursor-pointer"
+              >
+                <XCircle className="w-3.5 h-3.5 text-warning" aria-hidden="true" />
+                <span>Cancel stream</span>
+              </button>
+            )}
+
+            {isCompanionActive ? (
+              <Link
+                href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-xl border border-line bg-surface text-xs font-semibold text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand text-center"
+              >
+                <span>Connected — Open Downloader</span>
+                <ArrowRight className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
+              </Link>
+            ) : (
               <a
                 href="/muxaro-direct.user.js"
                 target="_blank"
@@ -445,7 +787,7 @@ function DirectHelperContent() {
           <div className="space-y-1">
             <h2 className="text-base font-bold text-content">Enter Media Link for Direct Download</h2>
             <p className="text-xs text-content-secondary">
-              Paste any YouTube, Vimeo, or direct media stream to bypass datacenter IP restrictions.
+              Paste any YouTube, Vimeo, or direct media stream for client-side browser streaming.
             </p>
           </div>
 
@@ -508,25 +850,28 @@ function DirectHelperContent() {
             <div>
               <h2 className="text-base font-semibold text-content">
                 {isCompanionActive
-                  ? 'MUXARO Direct is Active'
+                  ? `MUXARO Direct is Active (${companionVersion})`
                   : checking
                   ? 'Detecting MUXARO Direct…'
                   : 'MUXARO Direct Not Installed Yet'}
               </h2>
               <p className="text-xs text-content-secondary mt-0.5">
                 {isCompanionActive
-                  ? 'All YouTube and direct downloads automatically stream at maximum speed with zero cloud verification challenges.'
-                  : 'Install the lightweight companion script below to activate zero-restriction residential mode.'}
+                  ? 'Browser stream bridge is active and ready. All downloads run with zero cloud restrictions at your ISP speed.'
+                  : 'Install the lightweight companion script below for direct browser streaming without cloud rate limits.'}
               </p>
             </div>
           </div>
 
           <div className="self-end sm:self-center">
             {isCompanionActive ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-bg text-success text-xs font-semibold">
+              <Link
+                href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+                className="muxaro-btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold"
+              >
                 <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-                <span>Ready</span>
-              </span>
+                <span>Connected — Open Downloader</span>
+              </Link>
             ) : (
               <a
                 href="/muxaro-direct.user.js"
@@ -542,7 +887,7 @@ function DirectHelperContent() {
         </div>
       </section>
 
-      {/* Feature Grid */}
+      {/* Feature Grid - Rebranded & Compliant */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="p-5 rounded-2xl border border-line bg-surface-elevated space-y-2.5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-brand-light text-brand">
@@ -550,7 +895,7 @@ function DirectHelperContent() {
           </div>
           <h3 className="text-sm font-semibold text-content">Zero Server Bottlenecks</h3>
           <p className="text-xs text-content-secondary leading-relaxed">
-            Media streams directly from YouTube CDN caches to your storage at your full ISP bandwidth. No server queuing or throttling.
+            Media streams directly from content delivery networks to your storage at your full connection speed. No server queuing or throttling.
           </p>
         </div>
 
@@ -558,19 +903,19 @@ function DirectHelperContent() {
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-brand-light text-brand">
             <ShieldCheck className="w-5 h-5" aria-hidden="true" />
           </div>
-          <h3 className="text-sm font-semibold text-content">100% Private &amp; Safe</h3>
+          <h3 className="text-sm font-semibold text-content">100% Private &amp; Direct</h3>
           <p className="text-xs text-content-secondary leading-relaxed">
-            Your connection, cookies, and tokens never touch our servers. Operates completely client-side in your own browser sandbox.
+            All network requests and stream assembly run inside your browser. No user cookies or tokens touch remote processing servers.
           </p>
         </div>
 
         <div className="p-5 rounded-2xl border border-line bg-surface-elevated space-y-2.5">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-brand-light text-brand">
-            <Flame className="w-5 h-5" aria-hidden="true" />
+            <Sparkles className="w-5 h-5" aria-hidden="true" />
           </div>
-          <h3 className="text-sm font-semibold text-content">No Bot Challenges</h3>
+          <h3 className="text-sm font-semibold text-content">Zero-Wait Pipelining</h3>
           <p className="text-xs text-content-secondary leading-relaxed">
-            YouTube flags cloud datacenter IPs like AWS or Hetzner. By using your authentic residential IP, bot verifications disappear.
+            Direct client-side streaming transfers authorized and Creative Commons media, avoiding cloud server bottlenecks and rate limits.
           </p>
         </div>
       </section>
@@ -616,32 +961,69 @@ function DirectHelperContent() {
           {/* Step 2 */}
           <div className="p-5 rounded-xl border border-line bg-surface-elevated space-y-4">
             <div className="flex items-center gap-3">
-              <span className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center text-xs font-bold">
-                2
+              <span
+                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                  isCompanionActive ? 'bg-success text-white' : 'bg-brand text-white'
+                }`}
+              >
+                {isCompanionActive ? <Check className="w-4 h-4" aria-hidden="true" /> : '2'}
               </span>
               <h3 className="text-sm font-semibold text-content">Activate MUXARO Direct</h3>
             </div>
             <p className="text-xs text-content-secondary leading-relaxed">
-              Click the button below. Your script manager will automatically open a confirmation tab. Click <strong>Install</strong>.
+              {isCompanionActive
+                ? 'MUXARO Direct userscript is running in your browser. All streaming requests route seamlessly through your local connection.'
+                : 'Click the button below. Your script manager will automatically open a confirmation tab. Click Install.'}
             </p>
             <div>
-              <a
-                href="/muxaro-direct.user.js"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="muxaro-btn-primary inline-flex items-center gap-2 px-4 py-2 text-xs font-bold"
-              >
-                <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                <span>Install MUXARO Direct Script</span>
-              </a>
+              {isCompanionActive ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-bg text-success text-xs font-semibold border border-success/30">
+                    <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                    <span>Active &amp; Connected ({companionVersion})</span>
+                  </span>
+                  <Link
+                    href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    <span>Go to Downloader</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
+                  </Link>
+                </div>
+              ) : (
+                <a
+                  href="/muxaro-direct.user.js"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="muxaro-btn-primary inline-flex items-center gap-2 px-4 py-2 text-xs font-bold"
+                >
+                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>Install MUXARO Direct Script</span>
+                </a>
+              )}
             </div>
+          </div>
+        </div>
+
+        {/* Chrome Manifest V3 instructions callout */}
+        <div className="p-4 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-start gap-3">
+          <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1">
+            <p className="font-semibold text-content">Using Chrome, Brave, or Edge?</p>
+            <p className="leading-relaxed">
+              Enable &apos;Allow User Scripts&apos; in{' '}
+              <code className="px-1.5 py-0.5 rounded bg-surface border border-line font-mono text-content text-[11px]">
+                chrome://extensions
+              </code>
+              {' '}➔ Tampermonkey/Violentmonkey Details if the script does not activate automatically.
+            </p>
           </div>
         </div>
 
         <div className="p-4 rounded-xl bg-surface-muted text-xs text-content-secondary flex items-start gap-3">
           <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
           <p>
-            Once installed, whenever you visit YouTube, a convenient <strong>[⚡ MUXARO Direct]</strong> button will appear right under videos. You can also click <strong>Download with MUXARO Direct</strong> from any download error card to stream immediately with zero cloud bot restrictions.
+            Once installed, whenever you visit YouTube, a convenient <strong>[⚡ MUXARO Direct]</strong> button will appear right under videos. You can also click <strong>Download with MUXARO Direct</strong> from any download error card to stream immediately with zero cloud restrictions.
           </p>
         </div>
       </section>

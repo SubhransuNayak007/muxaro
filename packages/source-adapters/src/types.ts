@@ -12,7 +12,14 @@
  * - AdapterCapabilities (declared operational capabilities and restrictions)
  */
 
-export type SourceType = 'direct_media' | 'youtube_permitted' | 'unsupported';
+export type SourceType =
+  | 'direct_media'
+  | 'youtube_permitted'
+  | 'youtube'
+  | 'tiktok'
+  | 'instagram'
+  | 'twitter'
+  | 'unsupported';
 
 export type StreamType = 'video' | 'audio' | 'muxed';
 

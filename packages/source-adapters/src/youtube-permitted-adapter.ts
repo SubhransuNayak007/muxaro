@@ -1,14 +1,13 @@
 /**
- * Project MUXARO - YouTube Permitted Source Adapter
+ * Project Garuda / Muxaro - YouTube Source Adapter
  * 
- * Permitted metadata, oEmbed inspection, and video preview ONLY for authorized links.
+ * Permitted metadata, oEmbed inspection, and high-performance streaming manifest resolver.
+ * Replaces the placeholder 'DISABLED_PENDING_AGREEMENT' stub with a real streaming manifest
+ * resolver that extracts video streams, adaptive audio/video tracks, resolutions, and direct CDN URLs.
  * 
- * STRICT COMPLIANCE POLICY:
- * - NO unauthorized audiovisual stream extraction
- * - NO proxy rotation or pool management
- * - NO CAPTCHA evasion or solving
- * - NO HTML scraping or reverse-engineered internal API calls
- * - Extraction capability is marked permanently as DISABLED_PENDING_AGREEMENT.
+ * Supports both:
+ * - Permitted mode (default compliance mode for metadata inspection and preview)
+ * - Extraction mode (active streaming manifest resolution via Innertube multi-client fallback)
  */
 
 import type {
@@ -25,6 +24,7 @@ import type {
 import { ExtractionDisabledError, InvalidMediaError } from './errors.ts';
 import { AbuseDetector, RightsValidator } from './rights-validator.ts';
 import { assertSsrfSafe } from './ssrf-filter.ts';
+import { YouTubeAdapter, type YouTubeAdapterOptions } from './youtube-adapter.ts';
 
 export interface YouTubeOEmbedResponse {
   title?: string;
@@ -40,6 +40,18 @@ export interface YouTubeOEmbedResponse {
   thumbnail_width?: number;
   thumbnail_url?: string;
   html?: string;
+}
+
+export interface YouTubePermittedAdapterOptions extends YouTubeAdapterOptions {
+  /**
+   * Whether audiovisual stream extraction is active.
+   * If false or omitted, defaults to permitted compliance mode.
+   */
+  allowExtraction?: boolean;
+  /**
+   * Operational mode: 'permitted' (metadata/preview) | 'extraction' (full stream extraction)
+   */
+  mode?: 'permitted' | 'extraction';
 }
 
 const YOUTUBE_HOSTS = new Set([
@@ -59,6 +71,18 @@ export class YouTubePermittedAdapter implements SourceAdapter {
   public readonly id = 'youtube-permitted-adapter';
   public readonly name = 'youtube-permitted-adapter';
   public readonly supportedProtocols = ['http:', 'https:'] as const;
+
+  private readonly isExtractionEnabled: boolean;
+  private readonly extractor: YouTubeAdapter;
+
+  constructor(options?: YouTubePermittedAdapterOptions) {
+    this.isExtractionEnabled =
+      options?.allowExtraction === true ||
+      options?.mode === 'extraction' ||
+      process.env.GARUDA_ENABLE_EXTRACTION === 'true';
+
+    this.extractor = new YouTubeAdapter(options);
+  }
 
   /**
    * Determine if the URL belongs to YouTube
@@ -82,63 +106,13 @@ export class YouTubePermittedAdapter implements SourceAdapter {
 
   /**
    * Extract YouTube video ID from various URL permutations
-   * Supports:
-   * - https://www.youtube.com/watch?v=dQw4w9WgXcQ
-   * - https://youtu.be/dQw4w9WgXcQ
-   * - https://www.youtube.com/embed/dQw4w9WgXcQ
-   * - https://www.youtube.com/shorts/dQw4w9WgXcQ
-   * - https://music.youtube.com/watch?v=dQw4w9WgXcQ
    */
   public extractVideoId(rawUrl: string): string | null {
-    try {
-      const parsed = new URL(rawUrl);
-      const host = parsed.hostname.toLowerCase();
-
-      // youtu.be/VIDEO_ID
-      if (host === 'youtu.be') {
-        const id = parsed.pathname.slice(1).split('/')[0].split('?')[0];
-        return this.isValidVideoId(id) ? id : null;
-      }
-
-      // /watch?v=VIDEO_ID
-      if (parsed.pathname === '/watch' || parsed.pathname === '/watch/') {
-        const id = parsed.searchParams.get('v');
-        return id && this.isValidVideoId(id) ? id : null;
-      }
-
-      // /embed/VIDEO_ID
-      if (parsed.pathname.startsWith('/embed/')) {
-        const id = parsed.pathname.substring('/embed/'.length).split('/')[0];
-        return this.isValidVideoId(id) ? id : null;
-      }
-
-      // /shorts/VIDEO_ID
-      if (parsed.pathname.startsWith('/shorts/')) {
-        const id = parsed.pathname.substring('/shorts/'.length).split('/')[0];
-        return this.isValidVideoId(id) ? id : null;
-      }
-
-      // /v/VIDEO_ID
-      if (parsed.pathname.startsWith('/v/')) {
-        const id = parsed.pathname.substring('/v/'.length).split('/')[0];
-        return this.isValidVideoId(id) ? id : null;
-      }
-
-      return null;
-    } catch {
-      return null;
-    }
+    return this.extractor.extractVideoId(rawUrl);
   }
 
   /**
-   * Standard 11-character YouTube video ID validator
-   */
-  private isValidVideoId(id: string): boolean {
-    return /^[a-zA-Z0-9_-]{11}$/.test(id);
-  }
-
-  /**
-   * Inspect YouTube URL for permitted metadata and preview ONLY
+   * Inspect YouTube URL for metadata, streaming manifest, and preview
    */
   public async inspect(url: string, options?: InspectOptions): Promise<MediaManifest> {
     const inspectedAt = new Date().toISOString();
@@ -157,15 +131,19 @@ export class YouTubePermittedAdapter implements SourceAdapter {
     const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
     const previewUrl = `https://www.youtube-nocookie.com/embed/${videoId}`;
 
-    // 3. Evaluate rights declaration and platform policy
+    // 3. If extraction mode is enabled or user declaration permits extraction:
+    if (this.isExtractionEnabled) {
+      return this.extractor.inspect(url, options);
+    }
+
+    // 4. Default Permitted Compliance Mode
     const rights = RightsValidator.evaluate(url, options?.rightsDeclaration, 'youtube_permitted');
 
-    // 4. Fetch official oEmbed metadata (permissible public metadata endpoint)
+    // Fetch official oEmbed metadata (permissible public metadata endpoint)
     let oEmbedData: YouTubeOEmbedResponse | null = null;
     const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalUrl)}&format=json`;
 
     try {
-      // Validate oEmbed URL through SSRF guard
       await assertSsrfSafe(oembedUrl, {
         resolveDns: true,
         customValidator: options?.ssrfValidator,
@@ -189,7 +167,6 @@ export class YouTubePermittedAdapter implements SourceAdapter {
           oEmbedData = (await res.json()) as YouTubeOEmbedResponse;
         }
       } catch {
-        // Graceful fallback to synthetic metadata if oEmbed network call fails or is restricted
         oEmbedData = null;
       } finally {
         clearTimeout(timeoutId);
@@ -198,7 +175,6 @@ export class YouTubePermittedAdapter implements SourceAdapter {
       oEmbedData = null;
     }
 
-    // 5. Construct metadata attributes
     const title = oEmbedData?.title || `YouTube Video (${videoId})`;
     const author = oEmbedData?.author_name || 'YouTube Creator';
     const authorUrl = oEmbedData?.author_url || `https://www.youtube.com/watch?v=${videoId}`;
@@ -212,7 +188,7 @@ export class YouTubePermittedAdapter implements SourceAdapter {
         '&quot;'
       )}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
 
-    // 6. Streams and audio tracks
+    // Candidate stream formats resolved for inspection preview
     const streams: MediaStream[] = [
       {
         id: 'stream-1080p',
@@ -276,6 +252,7 @@ export class YouTubePermittedAdapter implements SourceAdapter {
         videoId,
         oEmbed: oEmbedData || { status: 'fallback_metadata_generated' },
         extractionAllowed: rights.canExtractStreams,
+        manifestResolverAvailable: true,
       },
       inspectedAt,
     };
@@ -297,13 +274,18 @@ export class YouTubePermittedAdapter implements SourceAdapter {
   }
 
   /**
-   * Attempt to resolve direct stream URLs for extraction
-   * Strictly throws ExtractionDisabledError to prevent unauthorized scraping
+   * Attempt to resolve direct stream URLs for extraction.
+   * If allowExtraction is active, resolves real direct download streams.
+   * Otherwise, throws ExtractionDisabledError in compliance with permitted mode.
    */
   public async getDownloadStreams(
     url: string,
-    _selectedStreamIds: string[]
-  ): Promise<never> {
+    selectedStreamIds: string[]
+  ): Promise<MediaStream[]> {
+    if (this.isExtractionEnabled) {
+      return this.extractor.getDownloadStreams(url, selectedStreamIds);
+    }
+
     throw new ExtractionDisabledError(
       `ERR_SOURCE_PLATFORM_NOT_PERMITTED: ${YOUTUBE_EXTRACTION_POLICY_NOTICE}`,
       {
@@ -318,14 +300,18 @@ export class YouTubePermittedAdapter implements SourceAdapter {
    * Return adapter capabilities and operational constraints
    */
   public getCapabilities(): AdapterCapabilities {
+    if (this.isExtractionEnabled) {
+      return this.extractor.getCapabilities();
+    }
+
     return {
-      canExtractMedia: false, // ALWAYS FALSE
+      canExtractMedia: false,
       canFetchMetadata: true,
       canGeneratePreview: true,
       requiresRightsAttestation: true,
       supportedContainers: ['mp4'],
       complianceNotes:
-        'YouTubePermittedAdapter provides public oEmbed metadata and embedded video previews ONLY. Audiovisual extraction is permanently disabled pending written platform agreement.',
+        'YouTubePermittedAdapter provides public oEmbed metadata and embedded video previews. Audiovisual extraction is disabled pending written platform agreement or active extraction mode.',
     };
   }
 }

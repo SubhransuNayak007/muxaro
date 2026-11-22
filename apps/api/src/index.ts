@@ -1,61 +1,23 @@
 /**
- * Project MUXARO - API Server Entrypoint
+ * MUXARO Media Processing Platform - API Entrypoint
+ *
+ * Exports buildServer and startServer from server.ts and maintains compatibility aliases.
  */
 
-import { buildApp } from './app.js';
-import { config } from './config.js';
+import { buildServer, startServer } from './server.js';
 
-// Operational process guard: prevent unhandled rejections or uncaught errors from crashing the daemon
-process.on('uncaughtException', (err: Error) => {
-  console.error('[MUXARO API] [UNCAUGHT_EXCEPTION]', {
-    name: err?.name || 'Error',
-    message: err?.message || String(err),
-    stack: config.env === 'development' ? err?.stack : undefined,
-  });
-});
+export { buildServer, startServer };
 
-process.on('unhandledRejection', (reason: unknown) => {
-  const msg = reason instanceof Error ? reason.message : String(reason);
-  console.error('[MUXARO API] [UNHANDLED_REJECTION]', {
-    reason: msg,
-    stack: reason instanceof Error && config.env === 'development' ? reason.stack : undefined,
-  });
-});
+// Backward compatibility aliases
+export const buildApp = buildServer;
+export const start = startServer;
 
-async function start() {
-  const app = await buildApp();
-
-  try {
-    const address = await app.listen({ port: config.port, host: config.host });
-    console.log(`[MUXARO API] Server listening at ${address}`);
-    console.log(`[MUXARO API] Swagger OpenAPI UI documentation available at ${address}/docs`);
-    console.log(`[MUXARO API] Health check at ${address}/api/v1/health`);
-  } catch (err) {
-    console.error('[MUXARO API] Failed to start server:', err);
+// Start server if executed as main entry
+import { fileURLToPath } from 'node:url';
+const currentFilePath = fileURLToPath(import.meta.url);
+if (process.argv[1] && currentFilePath.endsWith(process.argv[1])) {
+  startServer().catch((err) => {
+    console.error('[MUXARO API] Fatal error starting server:', err);
     process.exit(1);
-  }
-
-  // Graceful shutdown
-  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
-  for (const sig of signals) {
-    process.on(sig, async () => {
-      console.log(`[MUXARO API] Received ${sig}, gracefully shutting down...`);
-      try {
-        await app.close();
-        console.log('[MUXARO API] Server shut down cleanly.');
-        process.exit(0);
-      } catch (err) {
-        console.error('[MUXARO API] Error during shutdown:', err);
-        process.exit(1);
-      }
-    });
-  }
+  });
 }
-
-// Start server
-start().catch((err) => {
-  console.error('[MUXARO API] Fatal error starting server:', err);
-  process.exit(1);
-});
-
-export { buildApp, start };

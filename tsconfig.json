@@ -21,6 +21,10 @@
       "@vyro/media-worker/*": ["./apps/media-worker/src/*"],
       "@vyro/api": ["./apps/api/src/index.ts"],
       "@vyro/api/*": ["./apps/api/src/*"],
+      "@muxaro/shared": ["./packages/shared/src/index.ts"],
+      "@muxaro/shared/*": ["./packages/shared/src/*"],
+      "@muxaro/db": ["./packages/db/src/index.ts"],
+      "@muxaro/db/*": ["./packages/db/src/*"],
       "@muxaro/security": ["./security/src/index.ts"],
       "@muxaro/security/*": ["./security/src/*"],
       "@muxaro/entitlements": ["./packages/entitlements/src/index.ts"],
@@ -29,8 +33,14 @@
       "@muxaro/source-adapters/*": ["./packages/source-adapters/src/*"],
       "@muxaro/media-worker": ["./apps/media-worker/src/index.ts"],
       "@muxaro/media-worker/*": ["./apps/media-worker/src/*"],
+      "@muxaro/worker-media": ["./apps/worker-media/src/index.ts"],
+      "@muxaro/worker-media/*": ["./apps/worker-media/src/*"],
       "@muxaro/api": ["./apps/api/src/index.ts"],
-      "@muxaro/api/*": ["./apps/api/src/*"]
+      "@muxaro/api/*": ["./apps/api/src/*"],
+      "@muxaro/shared": ["./packages/shared/src/index.ts"],
+      "@muxaro/shared/*": ["./packages/shared/src/*"],
+      "@muxaro/db": ["./packages/db/src/index.ts"],
+      "@muxaro/db/*": ["./packages/db/src/*"]
     }
   },
   "include": [

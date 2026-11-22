@@ -1,0 +1,63 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-worker-media-transcode
+  namespace: muxaro
+  labels:
+    app.kubernetes.io/name: muxaro-worker-media
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: muxaro
+    muxaro.com/lane: transcode
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker-media-transcode
+  # Part 8.2: Bounded capacity with aggressive scale-up and progressive scale-down
+  minReplicaCount: 1
+  maxReplicaCount: 40
+  pollingInterval: 15
+  cooldownPeriod: 300
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          selectPolicy: Max
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+            - type: Pods
+              value: 4
+              periodSeconds: 15
+        scaleDown:
+          # Protect long-running active video transcodes with 300s stabilization window
+          stabilizationWindowSeconds: 300
+          selectPolicy: Min
+          policies:
+            - type: Percent
+              value: 10
+              periodSeconds: 60
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    # Primary trigger: BullMQ waiting queue for lane:transcode (Target Queue Depth: 2)
+    - type: redis
+      metadata:
+        addressFromEnv: REDIS_URL
+        listName: bull:lane:transcode:wait
+        targetListLength: "2"
+        activationListLength: "1"
+        enableDBIndex: "true"
+        databaseIndex: "0"
+    # Secondary trigger: BullMQ active processing set to guarantee pods remain while active
+    - type: redis
+      metadata:
+        addressFromEnv: REDIS_URL
+        listName: bull:lane:transcode:active
+        targetListLength: "4"
+        activationListLength: "1"
+        enableDBIndex: "true"
+        databaseIndex: "0"

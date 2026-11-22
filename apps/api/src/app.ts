@@ -36,6 +36,8 @@ import { playlistRoutes } from './routes/playlists.js';
 import { accountRoutes } from './routes/account.js';
 import { adminRoutes } from './routes/admin.js';
 import { downloadRoutes } from './routes/download.js';
+import { downloadsRoutes } from './routes/downloads.js';
+import { probeRoutes } from './routes/probe.js';
 
 function resolveCorsOriginConfig(): boolean | string | string[] {
   const raw = config.corsOrigin;
@@ -357,9 +359,16 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(accountRoutes);
       await v1.register(adminRoutes);
       await v1.register(downloadRoutes);
+      await v1.register(downloadsRoutes);
+      await v1.register(probeRoutes);
     },
     { prefix: '/api/v1' }
   );
+
+  // Direct /v1 prefix for modern worker downloads, jobs, and probe
+  await app.register(downloadsRoutes, { prefix: '/v1' });
+  await app.register(probeRoutes, { prefix: '/v1' });
+  await app.register(jobRoutes, { prefix: '/v1' });
 
   // Root landing / health pointer
   app.get('/', async (_req, reply) => {

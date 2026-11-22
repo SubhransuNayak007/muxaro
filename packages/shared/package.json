@@ -1,0 +1,70 @@
+{
+  "name": "@muxaro/shared",
+  "version": "1.0.0",
+  "description": "MUXARO Media Processing Platform - Shared Core Types, Codec Matrix, Contracts, Errors, and URL Guard",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./src/types.ts"
+    },
+    "./codec-matrix": {
+      "types": "./dist/codec-matrix.d.ts",
+      "import": "./dist/codec-matrix.js",
+      "default": "./src/codec-matrix.ts"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./src/errors.ts"
+    },
+    "./url-guard": {
+      "types": "./dist/url-guard.d.ts",
+      "import": "./dist/url-guard.js",
+      "default": "./src/url-guard.ts"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js",
+      "default": "./src/contracts.ts"
+    },
+    "./ssrf-fetch": {
+      "types": "./dist/ssrf-fetch.d.ts",
+      "import": "./dist/ssrf-fetch.js",
+      "default": "./src/ssrf-fetch.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types tests/shared.test.ts"
+  },
+  "keywords": [
+    "muxaro",
+    "shared",
+    "types",
+    "contracts",
+    "zod",
+    "codec-matrix",
+    "url-guard",
+    "ssrf"
+  ],
+  "author": "Muxaro Core Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "undici": "^8.12.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "typescript": "^5.7.3"
+  }
+}

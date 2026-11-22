@@ -14,13 +14,13 @@ import * as fs from 'node:fs/promises';
 
 import {
   generateSyntheticMediaFixtures,
-  SyntheticMediaManifest,
+  type SyntheticMediaManifest,
 } from './synthetic-generator.ts';
-import { FFprobeRunner } from '../../apps/media-worker/src/prober/ffprobe.ts';
-import { AudioExtractor } from '../../apps/media-worker/src/transcoder/audio.ts';
-import { VideoTranscoder } from '../../apps/media-worker/src/transcoder/video.ts';
-import { MediaMerger } from '../../apps/media-worker/src/merger/merger.ts';
-import { OutputVerifier } from '../../apps/media-worker/src/verification/verifier.ts';
+import { FFprobeRunner } from '../../apps/media-worker/dist/prober/ffprobe.js';
+import { AudioExtractor } from '../../apps/media-worker/dist/transcoder/audio.js';
+import { VideoTranscoder } from '../../apps/media-worker/dist/transcoder/video.js';
+import { MediaMerger } from '../../apps/media-worker/dist/merger/merger.js';
+import { OutputVerifier } from '../../apps/media-worker/dist/verification/verifier.js';
 import {
   validateSafePath,
   sanitizeFilename,

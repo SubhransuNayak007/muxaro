@@ -1,0 +1,50 @@
+{
+  "name": "@muxaro/db",
+  "version": "1.0.0",
+  "description": "MUXARO Media Processing Platform - PostgreSQL Database Schema & Redis Cache Topology",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "default": "./src/schema.ts"
+    },
+    "./redis": {
+      "types": "./dist/redis.d.ts",
+      "import": "./dist/redis.js",
+      "default": "./src/redis.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "muxaro",
+    "db",
+    "postgresql",
+    "drizzle-orm",
+    "redis",
+    "ioredis"
+  ],
+  "author": "Muxaro Core Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@muxaro/shared": "link:../shared",
+    "drizzle-orm": "^0.39.0",
+    "ioredis": "^5.5.0",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "drizzle-kit": "^0.30.4",
+    "typescript": "^5.7.3"
+  }
+}

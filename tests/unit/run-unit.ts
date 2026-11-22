@@ -15,6 +15,7 @@ const suites = [
   'tests/unit/api-client-edge-mode.test.ts',
   'tests/unit/adapters.test.ts',
   'tests/unit/entitlements.test.ts',
+  'tests/unit/stream-engine.test.ts',
 ];
 
 console.log('='.repeat(70));

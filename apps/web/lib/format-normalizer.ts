@@ -231,7 +231,16 @@ export function normalizeVideoOptions(
   // Step 3: Build normalized option objects
   const options: NormalizedVideoOption[] = deduped.map((item, idx) => {
     const { stream, height, fps, fpsBucket, hdr } = item;
-    const resolutionLabel = height > 0 ? `${height}p` : String(stream.resolutionLabel || 'Original');
+    const resolutionLabel =
+      height >= 4320
+        ? '8K'
+        : height >= 2160
+        ? '4K'
+        : height >= 1440
+        ? '1440p'
+        : height > 0
+        ? `${height}p`
+        : String(stream.resolutionLabel || 'Original');
     const distinctFpsCount = (fpsBucketsByHeight.get(height) || new Set()).size;
     const showHighFps = Boolean(fps && fps > 35 && (distinctFpsCount > 1 || fps >= 50));
     const sizeInfo = computeStreamSize(stream, manifest, deduped.length);

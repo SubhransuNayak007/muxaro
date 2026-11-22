@@ -1,109 +1,112 @@
 /**
- * Project MUXARO - Account Quota, Credits & History Routes
+ * MUXARO Media Processing Platform - Account Quota, Credits & History Routes
  *
  * GET /api/v1/account/credits
  * GET /api/v1/account/history
- * (Immutable /api/v1/credits/ledger is served by routes/entitlements.ts)
+ * GET /v1/account/credits
+ * GET /v1/account/history
  */
 
-import type { FastifyPluginAsync } from 'fastify';
-import { entitlementsService } from '../services/entitlements.service.js';
-import { queueService } from '../services/queue.service.js';
-import { resolveQuotaActor, serializeUnifiedQuotaPayload } from './entitlements.js';
+import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import { getDb, mediaJobs, eq, desc } from '@muxaro/db';
 
 export const accountRoutes: FastifyPluginAsync = async (fastify) => {
-  // GET /api/v1/account/credits
-  fastify.get('/account/credits', {
-    schema: {
-      description:
-        'Get transparent rolling 24-hour quota allowances, extra rewarded credits, and live reset countdown timers',
-      tags: ['Account & Quota'],
-    },
-  }, async (request, reply) => {
-    const requestId = (request.id as string) || `req_${Date.now()}`;
-    const actor = await resolveQuotaActor(request, reply);
-    const status = await entitlementsService.getQuotaStatus(actor.userId, actor.tier, actor.role);
+  const db = getDb();
 
-    return reply.code(200).send({
+  // GET /account/credits
+  fastify.get('/account/credits', async (request: FastifyRequest, reply: FastifyReply) => {
+    const limits = request.tierLimits;
+    const now = new Date();
+    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+    const resetSeconds = Math.max(0, Math.floor((midnight.getTime() - now.getTime()) / 1000));
+
+    const totalAllowed = limits.dailyJobLimit; // 100 for guest
+    const remaining = request.quota.remainingJobsToday;
+    const used = Math.max(0, totalAllowed - remaining);
+
+    const payload = {
+      tier: request.tier,
+      tierLabel: request.tier === 'pro' ? 'Pro' : request.tier === 'free_account' ? 'Free Account' : 'Guest',
+      remainingAllowance: remaining,
+      dailyAllowance: totalAllowed,
+      usedAllowance: used,
+      concurrencyLimit: limits.maxConcurrentJobs,
+      concurrencyInUse: request.quota.concurrentActiveJobs,
+      extraCredits: 0,
+      totalAvailableCredits: remaining,
+      resetSecondsRemaining: resetSeconds,
+      formattedResetCountdown: `${Math.floor(resetSeconds / 3600)}h ${Math.floor((resetSeconds % 3600) / 60)}m`,
+      maxUploadBytes: limits.maxUploadSizeBytes,
+      allowedTools: limits.allowedTools,
+    };
+
+    return reply.status(200).send({
       success: true,
-      data: serializeUnifiedQuotaPayload(status),
-      requestId,
+      data: payload,
+      ...payload,
+      requestId: request.id,
     });
   });
 
-  // GET /api/v1/account/history
-  fastify.get('/account/history', {
-    schema: {
-      description: 'Get paginated history of jobs owned by the current authenticated account or guest session',
-      tags: ['Account & Quota'],
-      querystring: {
-        type: 'object',
-        properties: {
-          page: { type: 'integer', default: 1 },
-          limit: { type: 'integer', default: 20 },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const requestId = (request.id as string) || `req_${Date.now()}`;
-    const query = (request.query || {}) as { page?: number; limit?: number };
-
-    const page = Math.max(1, Number(query.page || 1));
-    const limit = Math.min(100, Math.max(1, Number(query.limit || 20)));
+  // GET /account/history
+  fastify.get('/account/history', async (request: FastifyRequest, reply: FastifyReply) => {
+    const query = (request.query || {}) as { page?: string; limit?: string };
+    const page = Math.max(1, Number.parseInt(query.page || '1', 10));
+    const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit || '20', 10)));
     const offset = (page - 1) * limit;
 
-    const actor = await resolveQuotaActor(request, reply);
-    const { items, total } = queueService.getUserJobs(actor.userId, limit, offset);
+    let jobsList: any[] = [];
+    try {
+      if (request.user?.id) {
+        jobsList = await db
+          .select()
+          .from(mediaJobs)
+          .where(eq(mediaJobs.userId, request.user.id))
+          .orderBy(desc(mediaJobs.createdAt))
+          .limit(limit)
+          .offset(offset);
+      } else {
+        jobsList = await db
+          .select()
+          .from(mediaJobs)
+          .where(eq(mediaJobs.guestIpHash, request.guestIpHash))
+          .orderBy(desc(mediaJobs.createdAt))
+          .limit(limit)
+          .offset(offset);
+      }
+    } catch {
+      jobsList = [];
+    }
 
-    return reply.code(200).send({
+    const items = (jobsList || []).map((j: any) => ({
+      id: j.id,
+      jobId: j.id,
+      status: j.status || 'queued',
+      tool: j.tool,
+      operation: j.operation,
+      progress: j.progress || 0,
+      targetFormat: j.targetFormat,
+      targetResolution: j.targetResolution,
+      sourceUrl: j.sourceUrl,
+      downloadUrl: j.downloadUrl,
+      error: j.errorMessage ? { message: j.errorMessage, code: j.errorCode } : null,
+      userMessage: j.errorMessage || null,
+      retentionPolicy: j.retentionPolicy,
+      expiresAt: j.retentionExpiresAt,
+      createdAt: j.createdAt,
+      completedAt: j.completedAt,
+    }));
+
+    return reply.status(200).send({
       success: true,
       data: {
-        total,
+        total: items.length,
         page,
         limit,
-        jobs: items.map((j) => {
-          const rec = j as any;
-          return {
-            id: j.jobId,
-            jobId: j.jobId,
-            batchId: rec.batchId || null,
-            itemNumber: rec.itemNumber || null,
-            status: j.status,
-            operation: j.operation,
-            progress: j.progress,
-            stage: j.stage || j.status,
-            stageMessage: j.stageMessage || '',
-            inputTitle: j.inputTitle || null,
-            targetFormat: j.targetFormat,
-            targetResolution: j.targetResolution || null,
-            processingLane: j.processingLane || 'smart',
-            strategyLabel: j.strategyLabel || 'Media Processing',
-            losslessPreserved: j.losslessPreserved ?? false,
-            retentionMinutes: j.retentionMinutes ?? 60,
-            downloadUrl: j.downloadUrl || null,
-            artifact: j.artifact
-              ? {
-                  artifactId: j.artifact.artifactId,
-                  filename: j.artifact.filename,
-                  mimeType: j.artifact.mimeType,
-                  sizeBytes: j.artifact.sizeBytes,
-                  container: j.artifact.container,
-                  codec: j.artifact.codec,
-                  durationSeconds: j.artifact.durationSeconds,
-                  checksumSha256: j.artifact.checksumSha256,
-                  downloadUrl: j.artifact.downloadUrl,
-                  expiresAt: j.artifact.expiresAt,
-                }
-              : null,
-            error: j.error || null,
-            userMessage: j.error?.userMessage || null,
-            expiresAt: j.expiresAt || null,
-            createdAt: j.createdAt,
-            completedAt: j.completedAt || null,
-          };
-        }),
+        jobs: items,
       },
-      requestId,
+      jobs: items,
+      requestId: request.id,
     });
   });
 };
