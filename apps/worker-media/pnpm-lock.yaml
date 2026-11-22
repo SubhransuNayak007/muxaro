@@ -15,11 +15,11 @@ importers:
         specifier: ^3.750.0
         version: 3.1172.0(@aws-sdk/client-s3@3.1172.0)
       '@muxaro/db':
-        specifier: file:../../packages/db
-        version: file:../../packages/db
+        specifier: link:../../packages/db
+        version: link:../../packages/db
       '@muxaro/shared':
-        specifier: file:../../packages/shared
-        version: file:../../packages/shared
+        specifier: link:../../packages/shared
+        version: link:../../packages/shared
       archiver:
         specifier: ^7.0.1
         version: 7.0.1(bare-buffer@3.7.3)
@@ -36,8 +36,8 @@ importers:
         specifier: ^3.4.5
         version: 3.4.9
       zod:
-        specifier: ^3.24.2
-        version: 3.25.76
+        specifier: ^4.6.6
+        version: 4.6.7
     devDependencies:
       '@types/archiver':
         specifier: ^6.0.3
@@ -324,12 +324,6 @@ packages:
     resolution: {integrity: sha512-PRBiOqK4mcR0rvm6nybO7pSOYRR2Zza0+43UK2IvbVGelzMqZViiZJmOWGuWOX678QKESO6YrHx36z43nSS6iQ==}
     cpu: [x64]
     os: [win32]
-
-  '@muxaro/db@file:../../packages/db':
-    resolution: {directory: ../../packages/db, type: directory}
-
-  '@muxaro/shared@file:../../packages/shared':
-    resolution: {directory: ../../packages/shared, type: directory}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -884,8 +878,8 @@ packages:
     resolution: {integrity: sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA==}
     engines: {node: '>= 14'}
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -1170,45 +1164,6 @@ snapshots:
 
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.7':
     optional: true
-
-  '@muxaro/db@file:../../packages/db':
-    dependencies:
-      '@muxaro/shared': link:../shared
-      drizzle-orm: 0.39.3(postgres@3.4.9)
-      ioredis: 5.11.1
-      postgres: 3.4.9
-    transitivePeerDependencies:
-      - '@aws-sdk/client-rds-data'
-      - '@cloudflare/workers-types'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@libsql/client-wasm'
-      - '@neondatabase/serverless'
-      - '@op-engineering/op-sqlite'
-      - '@opentelemetry/api'
-      - '@planetscale/database'
-      - '@prisma/client'
-      - '@tidbcloud/serverless'
-      - '@types/better-sqlite3'
-      - '@types/pg'
-      - '@types/sql.js'
-      - '@vercel/postgres'
-      - '@xata.io/client'
-      - better-sqlite3
-      - bun-types
-      - expo-sqlite
-      - knex
-      - kysely
-      - mysql2
-      - pg
-      - prisma
-      - sql.js
-      - sqlite3
-      - supports-color
-
-  '@muxaro/shared@file:../../packages/shared':
-    dependencies:
-      zod: 3.25.76
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
@@ -1728,4 +1683,4 @@ snapshots:
       compress-commons: 6.0.2
       readable-stream: 4.8.0
 
-  zod@3.25.76: {}
+  zod@4.6.7: {}
