@@ -793,19 +793,21 @@ class JobManager {
         }
       });
 
-      child.on('error', (err) => {
+      child.on('error', (err: any) => {
         if (watchdogTimer) clearTimeout(watchdogTimer);
         signal.removeEventListener('abort', abortHandler);
         resolved = true;
-        job.status = 'failed';
-        job.stage = 'FAILED';
-        job.stageMessage = err.message;
-        job.error = {
-          code: 'ERR_PROCESS_SPAWN',
-          message: err.message,
-          retryable: true,
-        };
-        this.notify(job);
+        if (err?.code !== 'ENOENT') {
+          job.status = 'failed';
+          job.stage = 'FAILED';
+          job.stageMessage = err.message;
+          job.error = {
+            code: 'ERR_PROCESS_SPAWN',
+            message: err.message,
+            retryable: true,
+          };
+          this.notify(job);
+        }
         reject(err);
       });
 
@@ -927,8 +929,10 @@ class JobManager {
 
     if (isYouTube) {
       try {
-        const { Ytdl } = await import('@distube/ytdl-core');
-        const ytdl = new Ytdl();
+        const { Ytdl, Client } = await import('@distube/ytdl-core');
+        const ytdl = new Ytdl({
+          clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
+        });
 
         // 1. Resolve media details & optimal format
         const info = await ytdl.getInfo(job.sourceUrl);
@@ -951,49 +955,61 @@ class JobManager {
             vFormats[0];
         }
 
-        if (selectedFormat?.url) {
+        if (selectedFormat) {
           job.directStreamUrl = selectedFormat.url;
           job.directMimeType = selectedFormat.mimeType;
           if (selectedFormat.contentLength) {
             job.fileSizeBytes = parseInt(selectedFormat.contentLength, 10);
           }
 
-          // 2. Download the real stream to finalPath directly from Google Video CDN
+          // If running on serverless (Vercel) and the media payload exceeds 30MB,
+          // mark ready immediately so client gets sub-second start and downloads
+          // on-demand via the cut-through stream route without Lambda buffer timeout.
+          const isServerlessEnv = isServerless();
+          const estBytes = job.fileSizeBytes || 0;
+
+          if (isServerlessEnv && estBytes > 30000000) {
+            job.status = 'ready';
+            job.progress = 100;
+            job.stage = 'READY';
+            job.stageMessage = 'Stream ready for instant cut-through download';
+            job.downloadUrl = `/api/v1/jobs/${encodeURIComponent(job.id)}/download?filename=${encodeURIComponent(job.filename)}`;
+            job.artifact = {
+              filename: job.filename,
+              downloadUrl: job.downloadUrl,
+              sizeBytes: job.fileSizeBytes || 0,
+              format: job.targetFormat,
+            };
+            persistJob(job);
+            this.notify(job);
+            return;
+          }
+
+          // 2. Download the real stream to finalPath using authenticated session stream
           job.progress = 65;
           this.notify(job);
 
-          const streamRes = await fetch(selectedFormat.url, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            },
-            signal,
+          const stream = ytdl.download(info, { format: selectedFormat });
+          const out = fs.createWriteStream(finalPath);
+
+          await new Promise<void>((resolve, reject) => {
+            stream.pipe(out);
+            stream.on('error', reject);
+            out.on('error', reject);
+            out.on('finish', () => resolve());
+
+            signal.addEventListener(
+              'abort',
+              () => {
+                try { stream.destroy(); } catch {}
+                try { out.destroy(); } catch {}
+                reject(new Error('Operation aborted'));
+              },
+              { once: true }
+            );
           });
 
-          if (streamRes.ok && streamRes.body) {
-            const { Readable } = await import('node:stream');
-            const out = fs.createWriteStream(finalPath);
-            const readable = Readable.fromWeb(streamRes.body as any);
-
-            await new Promise<void>((resolve, reject) => {
-              readable.pipe(out);
-              readable.on('error', reject);
-              out.on('error', reject);
-              out.on('finish', () => resolve());
-
-              signal.addEventListener(
-                'abort',
-                () => {
-                  try { readable.destroy(); } catch {}
-                  try { out.destroy(); } catch {}
-                  reject(new Error('Operation aborted'));
-                },
-                { once: true }
-              );
-            });
-
-            downloaded = true;
-          }
+          downloaded = true;
         }
       } catch (ytErr) {
         console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);

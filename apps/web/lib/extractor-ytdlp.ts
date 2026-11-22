@@ -941,8 +941,10 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
 
   // 1. Try @distube/ytdl-core first for complete metadata, real duration & all formats
   try {
-    const { Ytdl } = await import('@distube/ytdl-core');
-    const ytdl = new Ytdl();
+    const { Ytdl, Client } = await import('@distube/ytdl-core');
+    const ytdl = new Ytdl({
+      clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
+    });
     const info = await ytdl.getInfo(sourceUrl);
     if (info.videoDetails) {
       if (info.videoDetails.title) title = info.videoDetails.title;
@@ -1173,7 +1175,63 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     };
   }
 
-  const videoFormats: VideoFormatOption[] = [
+  const is8K = /8k|4320/i.test(title);
+  const is4K = is8K || /4k|2160/i.test(title);
+  const is1440 = is4K || /1440|2k/i.test(title);
+  const isHdr = /hdr/i.test(title);
+
+  const fallbackAllFormats: VideoFormatOption[] = [
+    {
+      id: 'v_4320p',
+      videoFormatId: '702',
+      label: '8K Ultra HD',
+      resolutionHeight: 4320,
+      width: 7680,
+      fps: 60,
+      vcodec: 'av01',
+      acodec: 'aac',
+      container: 'mp4',
+      targetContainer: 'mp4',
+      isHdr,
+      requiresMerge: true,
+      estimatedBytes: 1580000000,
+      bitrateKbps: 45000,
+      badge: '8K Ultra HD',
+    },
+    {
+      id: 'v_2160p',
+      videoFormatId: '313',
+      label: '4K Ultra HD',
+      resolutionHeight: 2160,
+      width: 3840,
+      fps: 60,
+      vcodec: 'vp9',
+      acodec: 'aac',
+      container: 'mp4',
+      targetContainer: 'mp4',
+      isHdr,
+      requiresMerge: true,
+      estimatedBytes: 650000000,
+      bitrateKbps: 25000,
+      badge: isHdr ? '4K HDR' : '4K UHD',
+    },
+    {
+      id: 'v_1440p',
+      videoFormatId: '271',
+      label: '1440p Quad HD',
+      resolutionHeight: 1440,
+      width: 2560,
+      fps: 60,
+      vcodec: 'vp9',
+      acodec: 'aac',
+      container: 'mp4',
+      targetContainer: 'mp4',
+      isHdr: false,
+      requiresMerge: true,
+      estimatedBytes: 180000000,
+      bitrateKbps: 12000,
+      badge: '1440p60',
+    },
     {
       id: 'v_1080p',
       videoFormatId: '137',
@@ -1225,6 +1283,15 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
       bitrateKbps: 1100,
     },
   ];
+
+  const videoFormats = fallbackAllFormats.filter(f => {
+    if (f.resolutionHeight === 4320 && !is8K) return false;
+    if (f.resolutionHeight === 2160 && !is4K) return false;
+    if (f.resolutionHeight === 1440 && !is1440) return false;
+    return true;
+  });
+
+  const maxResLabel = is8K ? '8K Ultra HD' : is4K ? '4K Ultra HD' : is1440 ? '1440p Quad HD' : '1080p Full HD';
 
   const audioFormats: AudioFormatOption[] = [
     {
@@ -1354,15 +1421,15 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     sourceUrl,
     originalUrl: sourceUrl,
     container: 'mp4',
-    fileSizeBytes: 45000000,
-    maxResolutionLabel: '1080p Full HD',
+    fileSizeBytes: videoFormats[0]?.estimatedBytes || 45000000,
+    maxResolutionLabel: maxResLabel,
     videoFormats,
     audioFormats,
     videoStreams,
     audioStreams,
     streams: [...videoStreams, ...audioStreams],
     availableFormats: {
-      videoResolutions: ['1080p Full HD', '720p HD', '480p Standard'],
+      videoResolutions: videoFormats.map((v) => v.label),
       audioCodecs: ['mp3', 'flac', 'm4a'],
     },
     rightsCheck: {

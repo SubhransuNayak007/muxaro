@@ -70,15 +70,63 @@ export async function GET(
   const candidateStreamUrl = streamParam || job?.directStreamUrl;
   const localFileValid = fileInfo && fs.existsSync(fileInfo.filePath) && fs.statSync(fileInfo.filePath).size >= 1000;
 
+  // 1a. Dedicated YouTube stream resolution for serverless environments
+  if (!localFileValid && job?.sourceUrl && /(?:youtube\.com|youtu\.be)/i.test(job.sourceUrl)) {
+    try {
+      const { Ytdl, Client } = await import('@distube/ytdl-core');
+      const ytdl = new Ytdl({
+        clients: [Client.Tv, Client.VisionOS, Client.WebEmbedded, Client.Mweb],
+      });
+      const info = await ytdl.getInfo(job.sourceUrl);
+      const isAudio = ['mp3', 'm4a', 'flac', 'wav', 'opus'].includes((job.targetFormat || '').toLowerCase());
+      const reqHeight = parseInt(job.targetResolution || '1080', 10) || 1080;
+      let selectedFormat: any;
+      if (isAudio) {
+        selectedFormat =
+          info.formats.find((f: any) => f.hasAudio && !f.hasVideo) ||
+          info.formats.find((f: any) => f.hasAudio);
+      } else {
+        const vFormats = info.formats.filter((f: any) => f.hasVideo);
+        selectedFormat =
+          vFormats.find((f: any) => f.height === reqHeight) ||
+          vFormats.find((f: any) => f.height && f.height <= reqHeight) ||
+          vFormats[0];
+      }
+
+      if (selectedFormat) {
+        const safeFilename = sanitizeFilename(requestedFilename || job?.filename || `${info.videoDetails.title}.${job.targetFormat}`);
+        const stream = ytdl.download(info, { format: selectedFormat });
+        const { Readable } = await import('node:stream');
+        const webStream = Readable.toWeb(stream);
+
+        return streamTier0ToResponse({
+          source: webStream as any,
+          filename: safeFilename,
+          contentLength: selectedFormat.contentLength ? parseInt(selectedFormat.contentLength, 10) : undefined,
+          contentType: selectedFormat.mimeType?.split(';')[0] || (isAudio ? 'audio/mpeg' : 'video/mp4'),
+          status: 200,
+          signal: req.signal,
+          disposition: isInline ? 'inline' : 'attachment',
+        });
+      }
+    } catch (ytStreamErr) {
+      console.warn('[Download YouTube Stream Error]', ytStreamErr);
+    }
+  }
+
+  // 1b. Generic remote stream proxying (Pinterest, Twitter, TikTok, direct URLs)
   if (!localFileValid && candidateStreamUrl && !isForbiddenStreamUrl(candidateStreamUrl)) {
     try {
       const safeFilename = sanitizeFilename(requestedFilename || job?.filename || 'media_download.mp4');
       const rangeHeader = req.headers.get('range');
+      const isGoogleVideo = candidateStreamUrl.includes('googlevideo.com');
+      const userAgent = isGoogleVideo
+        ? 'Mozilla/5.0 (SMART-TV; Linux; Tizen 2.4.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/2.4.0 TV Safari/538.1'
+        : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
       const remoteRes = await fetch(candidateStreamUrl, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'User-Agent': userAgent,
           ...(rangeHeader ? { Range: rangeHeader } : {}),
         },
         signal: req.signal,

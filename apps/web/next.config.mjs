@@ -15,7 +15,7 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ['@distube/ytdl-core'],
     outputFileTracingIncludes: {
-      '/api/**/*': ['./node_modules/@distube/ytdl-core/**/*'],
+      '/**': ['./node_modules/@distube/ytdl-core/**/*'],
     },
   },
   images: {
