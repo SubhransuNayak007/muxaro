@@ -191,7 +191,36 @@ export function normalizeVideoOptions(
   manifest: MediaManifest | null | undefined,
   preferredHeight?: number | null
 ): NormalizedVideoOption[] {
-  const rawStreams = Array.isArray(manifest?.videoStreams) ? manifest.videoStreams : [];
+  let rawStreams = Array.isArray(manifest?.videoStreams) ? [...manifest.videoStreams] : [];
+  if (Array.isArray((manifest as any)?.videoFormats)) {
+    const existingHeights = new Set(rawStreams.map(s => parseHeight(s) || s.height || 0));
+    for (const vf of (manifest as any).videoFormats) {
+      if (vf && vf.resolutionHeight && !existingHeights.has(vf.resolutionHeight)) {
+        rawStreams.push({
+          streamIndex: rawStreams.length,
+          streamType: 'video',
+          codec: vf.vcodec || 'h264',
+          bitrateKbps: vf.bitrateKbps || 4500,
+          formatId: vf.videoFormatId || String(vf.resolutionHeight),
+          width: vf.width || Math.round((vf.resolutionHeight * 16) / 9),
+          height: vf.resolutionHeight,
+          resolutionLabel: vf.label || `${vf.resolutionHeight}p`,
+          frameRate: vf.fps || 30,
+          fps: vf.fps || 30,
+          hdr: Boolean(vf.isHdr),
+          estimatedSizeBytes: vf.estimatedBytes || 0,
+          sizeIsEstimate: true,
+          recommended: vf.resolutionHeight === 1080,
+          isNativeLossless: true,
+          isStreamCopyCandidate: true,
+          transcodeRequired: false,
+          notes: `${vf.resolutionHeight}p stream`,
+          url: manifest?.sourceUrl,
+        });
+        existingHeights.add(vf.resolutionHeight);
+      }
+    }
+  }
   if (!manifest || rawStreams.length === 0) return [];
 
   // Step 1: Group by (height, fpsBucket, hdr) and pick best-compatible variant per bucket

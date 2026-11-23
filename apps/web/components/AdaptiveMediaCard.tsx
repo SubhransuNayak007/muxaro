@@ -410,10 +410,9 @@ export default function AdaptiveMediaCard({
         : undefined;
 
     const directStreamUrl =
-      selectedVideoOption?.stream?.url ||
-      manifest.videoStreams.find((s) => s.url)?.url ||
-      manifest.audioStreams.find((s) => s.url)?.url ||
-      `/api/v1/jobs/direct_${Date.now()}/download?url=${encodeURIComponent(manifest.sourceUrl)}&format=${targetFormat}`;
+      selectedVideoOption?.stream?.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(selectedVideoOption.stream.url)
+        ? selectedVideoOption.stream.url
+        : manifest.videoStreams.find((s) => s.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(s.url))?.url;
 
     try {
       const job = await api.createJob({

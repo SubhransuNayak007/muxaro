@@ -30,6 +30,7 @@ export interface JobProgressProps {
   onJobUpdate?: (updated: ProcessingJob) => void;
   onDismiss?: () => void;
   sourceUrl?: string;
+  manifest?: any;
 }
 
 const MAX_POLL_RETRIES = 15;
@@ -170,6 +171,7 @@ export default function JobProgress({
   onJobUpdate,
   onDismiss,
   sourceUrl: propSourceUrl,
+  manifest,
 }: JobProgressProps) {
   const [job, setJob] = useState<ExtendedProcessingJob>(() => {
     const ext = initialJob as ExtendedProcessingJob;
@@ -716,6 +718,16 @@ export default function JobProgress({
     ? `/tools/direct-helper?url=${encodeURIComponent(directTargetUrl)}`
     : '/tools/direct-helper';
 
+  const fallbackDirectStream = useMemo(() => {
+    if (job.directStreamUrl && !job.directStreamUrl.startsWith('/api')) {
+      return job.directStreamUrl;
+    }
+    const fromManifest =
+      manifest?.videoStreams?.find((s: any) => s.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(s.url))?.url ||
+      (manifest?.directStreamUrl && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(manifest.directStreamUrl) ? manifest.directStreamUrl : undefined);
+    return fromManifest;
+  }, [job.directStreamUrl, manifest]);
+
   const isRateLimitedOrChallenged = useMemo(() => {
     const errorStr =
       typeof job.error === 'string'
@@ -734,7 +746,11 @@ export default function JobProgress({
       raw.includes('captcha') ||
       raw.includes('private') ||
       raw.includes('403') ||
-      raw.includes('429')
+      raw.includes('429') ||
+      raw.includes('empty') ||
+      raw.includes('incomplete') ||
+      raw.includes('0 bytes') ||
+      raw.includes('unable to fetch')
     );
   }, [job]);
 
@@ -1074,17 +1090,19 @@ export default function JobProgress({
                   <span>Stream with MUXARO Direct</span>
                 </Link>
 
-                <a
-                  href={resolvedDownloadUrl || directFallbackUrl}
-                  download={job.outputFilename || true}
-                  rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
-                  referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
-                  onClick={triggerBrowserSave}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Save file directly</span>
-                </a>
+                {fallbackDirectStream && (
+                  <a
+                    href={fallbackDirectStream}
+                    download={job.outputFilename || true}
+                    rel="noreferrer"
+                    referrerPolicy="no-referrer"
+                    onClick={triggerBrowserSave}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save file directly</span>
+                  </a>
+                )}
 
                 {onDismiss && (
                   <button
@@ -1114,17 +1132,27 @@ export default function JobProgress({
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                <a
-                  href={resolvedDownloadUrl || directFallbackUrl}
-                  download={job.outputFilename || true}
-                  rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
-                  referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
-                  onClick={triggerBrowserSave}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Save directly</span>
-                </a>
+                {fallbackDirectStream ? (
+                  <a
+                    href={fallbackDirectStream}
+                    download={job.outputFilename || true}
+                    rel="noreferrer"
+                    referrerPolicy="no-referrer"
+                    onClick={triggerBrowserSave}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save directly</span>
+                  </a>
+                ) : (
+                  <Link
+                    href={directHelperHref}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Stream with MUXARO Direct</span>
+                  </Link>
+                )}
 
                 <button
                   type="button"

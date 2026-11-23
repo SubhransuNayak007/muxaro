@@ -240,7 +240,17 @@ export class StreamMuxerEngine implements StreamPipelineController {
       // ----------------------------------------------------
       this.setStage('pipelining');
 
-      const videoTargetUrl = this.options.videoUrl || this.options.sourceUrl;
+      const isWebpage = (u?: string) =>
+        Boolean(u && /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|pin\.it|pinterest\.com)\//i.test(u));
+
+      let videoTargetUrl = this.options.videoUrl || this.options.sourceUrl;
+      if (isWebpage(videoTargetUrl)) {
+        if (this.options.videoUrl && !isWebpage(this.options.videoUrl)) {
+          videoTargetUrl = this.options.videoUrl;
+        } else {
+          throw new Error('Direct stream requires an authorized stream endpoint. Webpage URLs cannot be queried directly with byte ranges.');
+        }
+      }
       const audioTargetUrl = this.options.audioUrl;
 
       // Video pipeline

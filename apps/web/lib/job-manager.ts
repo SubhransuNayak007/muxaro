@@ -20,7 +20,7 @@ import os from 'node:os';
 import { sanitizeFilename } from './security-validator.ts';
 import { muxMedia, extractAudio, transcodeVideo } from './ffmpeg-muxer.ts';
 import type { JobStatus, JobError } from './contracts.ts';
-import { extractPlatformMedia } from './platform-extractors.ts';
+import { extractPlatformMedia, buildExtractorResultFromPlatformMedia } from './platform-extractors.ts';
 
 export interface CreateJobParams {
   sourceUrl: string;
@@ -964,18 +964,22 @@ class JobManager {
             job.fileSizeBytes = parseInt(selectedFormat.contentLength, 10);
           }
 
-          // If running on serverless (Vercel) and the media payload exceeds 30MB,
-          // mark ready immediately so client gets sub-second start and downloads
-          // on-demand via the cut-through stream route without Lambda buffer timeout.
+          // If running on serverless (Vercel), mark ready immediately so client gets
+          // sub-second start and downloads on-demand via the cut-through stream route
+          // without Lambda disk or execution buffer timeout.
           const isServerlessEnv = isServerless();
-          const estBytes = job.fileSizeBytes || 0;
 
-          if (isServerlessEnv && estBytes > 30000000) {
+          if (isServerlessEnv) {
             job.status = 'ready';
             job.progress = 100;
             job.stage = 'READY';
             job.stageMessage = 'Stream ready for instant cut-through download';
-            job.downloadUrl = `/api/v1/jobs/${encodeURIComponent(job.id)}/download?filename=${encodeURIComponent(job.filename)}`;
+            const dlParams = new URLSearchParams();
+            dlParams.set('filename', job.filename);
+            if (job.directStreamUrl) {
+              dlParams.set('stream', job.directStreamUrl);
+            }
+            job.downloadUrl = `/api/v1/jobs/${encodeURIComponent(job.id)}/download?${dlParams.toString()}`;
             job.artifact = {
               filename: job.filename,
               downloadUrl: job.downloadUrl,
@@ -1015,8 +1019,19 @@ class JobManager {
         }
       } catch (ytErr: any) {
         console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);
-        if (ytErr?.code === 'BOT_CHECK' || ytErr?.message?.includes('Sign in to confirm you’re not a bot')) {
-          const botMsg = 'YouTube requires session verification on cloud servers (BotGuard check). To enable YouTube downloads on Vercel, configure the YOUTUBE_COOKIE environment variable, or run MUXARO locally.';
+        const errMessage = String(ytErr?.message || ytErr || '');
+        const isBotOrDatacenterBlock =
+          ytErr?.code === 'BOT_CHECK' ||
+          errMessage.includes('Sign in to confirm you’re not a bot') ||
+          errMessage.includes('403') ||
+          errMessage.includes('429') ||
+          errMessage.includes('LOGIN_REQUIRED') ||
+          errMessage.includes('bot') ||
+          errMessage.includes('Status code') ||
+          isServerless();
+
+        if (isBotOrDatacenterBlock) {
+          const botMsg = 'YouTube requires session verification on cloud servers (BotGuard check). Use MUXARO Direct companion or the browser stream helper below to stream and save this media directly to your device.';
           job.status = 'failed';
           job.stage = 'FAILED';
           job.stageMessage = botMsg;
@@ -1025,6 +1040,7 @@ class JobManager {
             message: botMsg,
             retryable: false,
           };
+          persistJob(job);
           this.notify(job);
           return;
         }
@@ -1130,6 +1146,21 @@ class JobManager {
       }
       job.filePath = undefined;
       job.directStreamUrl = undefined;
+      const isYt = /(?:youtube\.com|youtu\.be)/i.test(job.sourceUrl);
+      if (isYt || isServerless()) {
+        const botMsg = 'Host server restricts automated cloud downloads for this media link. Use MUXARO Direct companion or the browser stream helper below to stream and save this media directly to your device.';
+        job.status = 'failed';
+        job.stage = 'FAILED';
+        job.stageMessage = botMsg;
+        job.error = {
+          code: 'ERR_YOUTUBE_BOT_CHECK',
+          message: botMsg,
+          retryable: false,
+        };
+        persistJob(job);
+        this.notify(job);
+        return;
+      }
       throw new Error(`Unable to fetch playable media for "${job.sourceUrl}". Resulting media file was incomplete or empty (${finalSize} bytes).`);
     }
 

@@ -7,12 +7,15 @@
 // @match        *://muxaro.pages.dev/*
 // @match        *://*.muxaro.pages.dev/*
 // @match        *://*-muxaro.pages.dev/*
+// @match        https://muxaro.vercel.app/*
+// @match        https://*.vercel.app/*
 // @match        http://localhost:*/*
 // @match        http://127.0.0.1:*/*
 // @match        https://www.youtube.com/*
 // @connect      googlevideo.com
 // @connect      youtube.com
 // @connect      muxaro.pages.dev
+// @connect      vercel.app
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // @grant        GM_setValue
@@ -30,6 +33,8 @@
     location.hostname === 'muxaro.pages.dev' ||
     location.hostname.endsWith('.muxaro.pages.dev') ||
     location.hostname.endsWith('-muxaro.pages.dev') ||
+    location.hostname === 'muxaro.vercel.app' ||
+    location.hostname.endsWith('.vercel.app') ||
     location.hostname === 'localhost' ||
     location.hostname === '127.0.0.1';
 

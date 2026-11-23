@@ -446,6 +446,7 @@ export default function HomePage() {
                 initialJob={activeJob}
                 onJobUpdate={setActiveJob}
                 sourceUrl={activeJob.sourceUrl || url || manifest?.sourceUrl}
+                manifest={manifest}
                 onDismiss={() => {
                   setActiveJob(null);
                   setManifest(null);

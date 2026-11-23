@@ -36,6 +36,7 @@ export interface MediaManifest {
   isLocalUpload?: boolean;
   permitted: boolean;
   rightsNote: string;
+  directStreamUrl?: string;
   isCarousel?: boolean;
   items?: Array<{
     id: string;

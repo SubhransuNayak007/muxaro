@@ -7,6 +7,19 @@ import { streamTier0ToResponse, inferMime } from '@/lib/pipeline/tier0-passthrou
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 300;
+
+const DOWNLOAD_CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+  'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, If-Range, X-Requested-With',
+  'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag, Content-Disposition',
+  'Access-Control-Max-Age': '86400',
+};
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: DOWNLOAD_CORS_HEADERS });
+}
 
 function resolveJobFile(id: string, requestedFilename?: string | null): { filePath: string; filename: string } | null {
   const job = jobManager.getJob(id);
@@ -60,7 +73,7 @@ export async function GET(
   const { id } = params;
   const searchParams = req.nextUrl.searchParams;
   const requestedFilename = searchParams.get('filename') || searchParams.get('title');
-  const streamParam = searchParams.get('stream');
+  const streamParam = searchParams.get('stream') || searchParams.get('url');
 
   const job = jobManager.getJob(id);
   const fileInfo = resolveJobFile(id, requestedFilename);
@@ -167,7 +180,7 @@ export async function GET(
           message: `Processed media artifact for job ${id} was not found or has expired. Please initiate a new download.`,
         },
       },
-      { status: 404 }
+      { status: 404, headers: DOWNLOAD_CORS_HEADERS }
     );
   }
 
@@ -186,7 +199,7 @@ export async function GET(
           message: 'Access to file outside the authorized storage directory is prohibited.',
         },
       },
-      { status: 403 }
+      { status: 403, headers: DOWNLOAD_CORS_HEADERS }
     );
   }
 
@@ -243,7 +256,7 @@ export async function HEAD(
   const { id } = params;
   const searchParams = req.nextUrl.searchParams;
   const requestedFilename = searchParams.get('filename') || searchParams.get('title');
-  const streamParam = searchParams.get('stream');
+  const streamParam = searchParams.get('stream') || searchParams.get('url');
 
   const job = jobManager.getJob(id);
   const candidateStreamUrl = streamParam || job?.directStreamUrl;
@@ -263,6 +276,7 @@ export async function HEAD(
       if (remoteRes.ok) {
         const safeFilename = sanitizeFilename(requestedFilename || job?.filename || 'media_download.mp4');
         const headers = new Headers();
+        Object.entries(DOWNLOAD_CORS_HEADERS).forEach(([k, v]) => headers.set(k, v));
         headers.set('Content-Type', remoteRes.headers.get('content-type') || inferMime(safeFilename));
         headers.set('Content-Disposition', formatContentDisposition(safeFilename));
         headers.set('Accept-Ranges', 'bytes');
@@ -275,7 +289,7 @@ export async function HEAD(
   }
 
   if (!fileInfo) {
-    return new Response(null, { status: 404 });
+    return new Response(null, { status: 404, headers: DOWNLOAD_CORS_HEADERS });
   }
 
   const stat = fs.statSync(fileInfo.filePath);
@@ -285,6 +299,7 @@ export async function HEAD(
   return new Response(null, {
     status: 200,
     headers: {
+      ...DOWNLOAD_CORS_HEADERS,
       'Content-Type': mimeType,
       'Content-Length': String(stat.size),
       'Accept-Ranges': 'bytes',

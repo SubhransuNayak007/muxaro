@@ -316,12 +316,45 @@ function DirectHelperContent() {
       .slice(0, 40);
     const filename = `${cleanTitle}_${Date.now()}.${ext}`;
 
+    const isWebpage = /(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|pinterest\.com|pin\.it)/i.test(activeUrl);
+
+    if (isCompanionActive) {
+      const sent = triggerMuxaroDirectDownload(activeUrl, filename);
+      if (sent) {
+        setDownloadStatus('streaming');
+        setStreamProgress(15);
+        setStatusMessage('Streaming via MUXARO Direct companion (full residential speed)...');
+        return;
+      }
+    }
+
+    let resolvedVideoUrl: string | undefined;
+    let resolvedAudioUrl: string | undefined;
+
+    const streamUrlCandidate =
+      manifest?.videoStreams?.find((s) => s.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(s.url))?.url ||
+      (manifest?.directStreamUrl && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(manifest.directStreamUrl) ? manifest.directStreamUrl : undefined);
+
+    if (streamUrlCandidate) {
+      resolvedVideoUrl = `/api/v1/jobs/proxy_stream/download?stream=${encodeURIComponent(streamUrlCandidate)}`;
+    }
+
+    if (isWebpage && !resolvedVideoUrl && !isCompanionActive) {
+      setDownloadStatus('idle');
+      setStatusMessage(
+        'Host server restricts direct byte-range access on cloud instances. Install the MUXARO Direct companion below for 1-click unthrottled streaming.'
+      );
+      return;
+    }
+
     // 1. First attempt to invoke Zero-Wait Stream Engine (@/lib/stream-engine/engine)
     try {
       const streamEngineModule = await import('@/lib/stream-engine/engine');
       if (typeof streamEngineModule.startZeroWaitStream === 'function') {
         const controller = await streamEngineModule.startZeroWaitStream({
           sourceUrl: activeUrl,
+          videoUrl: resolvedVideoUrl,
+          audioUrl: resolvedAudioUrl,
           filename,
           format: selectedFormat === 'mp3' ? 'mp3' : 'mp4',
           onProgress: (p: any) => {
@@ -351,7 +384,12 @@ function DirectHelperContent() {
             );
           },
           onError: () => {
-            fallbackToBridge(activeUrl, filename);
+            if (isCompanionActive) {
+              fallbackToBridge(activeUrl, filename);
+            } else {
+              setDownloadStatus('idle');
+              setStatusMessage('Direct stream encountered host restrictions. Use MUXARO Direct companion for 1-click downloads.');
+            }
           },
         });
         streamControllerRef.current = controller;
@@ -361,7 +399,12 @@ function DirectHelperContent() {
       // Gracefully fall back to companion bridge
     }
 
-    fallbackToBridge(activeUrl, filename);
+    if (isCompanionActive) {
+      fallbackToBridge(activeUrl, filename);
+    } else {
+      setDownloadStatus('idle');
+      setStatusMessage('Host server restricts automated streaming. Install MUXARO Direct companion to download directly.');
+    }
   }, [targetUrl, inputValue, selectedFormat, manifest, fallbackToBridge]);
 
   const handleCancelStreaming = () => {

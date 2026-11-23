@@ -166,6 +166,10 @@ export function createTier0Passthrough(opts: Tier0PassthroughOptions): Tier0Resp
     'Accept-Ranges': 'bytes',
     'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'public, max-age=3600',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, If-Range, X-Requested-With',
+    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag, Content-Disposition',
   };
 
   if (contentLength > 0) {
