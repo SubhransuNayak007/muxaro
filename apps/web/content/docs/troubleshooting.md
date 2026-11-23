@@ -129,6 +129,13 @@ High-bandwidth streaming CDNs monitor traffic patterns for robotic activity:
 - **Burst Concurrency:** Submitting 20 simultaneous range-requests for high-resolution video chunks triggers edge security firewalls (Cloudflare, Akamai, AWS CloudFront).
 - **Missing or Invalid User Agents:** Requests lacking standard client headers or proper HTTP/2 multiplexing are throttled.
 
+### Host Blocks & Datacenter IP Restrictions (YouTube & Instagram)
+Free shared cloud servers (AWS, Vercel, Oracle, Render) frequently encounter bot-detection firewalls from upstream video platforms. When this occurs, upstream servers return HTTP 403 Forbidden with challenges such as *"Sign in to confirm you're not a bot"*.
+
+**The Two Honest Remedies:**
+1. **Desktop Direct (Residential Connection):** On desktop, install the MUXARO Direct companion (extension or userscript). All requests originate from your home residential IP, bypassing datacenter bot restrictions completely.
+2. **Custom Worker (Cobalt Model):** If you are on mobile or prefer self-hosting, run your own Docker media-worker container (`ghcr.io/muxaro/media-worker`) on a home server or private VPS and save the endpoint in [Settings > Custom Worker](/settings?tab=instances). MUXARO stores this in your browser's `localStorage` and routes all requests through your private endpoint.
+
 ### MUXARO's Resilient Handling
 Our backend integration adapters execute all network transfers with strict architectural defenses:
 1. **Exponential Backoff with Full Jitter:** When a 429 response is detected, retry delays are calculated using randomized exponential increments ($T_{\text{wait}} = \text{random}(0, 2^{\text{retry}} \times 1000\text{ms})$) to avoid synchronized retry stampedes.

@@ -758,6 +758,16 @@ export function extractDisplayError(
   if (typeof err === 'object' && err !== null) {
     const obj = err as Record<string, unknown>;
 
+    // Standardized HOST_BLOCKED / Bot-Detection Error
+    const code = clean(obj.code) || clean((obj.error as any)?.code);
+    const rawMsg = String(obj.rawMessage || obj.message || (obj.error as any)?.message || '');
+    if (
+      code === 'HOST_BLOCKED' ||
+      /bot|confirm you're not a bot|login_required|checkpoint_required|blocked free cloud/i.test(rawMsg)
+    ) {
+      return 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.';
+    }
+
     // 1. ApiClientError / circuitBreaker rich fields
     const actionable = clean(obj.actionableFeedback);
     const userAdvice = clean(obj.userAdvice);
@@ -1163,10 +1173,34 @@ class ApiClient {
         body: JSON.stringify({ url: normalizedUrl }),
       });
       if (raw && typeof raw === 'object') {
+        if (
+          raw.status === 'host_restricted' ||
+          raw.ok === false ||
+          raw.code === 'HOST_BLOCKED' ||
+          raw.error?.code === 'HOST_BLOCKED'
+        ) {
+          const blockErr = new ApiClientError(
+            raw.rawMessage || raw.message || raw.error?.message || 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.',
+            200,
+            { code: 'HOST_BLOCKED' }
+          );
+          (blockErr as any).code = 'HOST_BLOCKED';
+          (blockErr as any).status = 'host_restricted';
+          (blockErr as any).suggestedMode = raw.suggestedMode || 'desktop-direct';
+          throw blockErr;
+        }
         const payload = raw.data || raw;
         return normalizeManifest(payload, { sourceUrl: normalizedUrl, isLocalUpload: false });
       }
-    } catch {
+    } catch (err: any) {
+      if (
+        err?.code === 'HOST_BLOCKED' ||
+        err?.status === 'host_restricted' ||
+        (err instanceof ApiClientError && (err.status === 403 || err.status === 200)) ||
+        /blocks free cloud servers/i.test(err?.message || '')
+      ) {
+        throw err;
+      }
       // Graceful fallback to inspectMedia
     }
 
@@ -1489,10 +1523,70 @@ class ApiClient {
 
     options?.onProgress?.(0);
 
-    const raw =
-      file.size > MULTIPART_CHUNK_BYTES
-        ? await this.uploadMultipart(file, options)
-        : await this.uploadDirectWithProgress(file, options);
+    let raw: any = null;
+    try {
+      raw =
+        file.size > MULTIPART_CHUNK_BYTES
+          ? await this.uploadMultipart(file, options)
+          : await this.uploadDirectWithProgress(file, options);
+    } catch (uploadErr: any) {
+      // $0 In-Browser Architecture: If cloud upload endpoint is unconfigured (404),
+      // create client-side manifest directly using HTML5 media and in-browser WASM tools
+      if (
+        typeof window !== 'undefined' &&
+        (uploadErr?.status === 404 || /404|not found/i.test(uploadErr?.message || ''))
+      ) {
+        const objectUrl = URL.createObjectURL(file);
+        options?.onProgress?.(100);
+        return {
+          id: `local_${Date.now()}`,
+          title: baseTitle,
+          platform: 'other',
+          durationSeconds: 0,
+          thumbnailUrl: '',
+          sourceUrl: objectUrl,
+          fileSizeBytes: file.size,
+          container: ext,
+          isLocalUpload: true,
+          permitted: true,
+          rightsNote: '',
+          videoStreams: [
+            {
+              streamIndex: 0,
+              streamType: 'video',
+              codec: ext,
+              bitrateKbps: 0,
+              formatId: 'local-video',
+              resolutionLabel: 'Original',
+              fps: 30,
+              hdr: false,
+              estimatedSizeBytes: file.size,
+              isStreamCopyCandidate: true,
+              transcodeRequired: false,
+              url: objectUrl,
+            },
+          ],
+          audioStreams: [
+            {
+              streamIndex: 1,
+              streamType: 'audio',
+              codec: 'aac',
+              bitrateKbps: 192,
+              formatId: 'local-audio',
+              sampleRateHz: 48000,
+              channels: 2,
+              channelLayout: 'stereo',
+              estimatedSizeBytes: 0,
+              isStreamCopyCandidate: true,
+              transcodeRequired: false,
+              isNativeLossless: false,
+              url: objectUrl,
+            },
+          ],
+        };
+      }
+      throw uploadErr;
+    }
 
     if (!raw || typeof raw !== 'object') {
       throw new Error('File upload completed, but media details were not returned.');

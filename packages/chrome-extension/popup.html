@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MUXARO Direct Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <svg class="brand-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <div class="brand-title-wrap">
+          <h1 class="brand-title">MUXARO Direct</h1>
+          <span class="brand-badge">BRIDGE MV3</span>
+        </div>
+      </div>
+      <span class="version-tag" id="ext-version">v1.1.0</span>
+    </header>
+
+    <!-- Connection Status Banner -->
+    <div class="status-card" id="status-card">
+      <div class="status-indicator">
+        <span class="status-dot active" id="status-dot"></span>
+        <div class="status-meta">
+          <span class="status-label" id="status-label">Bridge Active &amp; Ready</span>
+          <span class="status-subtext" id="status-sub">Residential IP direct streaming</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrics Row -->
+    <div class="metrics-row">
+      <div class="metric-item">
+        <span class="metric-label">Mode</span>
+        <span class="metric-value highlight">Residential</span>
+      </div>
+      <div class="metric-divider"></div>
+      <div class="metric-item">
+        <span class="metric-label">Streams</span>
+        <span class="metric-value" id="stat-streams">0</span>
+      </div>
+      <div class="metric-divider"></div>
+      <div class="metric-item">
+        <span class="metric-label">Data</span>
+        <span class="metric-value" id="stat-bytes">0 MB</span>
+      </div>
+    </div>
+
+    <!-- Tab Context Status -->
+    <div class="tab-context">
+      <div class="context-label-row">
+        <span class="context-title">Current Tab:</span>
+        <span class="context-status" id="tab-status-pill">Detecting...</span>
+      </div>
+      <div class="context-url" id="tab-url">Checking active browser tab...</div>
+    </div>
+
+    <!-- Configuration -->
+    <div class="config-section">
+      <label class="config-label" for="web-app-url">MUXARO Web Endpoint</label>
+      <div class="config-input-wrap">
+        <input type="url" id="web-app-url" class="config-input" placeholder="https://muxaro.pages.dev" spellcheck="false" />
+        <button type="button" id="btn-save-settings" class="btn-subtle" title="Save custom endpoint">Save</button>
+      </div>
+      <span class="config-hint">Default: https://muxaro.pages.dev (or http://localhost:3000 for dev)</span>
+    </div>
+
+    <!-- Actions -->
+    <footer class="footer-actions">
+      <button type="button" id="btn-open-app" class="btn btn-primary">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+        Open MUXARO Web App
+      </button>
+
+      <button type="button" id="btn-test-ping" class="btn btn-secondary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+        </svg>
+        Ping Diagnostics
+      </button>
+    </footer>
+
+    <!-- Diagnostics Toast -->
+    <div class="toast hidden" id="toast"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

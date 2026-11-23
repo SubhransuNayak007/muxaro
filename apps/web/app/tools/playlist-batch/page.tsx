@@ -21,6 +21,7 @@ import {
 import { api } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
+import { useUnifiedQuota, quotaManager } from '@/lib/quota/quota-manager';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
@@ -74,6 +75,12 @@ interface PlaylistJobStatus {
 
 export default function PlaylistBatchPage() {
   const [mode, setMode] = useState<'batch' | 'playlist'>('batch');
+  const { quota, refresh: refreshQuota } = useUnifiedQuota();
+  const remainingVideo = quota?.remainingVideoCredits ?? 10;
+  const totalVideoLimit = quota?.dailyVideoLimit ?? 10;
+  const remainingPlaylist = quota?.remainingPlaylistCredits ?? 1;
+  const totalPlaylistLimit = quota?.playlistJobsLimit ?? 1;
+  const maxPlaylistItems = quota?.maxPlaylistItems ?? 50;
 
   // Batch state (starts clean and empty)
   const [items, setItems] = useState<BatchEntry[]>([]);
@@ -119,6 +126,13 @@ export default function PlaylistBatchPage() {
 
   const handleRunBatch = async () => {
     if (items.length === 0) return;
+    if (items.length > remainingVideo) {
+      setBatchError(
+        `Batch contains ${items.length} items, but only ${remainingVideo} daily video credits remain (Daily limit: ${totalVideoLimit}).`
+      );
+      return;
+    }
+
     setIsBatchSubmitting(true);
     setBatchError(null);
     try {
@@ -139,6 +153,8 @@ export default function PlaylistBatchPage() {
         jobs.push(job);
       }
       setActiveJobs(jobs);
+      quotaManager.recordOptimisticDeduction('video', items.length);
+      refreshQuota().catch(() => {});
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -206,6 +222,13 @@ export default function PlaylistBatchPage() {
       return;
     }
 
+    if (remainingPlaylist <= 0) {
+      setPlaylistError(
+        `Daily playlist allowance reached (0 of ${totalPlaylistLimit} available). Your slot restores in a rolling 24-hour cycle.`
+      );
+      return;
+    }
+
     setIsPlaylistSubmitting(true);
     setPlaylistError(null);
     try {
@@ -244,6 +267,8 @@ export default function PlaylistBatchPage() {
         zipDownloadUrl: d.zipDownloadUrl || null,
         items: Array.isArray(d.items) ? d.items : undefined,
       });
+      quotaManager.recordOptimisticDeduction('playlist', 1);
+      refreshQuota().catch(() => {});
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -253,7 +278,7 @@ export default function PlaylistBatchPage() {
     } finally {
       setIsPlaylistSubmitting(false);
     }
-  }, [playlistUrl, playlistFormat, packageZip, inspected]);
+  }, [playlistUrl, playlistFormat, packageZip, inspected, remainingPlaylist, totalPlaylistLimit, refreshQuota]);
 
   useEffect(() => {
     if (!playlistJob?.playlistJobId) return;
@@ -431,8 +456,8 @@ export default function PlaylistBatchPage() {
                         setNewUrl(e.target.value);
                         if (batchError) setBatchError(null);
                       }}
-                      placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
+                      placeholder="Paste video, audio, or direct media link…"
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted placeholder:truncate truncate text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                     />
                     <button
                       type="submit"
@@ -501,7 +526,9 @@ export default function PlaylistBatchPage() {
                     <span className="font-semibold text-content">
                       Items in queue ({items.length})
                     </span>
-                    <span>Uses {items.length} of 10 daily video jobs</span>
+                    <span>
+                      Uses {items.length} of {remainingVideo} available daily video jobs ({totalVideoLimit} total)
+                    </span>
                   </div>
 
                   {items.length === 0 ? (
@@ -591,6 +618,16 @@ export default function PlaylistBatchPage() {
               </div>
             ) : (
               <div className="space-y-6">
+                <div className="p-3.5 rounded-xl bg-surface border border-line-subtle flex flex-wrap items-center justify-between gap-3 text-xs text-content-secondary">
+                  <div className="flex items-center gap-2">
+                    <ListVideo className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                    <span>
+                      Daily playlist quota: <strong className="text-content font-semibold">{remainingPlaylist} of {totalPlaylistLimit}</strong> available today
+                    </span>
+                  </div>
+                  <span>Max {maxPlaylistItems} items per archive</span>
+                </div>
+
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -622,8 +659,8 @@ export default function PlaylistBatchPage() {
                         setPlaylistUrl(e.target.value);
                         if (inspectError) setInspectError(null);
                       }}
-                      placeholder="Paste playlist link (e.g. youtube.com/playlist?list=...)"
-                      className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                      placeholder="Paste playlist link or album URL…"
+                      className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted placeholder:truncate truncate text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                     />
                     <button
                       type="submit"
@@ -751,10 +788,14 @@ export default function PlaylistBatchPage() {
                 <button
                   type="button"
                   onClick={submitPlaylist}
-                  disabled={isPlaylistSubmitting || !playlistUrl.trim()}
+                  disabled={isPlaylistSubmitting || !playlistUrl.trim() || remainingPlaylist <= 0}
                   className="muxaro-btn-primary px-6 py-3 text-sm whitespace-nowrap active:opacity-90 disabled:opacity-50"
                 >
-                  {isPlaylistSubmitting ? 'Starting playlist…' : 'Process playlist'}
+                  {isPlaylistSubmitting
+                    ? 'Starting playlist…'
+                    : remainingPlaylist <= 0
+                    ? 'Daily playlist limit reached'
+                    : 'Process playlist'}
                 </button>
 
                 {playlistJob && (
@@ -852,8 +893,16 @@ export default function PlaylistBatchPage() {
 
           <aside className="space-y-4">
             <div className="muxaro-media-card p-6 space-y-4">
-              <div className="text-sm font-bold text-content">
-                Daily allowance overview
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-content">
+                  Daily allowance overview
+                </span>
+                <Link
+                  href="/credits"
+                  className="text-xs text-brand hover:underline font-medium"
+                >
+                  View live status
+                </Link>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
                 <li className="flex items-start gap-2">
@@ -861,21 +910,27 @@ export default function PlaylistBatchPage() {
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>10 individual video or audio jobs every rolling 24 hours.</span>
+                  <span>
+                    <strong className="text-content font-semibold">{totalVideoLimit}</strong> individual video or audio jobs every rolling 24 hours (<strong className="text-content font-semibold">{remainingVideo}</strong> remaining).
+                  </span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>1 separate playlist job (up to 50 items) every rolling 24 hours.</span>
+                  <span>
+                    <strong className="text-content font-semibold">{totalPlaylistLimit}</strong> separate playlist job (up to {maxPlaylistItems} items) every rolling 24 hours (<strong className="text-content font-semibold">{remainingPlaylist}</strong> remaining).
+                  </span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Playlist jobs never subtract from your 10 individual media jobs.</span>
+                  <span>
+                    Playlist jobs never subtract from your {totalVideoLimit} individual media jobs.
+                  </span>
                 </li>
               </ul>
             </div>

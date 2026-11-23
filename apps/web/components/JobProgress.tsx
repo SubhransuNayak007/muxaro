@@ -306,6 +306,7 @@ export default function JobProgress({
       });
 
       es.onerror = () => {
+        console.warn('[MUXARO Job Stream] SSE connection interrupted; switching to polling fallback.');
         if (es) {
           es.close();
           es = null;
@@ -352,7 +353,10 @@ export default function JobProgress({
         if (cancelled) return;
         consecutiveFailures++;
         if (err?.status === 404) {
+          console.warn('[MUXARO Job Polling] Job status not found on edge storage; checking direct stream fallback.');
           setServerlessRoutingDetected(true);
+        } else {
+          console.warn(`[MUXARO Job Polling] Status check failed (attempt ${consecutiveFailures}/${MAX_POLL_RETRIES}):`, err?.message || err);
         }
         if (consecutiveFailures < MAX_POLL_RETRIES) {
           const delay = Math.min(
@@ -522,9 +526,9 @@ export default function JobProgress({
       setJob(updated);
       onJobUpdateRef.current?.(updated);
     } catch (err) {
-      setCancelError(
-        mapFriendlyError(err instanceof Error ? err.message : undefined)
-      );
+      const friendly = mapFriendlyError(err instanceof Error ? err.message : undefined);
+      console.error('[MUXARO Job Cancel Error]', friendly, err);
+      setCancelError(friendly);
     } finally {
       setCancelling(false);
     }
@@ -569,9 +573,9 @@ export default function JobProgress({
       setJob(nextJob);
       onJobUpdateRef.current?.(nextJob);
     } catch (err) {
-      setRetryError(
-        mapFriendlyError(err instanceof Error ? err.message : undefined)
-      );
+      const friendly = mapFriendlyError(err instanceof Error ? err.message : undefined);
+      console.error('[MUXARO Job Retry Error]', friendly, err);
+      setRetryError(friendly);
     } finally {
       setRetrying(false);
     }
@@ -898,31 +902,37 @@ export default function JobProgress({
             </div>
           )}
 
-          {/* Zero-Hop Client Handover / Server Proxy Fallback */}
+          {/* Zero-Hop Client Handover */}
           {job.deliveryMode === 'zero-hop' && (
             <div className="p-2.5 rounded-xl border border-line bg-surface-elevated/50 flex items-center justify-between gap-3 text-xs">
               <span className="text-content-secondary truncate">
                 Direct CDN download active
               </span>
               <a
-                href={job.id ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : (resolvedDownloadUrl || directFallbackUrl)}
+                href={resolvedDownloadUrl || directFallbackUrl || (job.id ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : '#')}
                 download={job.outputFilename || true}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content transition-colors select-none shrink-0"
-                title="Download through server proxy if direct CDN download fails"
+                title="Download directly from CDN stream"
               >
                 <Download className="w-3.5 h-3.5 text-content-secondary" />
-                <span>Download via Server Proxy</span>
+                <span>Save direct stream</span>
               </a>
             </div>
           )}
 
           {/* Subtle card footer: One understated 12px line */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            Safe to leave this page — files remain in{' '}
-            <Link href="/downloads" className="text-content hover:underline font-medium">
-              My Downloads
-            </Link>{' '}
-            for 60 minutes.
+            {job.deliveryMode === 'zero-hop' || isRateLimitedOrChallenged ? (
+              <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
+            ) : (
+              <span>
+                Safe to leave this page — server-processed files remain in{' '}
+                <Link href="/downloads" className="text-content hover:underline font-medium">
+                  My Downloads
+                </Link>{' '}
+                for 60 minutes.
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -991,18 +1001,6 @@ export default function JobProgress({
               </button>
             )}
 
-            {job.deliveryMode === 'zero-hop' && (
-              <a
-                href={job.id ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : resolvedDownloadUrl}
-                download={job.outputFilename || true}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
-                title="Download through server proxy if direct CDN download fails"
-              >
-                <Download className="w-3.5 h-3.5 text-content-secondary" />
-                <span>Download via Server Proxy</span>
-              </a>
-            )}
-
             {onDismiss && (
               <button
                 type="button"
@@ -1041,8 +1039,8 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            {isRateLimitedOrChallenged ? (
-              <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
+            {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
+              <span>Direct browser streams process inside your active tab. File saved directly to your device.</span>
             ) : (
               <span>
                 Safe to leave this page — server-processed files remain in{' '}
@@ -1075,11 +1073,17 @@ export default function JobProgress({
             )}
           </div>
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            Safe to leave this page — files remain in{' '}
-            <Link href="/downloads" className="text-content hover:underline font-medium">
-              My Downloads
-            </Link>{' '}
-            for 60 minutes.
+            {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
+              <span>Direct browser stream was cancelled.</span>
+            ) : (
+              <span>
+                Safe to leave this page — server-processed files remain in{' '}
+                <Link href="/downloads" className="text-content hover:underline font-medium">
+                  My Downloads
+                </Link>{' '}
+                for 60 minutes.
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -1090,16 +1094,16 @@ export default function JobProgress({
           {isRateLimitedOrChallenged ? (
             <div className="space-y-3">
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-surface-elevated border border-line flex items-center justify-center shrink-0 mt-0.5 text-content">
+                <div className="w-8 h-8 rounded-lg bg-surface-elevated border border-line flex items-center justify-center shrink-0 mt-0.5 text-zinc-900 dark:text-zinc-100">
                   <Zap className="w-4 h-4" aria-hidden="true" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
-                    Direct browser stream ready
+                    {fallbackDirectStream || !isMobileDevice ? 'Direct browser stream ready' : 'Host restriction detected'}
                   </h3>
-                  <p className="text-xs text-content-secondary mt-1 leading-relaxed">
+                  <p className="text-xs text-zinc-700 dark:text-zinc-300 mt-1 leading-relaxed">
                     {isMobileDevice
-                      ? 'Cloud servers encountered host restrictions for this media link. Direct stream options or server proxies are available below.'
+                      ? 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.'
                       : 'Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser.'}
                   </p>
                 </div>
@@ -1127,14 +1131,12 @@ export default function JobProgress({
                     <span>Download Direct Stream</span>
                   </a>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
+                  <Link
+                    href="/settings?tab=instances"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-brand-violet text-white text-xs sm:text-sm font-semibold hover:bg-brand-violet-hover transition-colors"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                    <span>Retry via Server Proxy</span>
-                  </button>
+                    <span>Connect Custom Worker</span>
+                  </Link>
                 )}
 
                 {fallbackDirectStream && !isMobileDevice && (
@@ -1226,8 +1228,8 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            {isRateLimitedOrChallenged ? (
-              <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
+            {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
+              <span>Direct browser streams process inside your active tab. File saved directly to your device.</span>
             ) : (
               <span>
                 Safe to leave this page — server-processed files remain in{' '}

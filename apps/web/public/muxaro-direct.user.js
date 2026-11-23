@@ -1,14 +1,17 @@
 // ==UserScript==
 // @name         MUXARO Direct - High-Speed Stream Downloader
 // @namespace    https://muxaro.pages.dev/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Client-side high-speed stream downloader for MUXARO. Enables direct browser streaming with zero limits.
 // @author       MUXARO Engineering
+// @match        https://muxaro.vercel.app/*
+// @match        https://*.vercel.app/*
+// @match        https://muxaro.app/*
+// @match        https://*.muxaro.app/*
+// @match        https://muxaro.pages.dev/*
 // @match        *://muxaro.pages.dev/*
 // @match        *://*.muxaro.pages.dev/*
 // @match        *://*-muxaro.pages.dev/*
-// @match        https://*.vercel.app/*
-// @match        https://muxaro.vercel.app/*
 // @match        http://localhost:*/*
 // @match        http://127.0.0.1:*/*
 // @match        https://www.youtube.com/*
@@ -26,17 +29,40 @@
 (function () {
   'use strict';
 
-  const MUXARO_VERSION = '1.1.0';
+  const MUXARO_VERSION = '1.2.0';
 
-  // 1. Integration on MUXARO Web Application (muxaro.pages.dev / *.muxaro.pages.dev / localhost / 127.0.0.1)
-  const isMuxaroHost =
-    location.hostname === 'muxaro.pages.dev' ||
-    location.hostname.endsWith('.muxaro.pages.dev') ||
-    location.hostname.endsWith('-muxaro.pages.dev') ||
-    location.hostname === 'muxaro.vercel.app' ||
-    location.hostname.endsWith('.vercel.app') ||
-    location.hostname === 'localhost' ||
-    location.hostname === '127.0.0.1';
+  // Origin verification helper
+  function isAllowedOrigin(origin) {
+    if (!origin || origin === 'null') {
+      try {
+        origin = window.location.origin;
+      } catch (_) {
+        return false;
+      }
+    }
+    if (!origin || origin === 'null') return false;
+
+    try {
+      const u = new URL(origin);
+      const host = u.hostname.toLowerCase();
+      return (
+        host === 'muxaro.pages.dev' ||
+        host.endsWith('.muxaro.pages.dev') ||
+        host.endsWith('-muxaro.pages.dev') ||
+        host === 'muxaro.app' ||
+        host.endsWith('.muxaro.app') ||
+        host === 'muxaro.vercel.app' ||
+        host.endsWith('.vercel.app') ||
+        host === 'localhost' ||
+        host === '127.0.0.1'
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // 1. Integration on MUXARO Web Application
+  const isMuxaroHost = isAllowedOrigin(window.location.origin);
 
   if (isMuxaroHost) {
     function getSafeTargetOrigin() {
@@ -48,26 +74,34 @@
       return '*';
     }
 
-    function injectMainWorldGlobals() {
+    function setBridgeActiveState() {
       try {
-        if (!document.documentElement) return;
-        const script = document.createElement('script');
-        script.textContent = `
-          window.__MUXARO_DIRECT_ACTIVE__ = true;
-          window.__MUXARO_DIRECT_VERSION__ = '${MUXARO_VERSION}';
-        `;
-        (document.head || document.documentElement).appendChild(script);
-        script.remove();
-      } catch (_) {
-        // Silently catch if CSP restricts inline script injection
-      }
+        if (document.documentElement) {
+          document.documentElement.setAttribute('data-muxaro-direct', 'active');
+          document.documentElement.setAttribute('data-muxaro-version', MUXARO_VERSION);
+        }
+      } catch (_) {}
     }
 
-    function announce() {
+    function sendPong(nonce, clientTimestamp) {
       try {
         const targetOrigin = getSafeTargetOrigin();
 
-        // 1. Overcome Sandbox Isolation via window.postMessage handshake (Dual-Format for 100% Interop)
+        // 1. Primary secure postMessage handshake
+        window.postMessage(
+          {
+            type: 'MUXARO_DIRECT_PONG',
+            source: 'MUXARO_BRIDGE',
+            version: MUXARO_VERSION,
+            active: true,
+            nonce: nonce || null,
+            clientTimestamp: clientTimestamp || null,
+            timestamp: Date.now(),
+          },
+          targetOrigin
+        );
+
+        // 2. Legacy event compatibility
         window.postMessage(
           {
             source: 'MUXARO_BRIDGE',
@@ -87,26 +121,22 @@
           targetOrigin
         );
 
-        // 2. Set DOM attributes (shared across sandbox and page context)
-        if (document.documentElement) {
-          document.documentElement.setAttribute('data-muxaro-direct', 'active');
-          document.documentElement.setAttribute('data-muxaro-version', MUXARO_VERSION);
-        }
+        // 3. Mark DOM attributes
+        setBridgeActiveState();
 
-        // 3. Set window properties in userscript context & attempt main world injection
-        window.__MUXARO_DIRECT_ACTIVE__ = true;
-        window.__MUXARO_DIRECT_VERSION__ = MUXARO_VERSION;
-        injectMainWorldGlobals();
-
-        // 4. Dispatch CustomEvent across window and document
-        const detail = { version: MUXARO_VERSION, active: true };
+        // 4. Dispatch CustomEvents across window and document
+        const detail = { version: MUXARO_VERSION, active: true, nonce: nonce || null };
         window.dispatchEvent(new CustomEvent('muxaro:direct-ready', { detail }));
         if (document.documentElement) {
           document.documentElement.dispatchEvent(new CustomEvent('muxaro:direct-ready', { detail }));
         }
       } catch (err) {
-        console.warn('[MUXARO Direct] Failed to announce bridge readiness:', err);
+        console.warn('[MUXARO Direct] Failed to reply with pong:', err);
       }
+    }
+
+    function announce() {
+      sendPong(null, null);
     }
 
     // Call announce immediately at document-start
@@ -120,20 +150,23 @@
     }
     window.addEventListener('load', announce);
 
-    // Periodic heartbeat to ensure state persists across Next.js client-side navigations
-    setInterval(announce, 1000);
+    // Periodic heartbeat to ensure state persists across client-side navigations
+    setInterval(announce, 2000);
 
-    // Listen for ping requests and download commands from page with strict origin & source check
+    // Listen for ping requests and download commands with strict origin verification
     window.addEventListener('message', function (event) {
       if (event.source !== window || !event.data || typeof event.data !== 'object') return;
-      if (event.origin && event.origin !== 'null' && event.origin !== window.location.origin) return;
 
+      const eventOrigin = event.origin || window.location.origin;
+      if (!isAllowedOrigin(eventOrigin)) return;
+
+      // Secure Ping Handshake
       if (
         event.data.type === 'MUXARO_DIRECT_PING' ||
         (event.data.source === 'MUXARO_APP' && event.data.type === 'PING') ||
         event.data.type === 'PING'
       ) {
-        announce();
+        sendPong(event.data.nonce, event.data.timestamp);
         return;
       }
 
@@ -299,7 +332,6 @@
       actionsBar.insertBefore(btn, actionsBar.firstChild);
     }
 
-    // Run on navigation and DOM mutations in YouTube SPA
     const observer = new MutationObserver(injectYouTubeButton);
     observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
     window.addEventListener('yt-navigate-finish', injectYouTubeButton);

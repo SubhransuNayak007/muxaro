@@ -8,6 +8,8 @@ import {
   ArrowRight,
   Loader2,
   Check,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 
 export type SupportedPlatform =
@@ -21,7 +23,34 @@ export type SupportedPlatform =
   | 'vimeo'
   | null;
 
-export type SmartPreset = 'best' | '1080p' | 'mp3' | 'lossless';
+export type SmartPreset =
+  | '2k'
+  | '1080p'
+  | '720p'
+  | 'audio'
+  | 'desktop-direct'
+  | 'best'
+  | 'mp3'
+  | 'lossless';
+
+export const PRESET_OPTIONS: { id: SmartPreset; label: string }[] = [
+  { id: '2k', label: '2K (1440p) · Cloud' },
+  { id: '1080p', label: '1080p · Cloud' },
+  { id: '720p', label: '720p · Cloud' },
+  { id: 'audio', label: 'Audio Only · Cloud' },
+  { id: 'desktop-direct', label: '4K / 8K · Desktop Direct' },
+];
+
+export const presetLabels: Record<SmartPreset, string> = {
+  '2k': '2K (1440p) · Cloud',
+  '1080p': '1080p · Cloud',
+  '720p': '720p · Cloud',
+  audio: 'Audio Only · Cloud',
+  'desktop-direct': '4K / 8K · Desktop Direct',
+  best: '4K / 8K · Desktop Direct',
+  mp3: 'Audio Only · Cloud',
+  lossless: 'Audio Only · Cloud',
+};
 
 export interface PlatformConfig {
   id: NonNullable<SupportedPlatform>;
@@ -161,11 +190,35 @@ export default function HeroOmnibox({
   onFocusChange,
 }: HeroOmniboxProps) {
   const [detectedPlatform, setDetectedPlatform] = useState<SupportedPlatform>(null);
-  const [activePreset, setActivePreset] = useState<SmartPreset>('best');
+  const [activePreset, setActivePreset] = useState<SmartPreset>('1080p');
   const [pastedFeedback, setPastedFeedback] = useState<boolean>(false);
   const [presetDropdownOpen, setPresetDropdownOpen] = useState<boolean>(false);
+  const [isMobileWidth, setIsMobileWidth] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const checkWidth = () => {
+      setIsMobileWidth(window.innerWidth < 420);
+    };
+    checkWidth();
+    window.addEventListener('resize', checkWidth);
+    return () => window.removeEventListener('resize', checkWidth);
+  }, []);
+
+  // Close quality preset dropdown on click outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setPresetDropdownOpen(false);
+      }
+    };
+    if (presetDropdownOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }
+  }, [presetDropdownOpen]);
 
   // Synchronize detected platform with URL changes
   useEffect(() => {
@@ -241,13 +294,6 @@ export default function HeroOmnibox({
     }
   };
 
-  const presetLabels: Record<SmartPreset, string> = {
-    best: 'Best (8K/4K)',
-    '1080p': '1080p MP4',
-    mp3: 'MP3 Audio',
-    lossless: 'Lossless FLAC',
-  };
-
   return (
     <div className="w-full space-y-4">
       {/* SSR-first Fixed Shell Container: Exactly min-h-[76px] to guarantee CLS = 0.00 */}
@@ -273,7 +319,7 @@ export default function HeroOmnibox({
             )}
           </div>
 
-          {/* Center Input */}
+          {/* Center Input with Responsive Placeholder & Graceful Ellipsis */}
           <input
             ref={inputRef}
             type="text"
@@ -282,9 +328,13 @@ export default function HeroOmnibox({
             onChange={(e) => onUrlChange(e.target.value)}
             onFocus={() => onFocusChange?.(true)}
             onBlur={() => onFocusChange?.(false)}
-            placeholder="Paste video, audio, or playlist URL…"
+            placeholder={
+              isMobileWidth
+                ? 'Paste media or playlist link…'
+                : 'Paste video, audio, or playlist URL…'
+            }
             aria-label="Media URL input"
-            className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary text-sm sm:text-base font-sans focus:outline-none focus:ring-0 px-2 py-1 select-text"
+            className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary placeholder:truncate truncate text-xs sm:text-sm md:text-base font-sans focus:outline-none focus:ring-0 px-1.5 sm:px-2 py-1 select-text"
           />
 
           {/* Right Action Cluster */}
@@ -301,6 +351,57 @@ export default function HeroOmnibox({
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
+
+            {/* Quality Preset Dropdown */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setPresetDropdownOpen((prev) => !prev)}
+                aria-expanded={presetDropdownOpen}
+                aria-haspopup="menu"
+                aria-label="Quality preset options"
+                title="Choose download quality preset"
+                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand-violet transition-colors duration-150 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
+                <span className="text-[11px] font-semibold">{presetLabels[activePreset]}</span>
+                <ChevronDown className={`w-3 h-3 text-content-secondary shrink-0 transition-transform ${presetDropdownOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+
+              {presetDropdownOpen && (
+                <div
+                  role="menu"
+                  aria-label="Quality preset options"
+                  className="absolute right-0 mt-2 w-56 rounded-xl border border-line bg-surface shadow-lg p-1.5 z-50 text-xs"
+                >
+                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-content-secondary border-b border-line mb-1">
+                    Quality Preset
+                  </div>
+                  {PRESET_OPTIONS.map((opt) => {
+                    const isSelected = activePreset === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setActivePreset(opt.id);
+                          setPresetDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors duration-150 ${
+                          isSelected
+                            ? 'bg-interactive text-brand-violet dark:text-content font-semibold'
+                            : 'text-content hover:bg-surface-elevated'
+                        }`}
+                      >
+                        <span>{opt.label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Paste Button (Clipboard API) */}
             <button

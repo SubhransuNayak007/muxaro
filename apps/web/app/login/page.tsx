@@ -139,30 +139,26 @@ function LoginFormContent() {
           )}
 
           {/* Google Sign-In (only active when genuinely configured on server) */}
-          {googleAuthConfigured ? (
-            <a
-              href={googleHref}
-              onClick={() => trackEvent('auth_google_started', { source: 'login' })}
-              className="w-full px-4 py-3 rounded-xl border border-line bg-surface text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-            >
-              <GoogleGlyph />
-              <span>Continue with Google</span>
-            </a>
-          ) : (
-            !authLoading && (
-              <div className="px-4 py-3 rounded-xl border border-line bg-elevated text-content-secondary text-xs text-center">
-                Google sign-in is currently unavailable on this server. Sign in with email below.
-              </div>
-            )
-          )}
+          {googleAuthConfigured && (
+            <>
+              <a
+                href={googleHref}
+                onClick={() => trackEvent('auth_google_started', { source: 'login' })}
+                className="w-full px-4 py-3 rounded-xl border border-line bg-surface text-content font-semibold text-sm inline-flex items-center justify-center gap-2.5 hover:border-brand active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+              >
+                <GoogleGlyph />
+                <span>Continue with Google</span>
+              </a>
 
-          <div className="relative flex items-center justify-center">
-            <div className="w-full border-t border-line" aria-hidden="true" />
-            <span className="bg-surface px-3 text-xs text-content-secondary whitespace-nowrap">
-              Or continue with email
-            </span>
-            <div className="w-full border-t border-line" aria-hidden="true" />
-          </div>
+              <div className="relative flex items-center justify-center">
+                <div className="w-full border-t border-line" aria-hidden="true" />
+                <span className="bg-surface px-3 text-xs text-content-secondary whitespace-nowrap">
+                  Or continue with email
+                </span>
+                <div className="w-full border-t border-line" aria-hidden="true" />
+              </div>
+            </>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

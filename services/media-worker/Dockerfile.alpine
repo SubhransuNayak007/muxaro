@@ -1,0 +1,56 @@
+# ==============================================================================
+# MUXARO Dedicated Media Worker - Alpine Ultra-Lightweight Variant
+# Optimized for minimum image footprint (~120MB) & fast cold starts
+# ==============================================================================
+
+FROM node:20-alpine AS runner
+
+LABEL maintainer="MUXARO Core Engineering <engineering@muxaro.com>"
+LABEL org.opencontainers.image.title="muxaro-media-worker-alpine"
+LABEL org.opencontainers.image.description="Ultra-lightweight Alpine stream-copy media worker"
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=5001
+ENV MAX_FILE_SIZE_MB=500
+
+# Install runtime utilities: FFmpeg, yt-dlp, python3, curl, tini, ca-certificates
+RUN apk add --no-cache \
+    ffmpeg \
+    yt-dlp \
+    python3 \
+    curl \
+    tini \
+    ca-certificates
+
+# Create dedicated unprivileged non-root system user (UID/GID 10001)
+RUN addgroup -g 10001 -S muxaro && \
+    adduser -u 10001 -S muxaro -G muxaro -h /app -s /sbin/nologin
+
+WORKDIR /app
+
+# Install application dependencies layer
+COPY package.json ./
+RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
+
+# Copy application source code
+COPY . .
+
+# Set up ephemeral temp / scratch directories with strict unprivileged ownership
+RUN mkdir -p /app/temp /app/scratch \
+    && chown -R 10001:10001 /app
+
+# Switch to non-privileged user (non-root enforcement)
+USER 10001:10001
+
+# Expose service ports (Render/Fly/Oracle default 5001 or 8080)
+EXPOSE 5001
+EXPOSE 8080
+
+# Healthcheck targeting dynamic PORT with 5001 fallback
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -f "http://127.0.0.1:${PORT:-5001}/health" || exit 1
+
+# Tini acts as PID 1 to gracefully reap zombie FFmpeg/yt-dlp child processes on disconnect
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "src/index.js"]

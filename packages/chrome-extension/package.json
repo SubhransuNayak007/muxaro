@@ -1,0 +1,20 @@
+{
+  "name": "@muxaro/chrome-extension",
+  "version": "1.1.0",
+  "description": "MUXARO Direct Bridge - Manifest V3 Chrome Extension for Residential IP Streaming & Direct Browser Remuxing",
+  "private": true,
+  "scripts": {
+    "generate-icons": "node generate-icons.js",
+    "test": "node test-manifest.js"
+  },
+  "keywords": [
+    "muxaro",
+    "chrome-extension",
+    "manifest-v3",
+    "streaming",
+    "cors-bypass",
+    "residential-bridge"
+  ],
+  "author": "MUXARO Engineering",
+  "license": "MIT"
+}

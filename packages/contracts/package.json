@@ -1,0 +1,67 @@
+{
+  "name": "@muxaro/contracts",
+  "version": "1.0.0",
+  "description": "MUXARO Canonical System & API Contracts, Strict Schemas, and Error Model",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./src/index.ts"
+    },
+    "./status-codes": {
+      "types": "./dist/status-codes.d.ts",
+      "import": "./dist/status-codes.js",
+      "default": "./src/status-codes.ts"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./src/errors.ts"
+    },
+    "./inspect": {
+      "types": "./dist/inspect.d.ts",
+      "import": "./dist/inspect.js",
+      "default": "./src/inspect.ts"
+    },
+    "./download": {
+      "types": "./dist/download.d.ts",
+      "import": "./dist/download.js",
+      "default": "./src/download.ts"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js",
+      "default": "./src/events.ts"
+    },
+    "./quota": {
+      "types": "./dist/quota.d.ts",
+      "import": "./dist/quota.js",
+      "default": "./src/quota.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types tests/contracts.test.ts"
+  },
+  "keywords": [
+    "muxaro",
+    "contracts",
+    "zod",
+    "schemas",
+    "api-contracts",
+    "types"
+  ],
+  "author": "Muxaro Core Team",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

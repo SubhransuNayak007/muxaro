@@ -63,9 +63,11 @@ export {
   BlobFallbackSink,
   FileSystemAccessSink,
   ServiceWorkerStreamSink,
+  OPFSStreamSink,
   createOptimalSink,
   isFileSystemAccessSupported,
   isServiceWorkerStreamingSupported,
+  isOPFSSupported,
 } from './sink.ts';
 export {
   HardwareGpuTranscoder,

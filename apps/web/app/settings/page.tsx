@@ -36,6 +36,7 @@ import {
   RequestTimeout,
 } from '@/lib/settings-store';
 import { useMuxaroBridge } from '@/hooks/useMuxaroBridge';
+import { useDeviceDetection } from '@/hooks/useDeviceDetection';
 
 type SettingsTab =
   | 'appearance'
@@ -51,6 +52,7 @@ type SettingsTab =
 export default function SettingsPage() {
   const { settings, mounted, updateSettings, resetSettings } = useMuxaroSettings();
   const { isDirectInstalled, isMobile, checkingDirect } = useMuxaroBridge();
+  const { isDesktop, isLoaded: isDeviceLoaded } = useDeviceDetection();
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance');
   const [customWorkerInput, setCustomWorkerInput] = useState<string>('');
@@ -61,6 +63,30 @@ export default function SettingsPage() {
   } | null>(null);
   const [saveWorkerFeedback, setSaveWorkerFeedback] = useState<boolean>(false);
   const [clearedDataFeedback, setClearedDataFeedback] = useState<boolean>(false);
+
+  // Check URL query parameters for deep linking to settings tab (e.g. /settings?tab=instances)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab') as SettingsTab | null;
+        const validTabs: SettingsTab[] = [
+          'appearance',
+          'accessibility',
+          'video',
+          'audio',
+          'metadata',
+          'local_processing',
+          'instances',
+          'privacy',
+          'advanced',
+        ];
+        if (tab && validTabs.includes(tab)) {
+          setActiveTab(tab);
+        }
+      } catch {}
+    }
+  }, []);
 
   useEffect(() => {
     if (mounted) {
@@ -109,7 +135,17 @@ export default function SettingsPage() {
   };
 
   const handleWorkerSave = () => {
-    updateSettings('customWorkerUrl', customWorkerInput.trim());
+    const clean = customWorkerInput.trim();
+    updateSettings('customWorkerUrl', clean);
+    if (typeof window !== 'undefined') {
+      try {
+        if (clean) {
+          window.localStorage.setItem('muxaro_custom_worker_url', clean);
+        } else {
+          window.localStorage.removeItem('muxaro_custom_worker_url');
+        }
+      } catch {}
+    }
     setSaveWorkerFeedback(true);
     setTimeout(() => setSaveWorkerFeedback(false), 2200);
   };
@@ -117,6 +153,11 @@ export default function SettingsPage() {
   const handleWorkerReset = () => {
     setCustomWorkerInput('');
     updateSettings('customWorkerUrl', '');
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem('muxaro_custom_worker_url');
+      } catch {}
+    }
     setWorkerTestResult({
       success: true,
       message: 'Reset to default MUXARO cloud serverless gateway.',
@@ -147,7 +188,7 @@ export default function SettingsPage() {
     { id: 'audio', label: 'Audio', icon: <Music className="w-4 h-4" /> },
     { id: 'metadata', label: 'Metadata', icon: <Tag className="w-4 h-4" /> },
     { id: 'local_processing', label: 'Local Processing', icon: <Cpu className="w-4 h-4" /> },
-    { id: 'instances', label: 'Worker Fleet', icon: <Server className="w-4 h-4" /> },
+    { id: 'instances', label: 'Custom Worker (Cobalt)', icon: <Server className="w-4 h-4" /> },
     { id: 'privacy', label: 'Privacy & Storage', icon: <ShieldCheck className="w-4 h-4" /> },
     { id: 'advanced', label: 'Advanced', icon: <Sliders className="w-4 h-4" /> },
   ];
@@ -703,7 +744,7 @@ export default function SettingsPage() {
                     </span>
                   </div>
 
-                  {!isMobile && (
+                  {isDeviceLoaded && isDesktop && (
                     <div className="pt-3 border-t border-line/60 flex items-center justify-between gap-4">
                       <span className="text-xs text-content-secondary">
                         Install Tampermonkey / Violentmonkey script for 8K direct processing
@@ -749,9 +790,22 @@ export default function SettingsPage() {
             {activeTab === 'instances' && (
               <section className="p-6 sm:p-8 rounded-2xl border border-line bg-surface shadow-card space-y-6">
                 <div>
-                  <h2 className="text-base font-bold text-content">Custom Media Worker Fleet (BYO-Worker)</h2>
-                  <p className="text-xs text-content-secondary mt-0.5">
-                    Connect a self-hosted Docker media worker (running on Oracle Cloud Always Free, Render, or a VPS) to bypass cloud datacenter limits.
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-brand-violet/10 text-brand-violet dark:text-brand-violet-hover text-[11px] font-semibold mb-2">
+                    Cobalt Self-Hosted Architecture
+                  </div>
+                  <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">Custom Worker URL (BYO-Worker)</h2>
+                  <p className="text-xs text-content-secondary mt-0.5 leading-relaxed">
+                    Connect a self-hosted media-worker (running locally via Docker on port 5001 or on a private VPS) to bypass cloud datacenter limits and bot protection on YouTube and Instagram.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-surface-elevated border border-line space-y-2 text-xs text-content-secondary leading-relaxed">
+                  <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                    <Server className="w-4 h-4 text-brand-violet" />
+                    <span>How the Cobalt Worker Model Works</span>
+                  </div>
+                  <p>
+                    Free public cloud servers often face aggressive IP bot-detection from upstream streaming platforms. By running your own media worker, all requests route through your personal residential or VPS IP address. The worker URL is saved in your browser&apos;s <code className="font-mono text-zinc-900 dark:text-zinc-100 bg-surface px-1 py-0.5 rounded border border-line">localStorage</code>.
                   </p>
                 </div>
 
@@ -759,7 +813,7 @@ export default function SettingsPage() {
                   <div>
                     <label
                       htmlFor="custom-worker-input"
-                      className="block text-xs font-semibold text-content mb-1.5"
+                      className="block text-xs font-semibold text-zinc-900 dark:text-zinc-100 mb-1.5"
                     >
                       Worker API Endpoint URL
                     </label>
@@ -770,14 +824,14 @@ export default function SettingsPage() {
                         value={customWorkerInput}
                         onChange={(e) => setCustomWorkerInput(e.target.value)}
                         placeholder="e.g. http://localhost:5001 or https://worker.yourdomain.com"
-                        className="flex-1 px-4 py-2.5 rounded-xl border border-line bg-surface-elevated text-content text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
+                        className="flex-1 px-4 py-2.5 rounded-xl border border-line bg-surface-elevated text-zinc-900 dark:text-zinc-100 text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
                       />
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           disabled={testingWorker}
                           onClick={handleWorkerTest}
-                          className="px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-content transition-colors disabled:opacity-50"
+                          className="px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 transition-colors disabled:opacity-50"
                         >
                           {testingWorker ? 'Testing…' : 'Test Endpoint'}
                         </button>
@@ -791,6 +845,25 @@ export default function SettingsPage() {
                         </button>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Quick Preset Buttons */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                    <span className="text-content-secondary font-medium">Quick presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomWorkerInput('http://localhost:5001')}
+                      className="px-2.5 py-1 rounded-lg bg-surface-elevated border border-line text-content-secondary hover:text-content text-xs font-mono transition-colors"
+                    >
+                      localhost:5001
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleWorkerReset}
+                      className="px-2.5 py-1 rounded-lg bg-surface-elevated border border-line text-content-secondary hover:text-content text-xs transition-colors"
+                    >
+                      Reset to Default Cloud
+                    </button>
                   </div>
 
                   {workerTestResult && (
@@ -811,7 +884,13 @@ export default function SettingsPage() {
                   )}
 
                   <div className="pt-2 flex items-center justify-between text-xs text-content-secondary border-t border-line/60">
-                    <span>Default: Same-origin Vercel Serverless Gateway (`/api/v1`)</span>
+                    <span>
+                      Current: {settings.customWorkerUrl ? (
+                        <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{settings.customWorkerUrl}</span>
+                      ) : (
+                        <span>Default MUXARO Cloud Serverless Gateway (`/api/v1`)</span>
+                      )}
+                    </span>
                     <button
                       type="button"
                       onClick={handleWorkerReset}

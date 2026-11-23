@@ -6,7 +6,7 @@ import { api } from '@/lib/api-client';
 import { EntitlementsUsage, CreditLedgerItem, CreditLedgerEventType } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 import { formatUtcTimestamp } from '@/lib/formatters';
-import RewardedAdCard from '@/components/RewardedAdCard';
+import { quotaManager } from '@/lib/quota/quota-manager';
 import {
   Video,
   ListMusic,
@@ -22,7 +22,6 @@ import {
   ArrowUpRight,
   Info,
   AlertCircle,
-  Gift,
   Layers,
 } from 'lucide-react';
 
@@ -416,6 +415,7 @@ export default function CreditsPage() {
       if (hasValidNumbers) {
         setUsage(data);
         setCountdown(computeRemainingSeconds(data));
+        quotaManager.invalidate().catch(() => {});
       } else {
         setUsage(null);
         setCountdown(0);
@@ -476,14 +476,9 @@ export default function CreditsPage() {
   const baseLimit = usage ? Math.max(0, safeNumber(usage.baseLimit, 0)) : 0;
   const baseUsed = usage ? Math.max(0, safeNumber(usage.baseUsed, 0)) : 0;
   const baseRemaining = usage ? Math.max(0, safeNumber(usage.baseRemaining, 0)) : 0;
-  const extraCreditsEarned = usage ? Math.max(0, safeNumber(usage.extraCreditsEarned, 0)) : 0;
-  const extraCreditsRemaining = usage ? Math.max(0, safeNumber(usage.extraCreditsRemaining, 0)) : 0;
-  const extraCreditsExpiresLocal = usage?.extraCreditsExpiresAt
-    ? safeFormatLocalDateTime(usage.extraCreditsExpiresAt, 'No active expiry')
-    : 'No active bonus credits';
   const totalAvailableIndividual = usage
-    ? Math.max(0, safeNumber(usage.totalAvailableIndividual, baseRemaining + extraCreditsRemaining))
-    : 0;
+    ? Math.max(0, safeNumber(usage.totalAvailableIndividual, baseRemaining))
+    : baseRemaining;
   const playlistLimit = usage ? Math.max(0, safeNumber(usage.playlistJobsLimit, 0)) : 0;
   const playlistRemaining = usage ? Math.max(0, safeNumber(usage.playlistJobsRemaining, 0)) : 0;
   const rollingHours = usage ? Math.max(1, safeNumber(usage.rollingWindowHours, 24)) : 24;
@@ -586,7 +581,7 @@ export default function CreditsPage() {
               Usage &amp; Daily Limits
             </h1>
             <p className="text-sm text-content-secondary mt-2 max-w-2xl leading-relaxed">
-              Track your daily video, bonus credits, and playlist allowance live.
+              Track your daily video and playlist allowance live.
             </p>
           </div>
 
@@ -609,7 +604,7 @@ export default function CreditsPage() {
       </header>
 
       {/* =====================================================================
-          LIVE ENTITLEMENT SUMMARY, GAUGES, REWARDED ADS & RESET TIMER
+          LIVE ENTITLEMENT SUMMARY, GAUGES & RESET TIMER
           ===================================================================== */}
       {isInitialLoading ? (
         <div aria-label="Loading daily limits">
@@ -660,47 +655,22 @@ export default function CreditsPage() {
       ) : (
         <>
           {/* Live Quota Breakdown Strip */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <section className="muxaro-card p-5" aria-label="Total available individual jobs">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <section className="muxaro-card p-5" aria-label="Available individual jobs">
               <div className="flex items-center justify-between gap-2 mb-1.5">
                 <span className="text-xs font-medium text-content-secondary">
-                  Total available video jobs
+                  Available video jobs
                 </span>
                 <Layers className="w-4 h-4 text-brand-indigo shrink-0" aria-hidden="true" />
               </div>
               <div className="text-2xl font-bold text-content mono-metric">
-                {totalAvailableIndividual}
-              </div>
-              <p className="text-xs text-content-secondary mt-1">
-                Base {baseRemaining} remaining + {extraCreditsRemaining} extra credits
-              </p>
-            </section>
-
-            <section className="muxaro-card p-5" aria-label="Extra credits earned from ads">
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-medium text-content-secondary">
-                    Extra credits from ads
-                  </span>
-                  <Tooltip
-                    content="Optional rewarded credits add extra individual video jobs for 24 hours from the time they are verified. They never expire earlier and do not change your playlist allowance."
-                    ariaLabel="How extra credits work"
-                  />
-                </div>
-                <Gift className="w-4 h-4 text-success shrink-0" aria-hidden="true" />
-              </div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-content mono-metric">
-                  +{extraCreditsEarned}
-                </span>
-                <span className="text-xs font-medium text-content-secondary">
-                  earned ({extraCreditsRemaining} remaining)
+                {baseRemaining}
+                <span className="text-sm font-normal text-content-secondary ml-0.5">
+                  /{baseLimit}
                 </span>
               </div>
               <p className="text-xs text-content-secondary mt-1">
-                {extraCreditsRemaining > 0 && usage.extraCreditsExpiresAt
-                  ? `Expires: ${extraCreditsExpiresLocal}`
-                  : 'No active bonus credits'}
+                {baseRemaining} of {baseLimit} daily jobs available for conversion or download
               </p>
             </section>
 
@@ -718,7 +688,7 @@ export default function CreditsPage() {
                 </span>
               </div>
               <p className="text-xs text-content-secondary mt-1">
-                Independent of video jobs and rewarded ads
+                Separate allowance for multi-item ZIP batches
               </p>
             </section>
           </div>
@@ -737,10 +707,10 @@ export default function CreditsPage() {
               badgeLabel="Single media"
               tooltipText="Your base video allowance covers individual links and uploaded files. Each used slot restores automatically 24 hours after completion, and cancelled or failed jobs refund immediately."
               details={[
-                { label: 'Base allowance', value: `${baseRemaining} / ${baseLimit} remaining` },
+                { label: 'Daily allowance', value: `${baseLimit} jobs / ${rollingHours}h` },
+                { label: 'Remaining slots', value: `${baseRemaining} available` },
                 { label: 'Used in window', value: `${baseUsed} jobs` },
-                { label: 'Bonus ad credits', value: `+${extraCreditsRemaining} available` },
-                { label: 'Total available now', value: `${totalAvailableIndividual} jobs` },
+                { label: 'Max resolution', value: 'Up to 8K (lossless)' },
               ]}
             />
 
@@ -754,24 +724,18 @@ export default function CreditsPage() {
               startColorToken="var(--muxaro-blue)"
               endColorToken="var(--muxaro-cyan)"
               badgeLabel="Batch archive"
-              tooltipText="Playlist jobs bundle collections into one organized ZIP archive. This allowance is completely separate from your individual video jobs and is unaffected by rewarded ads."
+              tooltipText="Playlist jobs bundle collections into one organized ZIP archive. This allowance is completely separate from your individual video jobs."
               details={[
                 { label: 'Daily allowance', value: `${playlistLimit} playlist / ${rollingHours}h` },
                 { label: 'Max playlist size', value: 'Up to 50 items' },
                 { label: 'Download format', value: 'Single ZIP file' },
-                { label: 'Ad independence', value: 'Separate from rewarded ads' },
+                { label: 'Pool isolation', value: 'Separate from single video jobs' },
               ]}
             />
           </div>
 
-          {/* Optional Rewarded Ads Card (authenticated & configured only) or Guest Upgrade Prompt */}
-          {authenticated ? (
-            <RewardedAdCard
-              showUnconfiguredNote
-              onRewardGranted={fetchUsageAndLedger}
-              className="mb-8"
-            />
-          ) : (
+          {/* Guest Upgrade Prompt */}
+          {!authenticated && (
             <aside className="muxaro-card p-5 mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-sm font-semibold text-content">
@@ -922,12 +886,12 @@ export default function CreditsPage() {
                 Rolling 24h record
               </span>
               <Tooltip
-                content="Every completed job, automatic refund, rewarded credit grant, and credit expiration is recorded in order so you can verify your exact balance."
+                content="Every completed job, automatic refund, and account adjustment is recorded in order so you can verify your exact balance."
                 ariaLabel="About your activity history"
               />
             </div>
             <p className="text-xs text-content-secondary mt-1">
-              Recent job usage, automatic refunds, bonus credits, and expirations.
+              Recent job usage, automatic refunds, and account adjustments.
             </p>
           </div>
 
@@ -1022,7 +986,7 @@ export default function CreditsPage() {
           <div className="py-10 text-center text-xs text-content-secondary border-t border-line-subtle">
             <p className="font-medium text-content">No activity yet in this rolling window.</p>
             <p className="mt-1">
-              Completed jobs, automatic refunds, bonus credits, and expirations will appear here.
+              Completed jobs, automatic refunds, and account adjustments will appear here.
             </p>
           </div>
         ) : filteredLedger.length === 0 ? (

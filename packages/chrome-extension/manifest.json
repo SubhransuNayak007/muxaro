@@ -1,0 +1,106 @@
+{
+  "manifest_version": 3,
+  "name": "MUXARO Direct Bridge",
+  "version": "1.1.0",
+  "description": "High-speed residential stream bridge and CORS bypass for MUXARO media streaming and studio tools.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "declarativeNetRequest",
+    "scripting",
+    "activeTab",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "*://*.googlevideo.com/*",
+    "*://*.youtube.com/*",
+    "*://*.ytimg.com/*",
+    "*://*.instagram.com/*",
+    "*://*.cdninstagram.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.tiktokcdn.com/*",
+    "*://*.tiktokv.com/*",
+    "*://*.fbcdn.net/*",
+    "*://*.twimg.com/*",
+    "*://*.x.com/*",
+    "*://*.twitter.com/*",
+    "*://*.reddit.com/*",
+    "*://*.redd.it/*",
+    "*://*.vimeo.com/*",
+    "*://*.vimeocdn.com/*",
+    "*://muxaro.pages.dev/*",
+    "*://*.muxaro.pages.dev/*",
+    "*://*-muxaro.pages.dev/*",
+    "*://muxaro.vercel.app/*",
+    "*://*.vercel.app/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "<all_urls>"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_cors",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://muxaro.pages.dev/*",
+        "*://*.muxaro.pages.dev/*",
+        "*://*-muxaro.pages.dev/*",
+        "*://muxaro.vercel.app/*",
+        "*://*.vercel.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://youtube.com/*"
+      ],
+      "js": ["youtube.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_title": "MUXARO Direct Bridge",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*",
+        "rules.json"
+      ],
+      "matches": [
+        "*://muxaro.pages.dev/*",
+        "*://*.muxaro.pages.dev/*",
+        "*://*-muxaro.pages.dev/*",
+        "*://muxaro.vercel.app/*",
+        "*://*.vercel.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
+    }
+  ]
+}

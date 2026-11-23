@@ -27,8 +27,10 @@ import {
   clearWarmupCache,
   isFileSystemAccessSupported,
   isServiceWorkerStreamingSupported,
+  isOPFSSupported,
   isWebCodecsSupported,
   BlobFallbackSink,
+  OPFSStreamSink,
   StreamMuxerEngine,
   type MediaSample,
 } from '../../apps/web/lib/stream-engine/index.ts';
@@ -299,6 +301,7 @@ describe('Stage 4: Zero-RAM Direct-to-Disk Streaming Sinks', () => {
   it('should accurately detect browser sink support', () => {
     assert.strictEqual(typeof isFileSystemAccessSupported(), 'boolean');
     assert.strictEqual(typeof isServiceWorkerStreamingSupported(), 'boolean');
+    assert.strictEqual(typeof isOPFSSupported(), 'boolean');
   });
 
   it('should write chunks progressively and close with BlobFallbackSink', async () => {
@@ -311,6 +314,16 @@ describe('Stage 4: Zero-RAM Direct-to-Disk Streaming Sinks', () => {
     await sink.write(c2);
 
     assert.strictEqual(sink.getBytesWritten(), 8);
+    await sink.close();
+  });
+
+  it('should support OPFSStreamSink stream accumulation with fallback safety', async () => {
+    const sink = new OPFSStreamSink();
+    assert.strictEqual(sink.type, 'opfs');
+
+    await sink.init('test_opfs_stream.mp4', 'video/mp4');
+    await sink.write(new Uint8Array([10, 20, 30]));
+    assert.strictEqual(sink.getBytesWritten(), 3);
     await sink.close();
   });
 });

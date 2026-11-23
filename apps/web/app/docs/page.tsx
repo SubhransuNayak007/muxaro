@@ -72,8 +72,43 @@ export default function DocsIndexPage() {
               Media guides and answers
             </h1>
             <p className="text-base text-content-secondary mt-3 leading-relaxed">
-              Clear guides to video formats, resolutions, audio quality, and common fixes.
+              Clear guides to video formats, resolutions, audio quality, operating modes, and common fixes.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Operating Modes Architecture Band */}
+      <section className="border-b border-line bg-surface/40 py-6">
+        <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl border border-line bg-surface shadow-xs">
+              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-surface-elevated border border-line text-content-secondary">
+                Mobile &amp; Web
+              </span>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mt-2 mb-1">Cloud Mode</h3>
+              <p className="text-xs text-content-secondary leading-relaxed">
+                Up to 2K lossless stream copy for open &amp; supported hosts with zero local setup.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl border border-line bg-surface shadow-xs">
+              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-surface-elevated border border-line text-content-secondary">
+                Desktop Direct
+              </span>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mt-2 mb-1">Direct Mode</h3>
+              <p className="text-xs text-content-secondary leading-relaxed">
+                Up to 8K via local browser bridge using your own residential connection.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl border border-line bg-surface shadow-xs">
+              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-surface-elevated border border-line text-content-secondary">
+                100% Private
+              </span>
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mt-2 mb-1">Studio Tools</h3>
+              <p className="text-xs text-content-secondary leading-relaxed">
+                100% private in-browser conversion, audio extraction, and audio/video merging.
+              </p>
+            </div>
           </div>
         </div>
       </section>

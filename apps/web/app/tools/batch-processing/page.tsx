@@ -173,8 +173,8 @@ export default function BatchProcessingPage() {
                     setNewUrl(e.target.value);
                     if (errorMsg) setErrorMsg(null);
                   }}
-                  placeholder="Paste video or audio link (e.g. youtube.com/watch?v=... or direct MP4)"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
+                  placeholder="Paste video, audio, or direct media link…"
+                  className="flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted placeholder:truncate truncate text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
                 <button
                   type="submit"

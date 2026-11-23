@@ -75,22 +75,29 @@ const THEME_STORAGE_KEY = 'theme';
 function applyThemeSetting(theme: MuxaroTheme) {
   if (typeof window === 'undefined') return;
   const root = document.documentElement;
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
 
-  let isDark = false;
-  if (theme === 'auto') {
-    isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  let isDark: boolean;
+  if (theme === 'dark') {
+    isDark = true;
+  } else if (theme === 'light') {
+    isDark = false;
+  } else if (storedTheme === 'dark') {
+    isDark = true;
+  } else if (storedTheme === 'light') {
+    isDark = false;
   } else {
-    isDark = theme === 'dark';
+    isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   }
 
   if (isDark) {
     root.classList.add('dark');
     root.setAttribute('data-theme', 'dark');
-    localStorage.setItem(THEME_STORAGE_KEY, 'dark');
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'dark');
   } else {
     root.classList.remove('dark');
     root.setAttribute('data-theme', 'light');
-    localStorage.setItem(THEME_STORAGE_KEY, 'light');
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light');
   }
 }
 
@@ -102,7 +109,7 @@ export function loadStoredSettings(): MuxaroUserSettings {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY) || window.localStorage.getItem(LEGACY_STORAGE_KEY);
     const existingWorker = window.localStorage.getItem(WORKER_STORAGE_KEY) || '';
-    const existingTheme = (window.localStorage.getItem(THEME_STORAGE_KEY) as MuxaroTheme) || 'auto';
+    const storedTheme = (window.localStorage.getItem(THEME_STORAGE_KEY) as MuxaroTheme) || null;
 
     let parsed: Partial<MuxaroUserSettings> = {};
     if (raw) {
@@ -112,7 +119,7 @@ export function loadStoredSettings(): MuxaroUserSettings {
     return {
       ...DEFAULT_MUXARO_SETTINGS,
       ...parsed,
-      theme: parsed.theme || existingTheme || 'auto',
+      theme: storedTheme || parsed.theme || 'auto',
       customWorkerUrl: parsed.customWorkerUrl !== undefined ? parsed.customWorkerUrl : existingWorker,
     };
   } catch {
@@ -151,7 +158,6 @@ export function useMuxaroSettings() {
   useEffect(() => {
     const current = loadStoredSettings();
     setSettings(current);
-    applyThemeSetting(current.theme);
     setMounted(true);
 
     const handleExternalChange = (e: Event) => {

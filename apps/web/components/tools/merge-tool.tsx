@@ -269,8 +269,8 @@ export function MergeTool() {
                   type="url"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="https://... video URL"
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none"
+                  placeholder="Paste video URL…"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
               ) : (
                 <div>
@@ -350,8 +350,8 @@ export function MergeTool() {
                   type="url"
                   value={audioUrl}
                   onChange={(e) => setAudioUrl(e.target.value)}
-                  placeholder="https://... audio URL"
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none"
+                  placeholder="Paste audio URL…"
+                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
               ) : (
                 <div>

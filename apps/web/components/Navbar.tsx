@@ -4,8 +4,6 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Sun,
-  Moon,
   Menu,
   X,
   Zap,
@@ -16,6 +14,7 @@ import {
   ChevronDown,
   Settings,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { api } from '@/lib/api-client';
 import { QuotaStatus } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
@@ -62,7 +61,6 @@ export default function Navbar() {
 
   const [quota, setQuota] = useState<LiveQuotaSummary | null>(null);
   const [quotaState, setQuotaState] = useState<QuotaLoadState>('loading');
-  const [isDark, setIsDark] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState<boolean>(false);
@@ -81,11 +79,6 @@ export default function Navbar() {
 
   useEffect(() => {
     setMounted(true);
-    const isDarkMode =
-      document.documentElement.classList.contains('dark') ||
-      document.documentElement.getAttribute('data-theme') === 'dark' ||
-      localStorage.getItem('theme') === 'dark';
-    setIsDark(isDarkMode);
   }, []);
 
   // Fetch live credits whenever auth state changes (never invent fallback numbers)
@@ -143,23 +136,6 @@ export default function Navbar() {
       isMounted = false;
     };
   }, [authenticated, user?.publicUserId]);
-
-  // Theme toggle with class, attribute, and storage synchronization
-  const toggleTheme = useCallback(() => {
-    setIsDark((prev) => {
-      const next = !prev;
-      if (next) {
-        document.documentElement.classList.add('dark');
-        document.documentElement.setAttribute('data-theme', 'dark');
-        localStorage.setItem('theme', 'dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-        document.documentElement.setAttribute('data-theme', 'light');
-        localStorage.setItem('theme', 'light');
-      }
-      return next;
-    });
-  }, []);
 
   // Close menus on route change
   useEffect(() => {
@@ -305,17 +281,21 @@ export default function Navbar() {
         <div className="flex items-center shrink-0">
           <Link
             href="/"
-            className="flex items-center gap-2.5 rounded-lg whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+            className="flex items-center gap-2.5 rounded-lg whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface group"
             aria-label="MUXARO Home"
           >
-            <img
-              src="/brand/muxaro-mark-mono.svg"
-              alt=""
-              width={28}
-              height={28}
-              className="w-7 h-7 object-contain text-content"
-              style={{ color: 'currentColor', filter: 'none' }}
-            />
+            {/* High-Contrast Luxury M Brand Mark (pure white in dark mode, crisp true ink in light mode) */}
+            <svg
+              viewBox="0 0 32 32"
+              fill="none"
+              className="w-7 h-7 text-content dark:text-white shrink-0 transition-colors"
+              aria-hidden="true"
+            >
+              <rect x="3" y="6" width="3" height="20" fill="currentColor" />
+              <rect x="26" y="6" width="3" height="20" fill="currentColor" />
+              <polygon points="3,6 16,20 29,6 29,10 16,26 3,10" fill="currentColor" />
+              <line x1="3" y1="29" x2="29" y2="29" stroke="currentColor" strokeWidth="1" />
+            </svg>
             <span className="font-sans font-extrabold text-xl tracking-[-0.03em] text-content">
               MUXARO
             </span>
@@ -561,20 +541,7 @@ export default function Navbar() {
           </Link>
 
           {/* Theme Switcher Button */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title={mounted && isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-            aria-label={mounted && isDark ? 'Switch to light theme' : 'Switch to dark theme'}
-            aria-pressed={mounted ? isDark : undefined}
-            className="w-9 h-9 shrink-0 flex items-center justify-center rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-          >
-            {mounted && isDark ? (
-              <Sun className="w-4 h-4 text-warning" aria-hidden="true" />
-            ) : (
-              <Moon className="w-4 h-4 text-content-secondary" aria-hidden="true" />
-            )}
-          </button>
+          <ThemeToggle />
 
           {/* Mobile Menu Button */}
           <button

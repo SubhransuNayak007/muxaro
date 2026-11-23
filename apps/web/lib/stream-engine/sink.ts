@@ -11,6 +11,10 @@
  */
 
 import type { StreamSink, SinkType } from './types.ts';
+import { OPFSStreamSink } from '../opfs/opfs-sink.ts';
+import { isOPFSSupported } from '../opfs/opfs-storage.ts';
+
+export { OPFSStreamSink, isOPFSSupported };
 
 // Ambient declarations for File System Access API
 interface FilePickerAcceptType {
@@ -318,7 +322,13 @@ export async function createOptimalSink(
   expectedSize?: number,
   preferred?: SinkType
 ): Promise<StreamSink> {
-  // If user or caller specified preferred sink
+  // If user or caller explicitly specified preferred sink
+  if (preferred === 'opfs' && isOPFSSupported()) {
+    const sink = new OPFSStreamSink();
+    await sink.init(filename, mimeType, expectedSize);
+    return sink;
+  }
+
   if (preferred === 'file-system' && isFileSystemAccessSupported()) {
     const sink = new FileSystemAccessSink();
     await sink.init(filename, mimeType, expectedSize);
@@ -336,7 +346,18 @@ export async function createOptimalSink(
   }
 
   // Automatic preference hierarchy:
-  // 1. Chromium File System Access API
+  // 1. Origin Private File System (OPFS) - Zero-RAM 8K stream accumulator
+  if (isOPFSSupported()) {
+    try {
+      const sink = new OPFSStreamSink();
+      await sink.init(filename, mimeType, expectedSize);
+      return sink;
+    } catch (err) {
+      console.warn('[MUXARO] OPFS sink initialization failed, falling through to secondary sink:', err);
+    }
+  }
+
+  // 2. Chromium File System Access API
   if (isFileSystemAccessSupported()) {
     try {
       const sink = new FileSystemAccessSink();
@@ -351,7 +372,7 @@ export async function createOptimalSink(
     }
   }
 
-  // 2. Safari / Firefox Service Worker Streaming
+  // 3. Safari / Firefox Service Worker Streaming
   if (isServiceWorkerStreamingSupported()) {
     try {
       const sink = new ServiceWorkerStreamSink();
@@ -362,7 +383,7 @@ export async function createOptimalSink(
     }
   }
 
-  // 3. Fallback Blob Sink
+  // 4. Fallback Blob Sink
   const blobSink = new BlobFallbackSink();
   await blobSink.init(filename, mimeType);
   return blobSink;

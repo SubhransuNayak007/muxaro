@@ -64,7 +64,31 @@ We maintain a strict and responsive copyright compliance process. Rightsholders 
 
 ---
 
-## 3. Processing Speeds & Engine Mechanics
+## 3. Platform Architecture & Operating Modes
+
+MUXARO operates with three transparent, honest modes designed to respect network boundaries and platform policies:
+
+### 1. Cloud Mode (Mobile & Web)
+- **Specification:** Up to 2K lossless stream copy for open & supported hosts.
+- **How it works:** Shared cloud edge workers demux and remux audio/video streams at line speed. Perfect for smartphones, tablets, and lightweight web sessions on platforms that do not restrict datacenter IPs.
+- **Capabilities:** Up to 1440p (2K), instant packaging, zero local CPU load.
+
+### 2. Direct Mode (Desktop)
+- **Specification:** Up to 8K via local browser bridge using your own residential connection.
+- **How it works:** Uses a lightweight desktop userscript or Chrome extension to orchestrate bitstream downloads directly through your home internet connection. Because requests originate from your residential IP rather than shared datacenter servers, upstream bot-blocking (from hosts like YouTube or Instagram) is completely bypassed.
+- **Capabilities:** Full 4K and 8K 60fps bitstream copy with Origin Private File System (OPFS) disk streaming.
+
+### 3. Studio Tools
+- **Specification:** 100% private in-browser conversion, audio extraction, and audio/video merging.
+- **How it works:** Powered by client-side WebAssembly FFmpeg. When you convert a container or extract audio stems, processing happens 100% locally in your browser memory/OPFS. No files are ever uploaded to cloud servers.
+
+### 4. Custom Worker URL (Cobalt Architecture)
+- **What is BYO-Worker?** Following the Cobalt self-hosted model, users can connect their own Docker media-worker instance (running on `localhost:5001`, an Oracle Cloud Always Free instance, or a VPS).
+- **Configuration:** Go to [Settings > Custom Worker](/settings?tab=instances) and enter your worker URL. It is saved directly in your browser's `localStorage` (`muxaro_custom_worker_url`).
+
+---
+
+## 4. Processing Speeds & Engine Mechanics
 
 ### What do the consumer processing presets (Best Quality, Balanced, Audio-Only, Lossless) do?
 MUXARO provides four streamlined, one-click processing presets with an optional Advanced Settings drawer:

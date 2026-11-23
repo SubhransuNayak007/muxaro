@@ -17,14 +17,19 @@ import {
   RotateCcw,
   X,
   Clock,
+  Server,
+  Zap,
 } from 'lucide-react';
 import HeroWaveLines from '@/components/HeroWaveLines';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 import HeroOmnibox from '@/components/HeroOmnibox';
 import AdaptiveMediaCard from '@/components/AdaptiveMediaCard';
 import TrustStrip from '@/components/TrustStrip';
+import ValueProposition from '@/components/ValueProposition';
+import CustomWorkerModal from '@/components/CustomWorkerModal';
 import { api } from '@/lib/api-client';
 import { useDeviceMode } from '@/lib/device-mode';
+import { useDeviceDetection } from '@/hooks/useDeviceDetection';
 import { useAuth } from '@/lib/auth-context';
 import { trackEvent } from '@/lib/analytics';
 import { MediaManifest, ProcessingJob, JobState } from '@/lib/types';
@@ -98,6 +103,7 @@ function isAbortError(err: unknown): boolean {
 export default function HomePage() {
   const router = useRouter();
   const { shouldAnimateAurora } = useDeviceMode();
+  const { isMobile } = useDeviceDetection();
   const {
     authenticated,
     loading: authLoading,
@@ -120,6 +126,7 @@ export default function HomePage() {
   const [lastFailedAction, setLastFailedAction] = useState<FailedAction | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [pastedFeedback, setPastedFeedback] = useState<boolean>(false);
+  const [workerModalOpen, setWorkerModalOpen] = useState<boolean>(false);
 
   const urlInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,6 +190,11 @@ export default function HomePage() {
     try {
       const data = await api.probeUrl(trimmed);
       setManifest(data);
+      console.info('[MUXARO Probe] Media manifest loaded successfully:', {
+        title: data.title,
+        videoCount: Array.isArray(data.videoStreams) ? data.videoStreams.length : 0,
+        audioCount: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
+      });
       trackEvent('media_inspect_succeeded', {
         source_type: 'url',
         video_options: Array.isArray(data.videoStreams) ? data.videoStreams.length : 0,
@@ -190,8 +202,19 @@ export default function HomePage() {
       });
     } catch (err: unknown) {
       let message = err instanceof Error ? err.message : '';
-      if (!message || message === '[object Object]' || message.includes('[object Object]')) {
+      const isBlockedHost = /(?:youtube\.com|youtu\.be|instagram\.com|instagr\.am)/i.test(trimmed);
+      if (
+        isBlockedHost ||
+        (err as any)?.code === 'HOST_BLOCKED' ||
+        /blocks free cloud servers|bot detection|confirm you're not a bot|login_required/i.test(message)
+      ) {
+        message = 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.';
+        console.info('[MUXARO Probe] Target host restricted in cloud mode. Suggesting Desktop Direct:', trimmed);
+      } else if (!message || message === '[object Object]' || message.includes('[object Object]')) {
         message = 'We could not analyse that link. Please check the URL and try again.';
+        console.error('[MUXARO Probe Error] Unresolvable media link error:', err);
+      } else {
+        console.error('[MUXARO Probe Error]', message, err);
       }
       setErrorMessage(message);
       setLastFailedAction({ type: 'url', url: trimmed });
@@ -329,6 +352,7 @@ export default function HomePage() {
           err instanceof Error
             ? err.message
             : 'We could not upload that file. Please try again.';
+        console.error('[MUXARO Upload Error]', message, err);
         setErrorMessage(message);
         setLastFailedAction({ type: 'file', file });
         trackEvent('media_inspect_failed', { source_type: 'local_file' });
@@ -511,7 +535,8 @@ export default function HomePage() {
                     <HeroOmnibox
                       url={url}
                       onUrlChange={setUrl}
-                      onSubmit={(targetUrl) => {
+                      onSubmit={(targetUrl, preset) => {
+                        console.info('[MUXARO Omnibox] Inspecting URL with quality preset:', preset);
                         void inspectTargetUrl(targetUrl);
                       }}
                       probing={inspecting}
@@ -637,21 +662,52 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Honest API Error Banner with Retry */}
+            {/* Honest API Error Banner with Retry & Custom Worker Action */}
             {!activeJob && errorMessage && (
               <div
                 role="alert"
-                className="mt-4 p-4 rounded-xl bg-error-bg border border-error text-error text-sm flex flex-wrap items-center justify-between gap-3"
+                className="mt-4 p-4 sm:p-5 rounded-2xl bg-surface border border-error/40 shadow-card text-sm flex flex-col gap-4"
               >
-                <div className="flex items-start gap-2.5 min-w-0">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
-                  <span>{errorMessage}</span>
+                <div className="flex items-start gap-3 w-full">
+                  <div className="w-8 h-8 rounded-xl bg-error/10 text-error flex items-center justify-center shrink-0 mt-0.5">
+                    <AlertCircle className="w-4 h-4" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      {errorMessage.includes('blocks free cloud servers')
+                        ? 'Host Restriction Detected'
+                        : 'Unable to analyse link'}
+                    </h3>
+                    <p className="text-xs text-content-secondary mt-1 leading-relaxed">
+                      {errorMessage}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line/40 w-full">
+                  {errorMessage.includes('blocks free cloud servers') && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setWorkerModalOpen(true)}
+                        className="px-3 py-1.5 rounded-lg bg-brand-violet text-white text-xs font-semibold hover:bg-brand-violet-hover active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Server className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Connect Custom Worker</span>
+                      </button>
+                      <Link
+                        href="/tools/direct-helper"
+                        className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                        <span>Desktop Direct</span>
+                      </Link>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={handleRetryLastAction}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-error text-error text-xs font-semibold hover:bg-error-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-line text-zinc-900 dark:text-zinc-100 text-xs font-semibold hover:bg-surface-elevated active:translate-y-px transition-colors duration-150 whitespace-nowrap"
                   >
                     <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Retry</span>
@@ -678,6 +734,9 @@ export default function HomePage() {
 
       {/* Main Content Container */}
       <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        {/* Transparent 3-Pillar Value Proposition */}
+        <ValueProposition />
+
         {/* Helpful Sign-In Prompt for Guest Inspection (non-blocking, preserves task) */}
         {!authLoading && !authenticated && manifest && !activeJob && (
           <div className="max-w-3xl mx-auto mb-5">
@@ -744,6 +803,12 @@ export default function HomePage() {
           </div>
         </section>
       </div>
+
+      {/* Custom Worker URL Modal (Cobalt Model) */}
+      <CustomWorkerModal
+        isOpen={workerModalOpen}
+        onClose={() => setWorkerModalOpen(false)}
+      />
     </div>
   );
 }

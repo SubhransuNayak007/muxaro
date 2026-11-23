@@ -34,7 +34,7 @@ import {
 import { api } from '@/lib/api-client';
 import { MediaManifest } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
-import { useMuxaroBridge } from '@/hooks/useMuxaroBridge';
+import { useDirectBridge } from '@/hooks/useDirectBridge';
 
 function DirectHelperSkeleton() {
   return (
@@ -52,7 +52,7 @@ function DirectHelperContent() {
 
   const [targetUrl, setTargetUrl] = useState<string>('');
   const [inputValue, setInputValue] = useState<string>('');
-  const { isInstalled: isBridgeInstalled, bridgeVersion: hookBridgeVersion, isMobile } = useMuxaroBridge();
+  const { isInstalled: isBridgeInstalled, bridgeVersion: hookBridgeVersion, isMobile } = useDirectBridge();
   const [isCompanionActive, setIsCompanionActive] = useState<boolean>(false);
   const [companionVersion, setCompanionVersion] = useState<string>('v1.1.0');
   const [checking, setChecking] = useState<boolean>(true);
@@ -165,24 +165,26 @@ function DirectHelperContent() {
       if (typeof pingMuxaroDirect === 'function') {
         pingMuxaroDirect();
       }
-      if (typeof window !== 'undefined') {
-        window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
-      }
     }
 
     // Proactive initial ping on mount
     if (typeof pingMuxaroDirect === 'function') {
       pingMuxaroDirect();
     }
-    if (typeof window !== 'undefined') {
-      window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
-    }
     detectBridge();
 
     const handleWindowMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'MUXARO_DIRECT_READY') {
+      if (event.origin && event.origin !== 'null' && event.origin !== window.location.origin) return;
+      if (
+        event.data?.type === 'MUXARO_DIRECT_PONG' ||
+        event.data?.type === 'MUXARO_DIRECT_READY' ||
+        (event.data?.source === 'MUXARO_BRIDGE' && event.data?.type === 'PONG')
+      ) {
         setIsCompanionActive(true);
         setChecking(false);
+        try {
+          sessionStorage.setItem('muxaro_direct_connected', 'true');
+        } catch (_) {}
         if (event.data?.version) {
           const v = String(event.data.version);
           setCompanionVersion(v.startsWith('v') ? v : `v${v}`);
@@ -822,7 +824,7 @@ function DirectHelperContent() {
               </Link>
             ) : (
               <a
-                href="/muxaro-direct.user.js"
+                href="/scripts/muxaro-direct.user.js"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-1.5 px-4 py-3.5 rounded-xl border border-line bg-surface text-xs font-semibold text-content hover:bg-surface-muted transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand text-center"
@@ -854,9 +856,9 @@ function DirectHelperContent() {
                 inputMode="url"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=... or direct media link"
+                placeholder="Paste video, audio, or direct media link…"
                 aria-label="Media link for direct download"
-                className="w-full pl-3 pr-24 py-3 rounded-xl bg-surface-elevated border border-line text-content placeholder:text-content-muted text-xs sm:text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                className="w-full pl-3 pr-24 py-2.5 sm:py-3 rounded-xl bg-surface-elevated border border-line text-content placeholder:text-content-muted placeholder:truncate truncate text-xs sm:text-sm font-mono focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                 <button
@@ -941,7 +943,7 @@ function DirectHelperContent() {
               </Link>
             ) : (
               <a
-                href="/muxaro-direct.user.js"
+                href="/scripts/muxaro-direct.user.js"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="muxaro-btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold"

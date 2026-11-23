@@ -67,41 +67,10 @@ export const onRequestPost: PagesFunction = async (context) => {
     targetFormat === 'wav';
   const videoQuality = targetResolution.replace('p', '');
 
-  // 2. Resolve stream via Cobalt or direct stream extraction
+  // 2. Direct stream URL if source is direct media, otherwise standard download endpoint
   let streamUrl = '';
-  if (sourceUrl) {
-    const cobaltInstances = [
-      'https://api.cobalt.tools',
-      'https://co.wuk.sh',
-      'https://cobalt.canine.tools',
-      'https://cobalt-api.kwiatekm.com',
-    ];
-
-    for (const inst of cobaltInstances) {
-      try {
-        const cRes = await fetch(inst.endsWith('/api/json') ? inst : `${inst}/api/json`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MUXARO/8.0',
-          },
-          body: JSON.stringify({
-            url: sourceUrl,
-            downloadMode: isAudio ? 'audio' : 'auto',
-            audioFormat: isAudio ? targetFormat : undefined,
-            videoQuality: isAudio ? undefined : videoQuality || '1080',
-          }),
-        });
-        if (cRes.ok) {
-          const cData: any = await cRes.json();
-          if (cData?.url) {
-            streamUrl = cData.url;
-            break;
-          }
-        }
-      } catch {}
-    }
+  if (/\.(mp4|webm|mkv|mov|mp3|wav|flac|m4a)($|\?)/i.test(sourceUrl)) {
+    streamUrl = sourceUrl;
   }
 
   const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;

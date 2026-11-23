@@ -27,6 +27,7 @@ import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
 import { api, extractDisplayError } from '@/lib/api-client';
 export { extractDisplayError };
+import { isMuxaroDirectActive } from '@/lib/background-download';
 import {
   normalizeVideoOptions,
   normalizeAudioOptions,
@@ -128,7 +129,7 @@ export default function MediaInspector({ manifest, onJobStarted }: MediaInspecto
     function checkDirect() {
       if (
         typeof window !== 'undefined' &&
-        ((window as any).__MUXARO_DIRECT_ACTIVE__ === true ||
+        (isMuxaroDirectActive() ||
           document.documentElement.getAttribute('data-muxaro-direct') === 'active')
       ) {
         setIsDirectActive(true);

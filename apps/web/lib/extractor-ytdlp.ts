@@ -111,6 +111,25 @@ function getJsRuntimeArgs(): string[] {
   return [];
 }
 
+export function isBotBlockMessage(msg: string): boolean {
+  const lower = (msg || '').toLowerCase();
+  return (
+    lower.includes('sign in to confirm') ||
+    lower.includes("confirm you're not a bot") ||
+    lower.includes('confirm you’re not a bot') ||
+    lower.includes('http error 403') ||
+    lower.includes('403: forbidden') ||
+    lower.includes('403 forbidden') ||
+    lower.includes('automated queries') ||
+    lower.includes('bot detected') ||
+    lower.includes('botguard') ||
+    lower.includes('bot_check') ||
+    lower.includes('too many requests') ||
+    lower.includes('http error 429') ||
+    lower.includes('login required')
+  );
+}
+
 /**
  * Executes yt-dlp with --dump-single-json, force-ipv4 and safe execution arguments
  */
@@ -122,7 +141,9 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
-      '--socket-timeout', '15',
+      '--retries', '0',
+      '--fragment-retries', '0',
+      '--socket-timeout', '8',
       ...getJsRuntimeArgs(),
       targetUrl,
     ];
@@ -136,12 +157,19 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
       },
     });
 
+    let finished = false;
+
     const timer = setTimeout(() => {
+      if (finished) return;
+      finished = true;
       try {
         child.kill('SIGTERM');
       } catch {}
-      reject(new Error('yt-dlp execution timed out'));
-    }, 15000);
+      const timeoutErr = new Error('yt-dlp execution timed out');
+      (timeoutErr as any).code = 'TIMEOUT';
+      (timeoutErr as any).status = 504;
+      reject(timeoutErr);
+    }, 12000);
 
     let stdoutData = '';
     let stderrData = '';
@@ -151,15 +179,31 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
     });
 
     child.stderr.on('data', (chunk) => {
-      stderrData += chunk.toString('utf8');
+      const text = chunk.toString('utf8');
+      stderrData += text;
+      if (!finished && isBotBlockMessage(text)) {
+        finished = true;
+        clearTimeout(timer);
+        try {
+          child.kill('SIGKILL');
+        } catch {}
+        const blockErr = new Error(text.trim() || 'Host blocked request (bot check / HTTP 403).');
+        (blockErr as any).code = 'HOST_BLOCKED';
+        (blockErr as any).status = 403;
+        reject(blockErr);
+      }
     });
 
     child.on('error', (err) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       reject(err);
     });
 
     child.on('close', (code) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       if (code === 0 && stdoutData.trim()) {
         try {
@@ -169,7 +213,13 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
           reject(new Error(`Failed to parse yt-dlp JSON output: ${parseErr.message}`));
         }
       } else {
-        reject(new Error(stderrData.trim() || `yt-dlp exited with code ${code}`));
+        const errMsg = stderrData.trim() || `yt-dlp exited with code ${code}`;
+        const err = new Error(errMsg);
+        if (isBotBlockMessage(errMsg)) {
+          (err as any).code = 'HOST_BLOCKED';
+          (err as any).status = 403;
+        }
+        reject(err);
       }
     });
   });
@@ -240,6 +290,18 @@ export async function extractMediaMetadata(rawUrl: string): Promise<ExtractorRes
     ytdlpData = await runYtDlpDump(trimmedUrl);
   } catch (err: any) {
     ytdlpError = err;
+    if (err?.code === 'HOST_BLOCKED' || isBotBlockMessage(err?.message || '')) {
+      const blockErr = new Error(err.message || 'Host blocked request (bot check / HTTP 403).');
+      (blockErr as any).code = 'HOST_BLOCKED';
+      (blockErr as any).status = 403;
+      throw blockErr;
+    }
+    if (err?.code === 'TIMEOUT') {
+      const timeoutErr = new Error(err.message || 'Media extraction timed out');
+      (timeoutErr as any).code = 'TIMEOUT';
+      (timeoutErr as any).status = 504;
+      throw timeoutErr;
+    }
   }
 
   // If yt-dlp successfully extracted media
@@ -1178,226 +1240,10 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     };
   }
 
-  const is8K = /8k|4320/i.test(title);
-  const is4K = is8K || /4k|2160/i.test(title);
-  const is1440 = is4K || /1440|2k/i.test(title);
-  const isHdr = /hdr/i.test(title);
-
-  const fallbackAllFormats: VideoFormatOption[] = [
-    {
-      id: 'v_4320p',
-      videoFormatId: '702',
-      label: '8K Ultra HD',
-      resolutionHeight: 4320,
-      width: 7680,
-      fps: 60,
-      vcodec: 'av01',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr,
-      requiresMerge: true,
-      estimatedBytes: 1580000000,
-      bitrateKbps: 45000,
-      badge: '8K Ultra HD',
-    },
-    {
-      id: 'v_2160p',
-      videoFormatId: '313',
-      label: '4K Ultra HD',
-      resolutionHeight: 2160,
-      width: 3840,
-      fps: 60,
-      vcodec: 'vp9',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr,
-      requiresMerge: true,
-      estimatedBytes: 650000000,
-      bitrateKbps: 25000,
-      badge: isHdr ? '4K HDR' : '4K UHD',
-    },
-    {
-      id: 'v_1440p',
-      videoFormatId: '271',
-      label: '1440p Quad HD',
-      resolutionHeight: 1440,
-      width: 2560,
-      fps: 60,
-      vcodec: 'vp9',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: true,
-      estimatedBytes: 180000000,
-      bitrateKbps: 12000,
-      badge: '1440p60',
-    },
-    {
-      id: 'v_1080p',
-      videoFormatId: '137',
-      label: '1080p Full HD',
-      resolutionHeight: 1080,
-      width: 1920,
-      fps: 60,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: true,
-      estimatedBytes: 45000000,
-      bitrateKbps: 4500,
-      badge: 'Full HD 60fps',
-    },
-    {
-      id: 'v_720p',
-      videoFormatId: '22',
-      label: '720p HD',
-      resolutionHeight: 720,
-      width: 1280,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: 22000000,
-      bitrateKbps: 2200,
-      badge: 'HD',
-    },
-    {
-      id: 'v_480p',
-      videoFormatId: '135',
-      label: '480p Standard',
-      resolutionHeight: 480,
-      width: 854,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: true,
-      estimatedBytes: 12000000,
-      bitrateKbps: 1100,
-    },
-  ];
-
-  // Provide the complete resolution matrix so all tiers (8K, 4K, 2K, 1080p, 720p, 480p) are selectable
-  const videoFormats = fallbackAllFormats;
-
-  const maxResLabel = is8K ? '8K Ultra HD' : is4K ? '4K Ultra HD' : '1440p Quad HD';
-
-  const audioFormats: AudioFormatOption[] = [
-    {
-      id: 'a_mp3',
-      sourceAudioFormatId: '140',
-      label: 'MP3 High Quality',
-      format: 'mp3',
-      bitrateLabel: '320 kbps',
-      estimatedBytes: 8000000,
-    },
-    {
-      id: 'a_flac',
-      sourceAudioFormatId: '140',
-      label: 'Lossless FLAC',
-      format: 'flac',
-      bitrateLabel: 'Studio Quality',
-      estimatedBytes: 25000000,
-    },
-    {
-      id: 'a_m4a',
-      sourceAudioFormatId: '140',
-      label: 'AAC Audio (M4A)',
-      format: 'm4a',
-      bitrateLabel: '256 kbps',
-      estimatedBytes: 6000000,
-    },
-  ];
-
-  const videoStreams: MediaStream[] = videoFormats.map((f, idx) => ({
-    streamIndex: idx,
-    streamType: 'video',
-    codec: f.vcodec || 'h264',
-    bitrateKbps: f.bitrateKbps || (f.resolutionHeight >= 4320 ? 45000 : f.resolutionHeight >= 2160 ? 25000 : f.resolutionHeight >= 1440 ? 12000 : f.resolutionHeight >= 1080 ? 4500 : 2200),
-    formatId: f.videoFormatId,
-    width: f.width,
-    height: f.resolutionHeight,
-    resolutionLabel: f.label,
-    frameRate: f.fps,
-    fps: f.fps,
-    hdr: Boolean(f.isHdr),
-    estimatedSizeBytes: f.estimatedBytes,
-    sizeIsEstimate: true,
-    recommended: f.resolutionHeight === 1080,
-    isNativeLossless: true,
-    isStreamCopyCandidate: true,
-    transcodeRequired: false,
-    notes: `${f.resolutionHeight}p ${f.fps}fps ${f.isHdr ? 'HDR ' : ''}stream`,
-    url: sourceUrl,
-  }));
-
-  const audioStreams: MediaStream[] = [
-    {
-      streamIndex: 3,
-      streamType: 'audio',
-      codec: 'aac',
-      bitrateKbps: 320,
-      formatId: '140',
-      sampleRateHz: 48000,
-      channels: 2,
-      channelLayout: 'stereo',
-      estimatedSizeBytes: 8000000,
-      sizeIsEstimate: true,
-      recommended: true,
-      isNativeLossless: true,
-      isStreamCopyCandidate: true,
-      transcodeRequired: false,
-      notes: '320 kbps high fidelity audio',
-      url: sourceUrl,
-    },
-  ];
-
-  return {
-    id,
-    assetId: id,
-    platform: 'youtube',
-    mediaType: 'video',
-    title,
-    uploader,
-    author: uploader,
-    uploaderUrl,
-    durationSeconds: resolvedDuration,
-    thumbnailUrl,
-    sourceUrl,
-    originalUrl: sourceUrl,
-    container: 'mp4',
-    fileSizeBytes: videoFormats[0]?.estimatedBytes || 45000000,
-    maxResolutionLabel: maxResLabel,
-    videoFormats,
-    audioFormats,
-    videoStreams,
-    audioStreams,
-    streams: [...videoStreams, ...audioStreams],
-    availableFormats: {
-      videoResolutions: videoFormats.map((v) => v.label),
-      audioCodecs: ['mp3', 'flac', 'm4a'],
-    },
-    rightsCheck: {
-      isPermitted: true,
-      rightsBasis: 'Public media stream inspection',
-    },
-    permitted: true,
-    rightsNote: 'Public video inspection',
-    isCarousel: false,
-    items: [],
-    entries: [],
-    analyzedAt: new Date().toISOString(),
-  };
+  const blockErr = new Error('YouTube requires session verification or bot check (HTTP 403). Direct companion or browser stream required.');
+  (blockErr as any).code = 'HOST_BLOCKED';
+  (blockErr as any).status = 403;
+  throw blockErr;
 }
 
 /**

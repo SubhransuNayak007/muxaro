@@ -12,17 +12,20 @@ export default function Footer() {
           <div className="space-y-3 sm:col-span-2 md:col-span-1">
             <Link
               href="/"
-              className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface w-fit"
+              className="flex items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface w-fit group"
               aria-label="MUXARO Home"
             >
-              <img
-                src="/brand/muxaro-mark-mono.svg"
-                alt=""
-                width={24}
-                height={24}
-                className="w-6 h-6 object-contain text-content"
-                style={{ color: 'currentColor', filter: 'none' }}
-              />
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                className="w-6 h-6 text-content dark:text-white shrink-0 transition-colors"
+                aria-hidden="true"
+              >
+                <rect x="3" y="6" width="3" height="20" fill="currentColor" />
+                <rect x="26" y="6" width="3" height="20" fill="currentColor" />
+                <polygon points="3,6 16,20 29,6 29,10 16,26 3,10" fill="currentColor" />
+                <line x1="3" y1="29" x2="29" y2="29" stroke="currentColor" strokeWidth="1" />
+              </svg>
               <span className="font-sans font-extrabold text-lg tracking-[-0.03em] text-content">
                 MUXARO
               </span>

@@ -26,6 +26,7 @@ import {
   NormalizedVideoOption,
 } from '@/lib/format-normalizer';
 import { useJobStream } from '@/hooks/use-job-stream';
+import { useDeviceDetection } from '@/hooks/useDeviceDetection';
 import { useMuxaroBridge } from '@/hooks/useMuxaroBridge';
 import { useMuxaroSettings } from '@/lib/settings-store';
 import { PlatformIcon, detectPlatform, SupportedPlatform } from './HeroOmnibox';
@@ -167,17 +168,18 @@ export default function AdaptiveMediaCard({
   onReset,
   onJobStarted,
 }: AdaptiveMediaCardProps) {
-  const { isMobile, isInstalled: isDirectBridgeInstalled } = useMuxaroBridge();
+  const { isDesktop, isMobile, isLoaded: isDeviceLoaded } = useDeviceDetection();
+  const { isInstalled: isDirectBridgeInstalled } = useMuxaroBridge();
   const { settings, mounted: settingsMounted } = useMuxaroSettings();
 
   // Normalize Video & Audio Options (Mobile capped to 2K, Desktop up to 8K)
   const allVideoOptions = useMemo(() => normalizeVideoOptions(manifest), [manifest]);
   const videoOptions = useMemo(() => {
-    if (isMobile) {
+    if (isDeviceLoaded && isMobile) {
       return allVideoOptions.filter((opt) => opt.height <= 1440);
     }
     return allVideoOptions;
-  }, [allVideoOptions, isMobile]);
+  }, [allVideoOptions, isDeviceLoaded, isMobile]);
 
   const audioTracks = useMemo(() => normalizeAudioOptions(manifest), [manifest]);
 
@@ -513,6 +515,7 @@ export default function AdaptiveMediaCard({
       }
     } catch (err: unknown) {
       if (directStreamUrl) {
+        console.info('[MUXARO Stream] Direct browser stream active from origin CDN.');
         setFallbackDownloadUrl(directStreamUrl);
         autoTriggeredRef.current = true;
         triggerBrowserDownload(directStreamUrl);
@@ -525,7 +528,20 @@ export default function AdaptiveMediaCard({
         );
         setErrorMessage(null);
       } else {
-        setErrorMessage(extractDisplayError(err, 'Direct stream available below. Click Save File Now to proceed.'));
+        const isBlocked = /(?:youtube\.com|youtu\.be|instagram\.com|instagr\.am)/i.test(manifest.sourceUrl || '');
+        if (isBlocked && isMobile) {
+          console.warn('[MUXARO Handover] Media host blocks datacenter IPs. Desktop Direct or custom worker required.');
+          setErrorMessage('This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.');
+        } else {
+          const displayErr = extractDisplayError(
+            err,
+            isBlocked
+              ? 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.'
+              : 'Direct stream available below. Click Save File Now to proceed.'
+          );
+          console.error('[MUXARO Download Error]', displayErr, err);
+          setErrorMessage(displayErr);
+        }
       }
     } finally {
       setSubmitting(false);
@@ -609,21 +625,25 @@ export default function AdaptiveMediaCard({
 
   const activeChoiceSubline = useMemo(() => {
     if (activeTab === 'video') {
+      const isDirectStream = Boolean(selectedVideoOption && selectedVideoOption.height > 1440);
+      if (isDirectStream) {
+        return 'Direct 4K/8K stream · Processed locally in browser';
+      }
       const isDirectRemux =
         videoContainer === 'mkv' ||
         videoContainer === 'webm' ||
         (selectedVideoOption?.codec && selectedVideoOption.codec.toLowerCase().includes('avc'));
       return isDirectRemux
-        ? 'Lossless remux · Auto-deletes in 60m'
-        : 'Lossless video · AAC audio · 60m auto-delete';
+        ? 'Lossless remux · Cloud storage 60m'
+        : 'Lossless video · AAC audio · Cloud storage 60m';
     }
     if (activeTab === 'audio') {
-      return 'Studio audio · Auto-deletes in 60m';
+      return 'Studio audio · Cloud storage 60m';
     }
     if (activeTab === 'subtitles') {
       return 'Timed caption track · Instant download';
     }
-    return 'ZIP container · Auto-deletes in 60m';
+    return 'ZIP container · Cloud storage 60m';
   }, [activeTab, videoContainer, selectedVideoOption]);
 
   const actionButtonLabel = useMemo(() => {
@@ -690,12 +710,19 @@ export default function AdaptiveMediaCard({
             <span className="text-content-muted">·</span>
             <span>{humanizeCodec(opt.codec)}</span>
 
-            {/* Restrained Micro-Tags: HDR & Best balance */}
-            {opt.height > 1440 && (
+            {/* Restrained Micro-Tags: Desktop Direct vs Cloud */}
+            {opt.height > 1440 ? (
               <>
                 <span className="text-content-muted">·</span>
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-brand-violet/10 text-brand-violet border border-brand-violet/20">
-                  Direct Local
+                  Desktop Direct
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-content-muted">·</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary">
+                  Cloud
                 </span>
               </>
             )}
@@ -947,8 +974,8 @@ export default function AdaptiveMediaCard({
               </div>
             )}
 
-            {/* Desktop 8K/4K Direct Banner */}
-            {!isMobile && selectedVideoOption && selectedVideoOption.height > 1440 && (
+            {/* Desktop 8K/4K Direct Banner - Strictly client-side to prevent SSR hydration mismatch */}
+            {isDeviceLoaded && isDesktop && selectedVideoOption && selectedVideoOption.height > 1440 && (
               <div className="p-3.5 rounded-xl border border-line bg-surface-elevated text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 text-content">
                   <Zap className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
@@ -970,8 +997,8 @@ export default function AdaptiveMediaCard({
               </div>
             )}
 
-            {/* Mobile Device 2K Notice */}
-            {isMobile && (
+            {/* Mobile Device 2K Notice - Strictly client-side to prevent SSR hydration mismatch */}
+            {isDeviceLoaded && isMobile && (
               <div className="p-3 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-center gap-2">
                 <span>📱 Mobile Mode: Server-side stream copy (Up to 2K). Files download natively without browser extensions.</span>
               </div>
@@ -1202,20 +1229,39 @@ export default function AdaptiveMediaCard({
           className="p-3.5 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated text-content text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
         >
           <div className="space-y-0.5">
-            <span className="font-semibold text-content">Direct stream available</span>
+            <span className="font-semibold text-content">
+              {errorMessage?.includes('blocks free cloud servers') ? 'Host Restriction' : 'Direct stream available'}
+            </span>
             <p className="text-content-secondary">
               {errorMessage || stream.error?.message || 'Server processing busy. You can save the direct stream immediately.'}
             </p>
           </div>
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-            <button
-              type="button"
-              onClick={handleStartDownload}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-medium shadow-xs"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Save file now</span>
-            </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+            {errorMessage?.includes('blocks free cloud servers') ? (
+              <>
+                <Link
+                  href="/settings?tab=instances"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-violet text-white text-xs font-medium shadow-xs hover:bg-brand-violet-hover transition-colors"
+                >
+                  <span>Connect Custom Worker</span>
+                </Link>
+                <Link
+                  href="/tools/direct-helper"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-xs font-medium text-content hover:bg-surface transition-colors"
+                >
+                  <span>Desktop Direct</span>
+                </Link>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleStartDownload}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-medium shadow-xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Save file now</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleResetCard}

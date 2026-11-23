@@ -217,8 +217,8 @@ export function ExtractAudioTool() {
                   type="url"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://www.youtube.com/watch?v=... or SoundCloud / Bandcamp URL"
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] focus:border-[var(--muxaro-border-focus)] focus:bg-[var(--muxaro-bg-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-colors duration-150"
+                  placeholder="Paste audio link or media URL…"
+                  className="w-full px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs sm:text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus:bg-[var(--muxaro-bg-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-colors duration-150"
                 />
               </div>
             ) : (

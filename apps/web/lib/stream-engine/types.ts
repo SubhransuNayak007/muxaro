@@ -20,7 +20,7 @@ export type StreamStage =
 export type OutputContainer = 'mp4' | 'webm' | 'mkv' | 'mp3' | 'aac' | 'wav';
 export type VideoCodec = 'h264' | 'vp9' | 'av1' | 'copy';
 export type AudioCodec = 'aac' | 'opus' | 'mp3' | 'copy';
-export type SinkType = 'file-system' | 'service-worker' | 'blob';
+export type SinkType = 'opfs' | 'file-system' | 'service-worker' | 'blob';
 
 export interface WarmupOptions {
   /** Target origin or direct media URL */

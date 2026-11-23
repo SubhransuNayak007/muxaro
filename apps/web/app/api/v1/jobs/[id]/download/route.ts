@@ -4,6 +4,7 @@ import path from 'node:path';
 import { jobManager, OUTPUTS_DIR } from '@/lib/job-manager';
 import { formatContentDisposition, sanitizeFilename } from '@/lib/security-validator';
 import { streamTier0ToResponse, inferMime } from '@/lib/pipeline/tier0-passthrough';
+import { createApiErrorResponse } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -15,6 +16,7 @@ const DOWNLOAD_CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, If-Range, X-Requested-With',
   'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, ETag, Content-Disposition',
   'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'no-store, no-cache, must-revalidate',
 };
 
 export async function OPTIONS() {
@@ -76,6 +78,24 @@ export async function GET(
   const streamParam = searchParams.get('stream') || searchParams.get('url');
 
   const job = jobManager.getJob(id);
+
+  // Early exit: if the job failed due to host bot detection / 403, fail immediately with 403
+  if (job?.status === 'failed') {
+    const isBot =
+      job.error?.code === 'HOST_BLOCKED' ||
+      job.error?.code === 'ERR_YOUTUBE_BOT_CHECK' ||
+      job.stageMessage?.toLowerCase().includes('bot') ||
+      job.stageMessage?.toLowerCase().includes('403');
+    if (isBot) {
+      return createApiErrorResponse(
+        job.error?.message || job.stageMessage || 'Host blocked media download (HTTP 403 / bot check).',
+        'HOST_BLOCKED',
+        undefined,
+        DOWNLOAD_CORS_HEADERS
+      );
+    }
+  }
+
   const fileInfo = resolveJobFile(id, requestedFilename);
   const isInline = searchParams.get('inline') === '1' || searchParams.get('inline') === 'true';
 
@@ -124,13 +144,36 @@ export async function GET(
           disposition: isInline ? 'inline' : 'attachment',
         });
       }
-    } catch (ytStreamErr) {
+    } catch (ytStreamErr: any) {
       console.warn('[Download YouTube Stream Error]', ytStreamErr);
+      const errMsg = String(ytStreamErr?.message || ytStreamErr || '');
+      if (
+        errMsg.toLowerCase().includes('bot') ||
+        errMsg.toLowerCase().includes('sign in') ||
+        errMsg.includes('403') ||
+        errMsg.includes('429')
+      ) {
+        return createApiErrorResponse(
+          'YouTube host blocked automated stream download (HTTP 403 / bot check).',
+          'HOST_BLOCKED',
+          undefined,
+          DOWNLOAD_CORS_HEADERS
+        );
+      }
     }
   }
 
-  // 1b. Generic remote stream proxying (Pinterest, Twitter, TikTok, direct URLs)
-  if (!localFileValid && candidateStreamUrl && !isForbiddenStreamUrl(candidateStreamUrl)) {
+  // 1b. Direct remote stream delivery (Pinterest, Twitter, TikTok, direct URLs)
+  if (!localFileValid && candidateStreamUrl) {
+    if (isForbiddenStreamUrl(candidateStreamUrl)) {
+      return createApiErrorResponse(
+        'Access to internal or restricted stream host is prohibited.',
+        'INVALID_URL',
+        undefined,
+        DOWNLOAD_CORS_HEADERS
+      );
+    }
+
     try {
       const safeFilename = sanitizeFilename(requestedFilename || job?.filename || 'media_download.mp4');
       const rangeHeader = req.headers.get('range');
@@ -146,6 +189,15 @@ export async function GET(
         },
         signal: req.signal,
       });
+
+      if (remoteRes.status === 403 || remoteRes.status === 429) {
+        return createApiErrorResponse(
+          'Remote media host rejected stream request (HTTP 403 Forbidden / Bot Block).',
+          'HOST_BLOCKED',
+          undefined,
+          DOWNLOAD_CORS_HEADERS
+        );
+      }
 
       if ((remoteRes.ok || remoteRes.status === 206) && remoteRes.body) {
         const contentLength = remoteRes.headers.get('content-length')
@@ -165,22 +217,21 @@ export async function GET(
           disposition: isInline ? 'inline' : 'attachment',
         });
       }
-    } catch (proxyErr) {
-      console.warn('[Download Proxy Error]', proxyErr);
+    } catch (proxyErr: any) {
+      console.warn('[Download Stream Error]', proxyErr);
+      if (proxyErr?.name === 'AbortError') {
+        return createApiErrorResponse('Remote stream fetch timed out.', 'TIMEOUT', undefined, DOWNLOAD_CORS_HEADERS);
+      }
     }
   }
 
   // 2. Local disk file delivery via Tier 0 Zero-Hop Pass-Through
   if (!fileInfo || !fs.existsSync(fileInfo.filePath)) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: 'ERR_ARTIFACT_NOT_FOUND',
-          message: `Processed media artifact for job ${id} was not found or has expired. Please initiate a new download.`,
-        },
-      },
-      { status: 404, headers: DOWNLOAD_CORS_HEADERS }
+    return createApiErrorResponse(
+      `Processed media artifact for job ${id} was not found or has expired. Please initiate a new download.`,
+      'INVALID_URL',
+      undefined,
+      DOWNLOAD_CORS_HEADERS
     );
   }
 
@@ -191,15 +242,11 @@ export async function GET(
   const resolvedTarget = path.resolve(filePath);
   const resolvedBase = path.resolve(OUTPUTS_DIR);
   if (!resolvedTarget.startsWith(resolvedBase)) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: 'ERR_ACCESS_DENIED',
-          message: 'Access to file outside the authorized storage directory is prohibited.',
-        },
-      },
-      { status: 403, headers: DOWNLOAD_CORS_HEADERS }
+    return createApiErrorResponse(
+      'Access to file outside authorized storage directory is prohibited.',
+      'INVALID_URL',
+      undefined,
+      DOWNLOAD_CORS_HEADERS
     );
   }
 
@@ -222,6 +269,7 @@ export async function GET(
         status: 416,
         headers: {
           'Content-Range': `bytes */${totalSize}`,
+          ...DOWNLOAD_CORS_HEADERS,
         },
       });
     }

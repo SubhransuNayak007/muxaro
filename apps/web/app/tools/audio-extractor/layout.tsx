@@ -37,8 +37,8 @@ export default function AudioExtractorLayout({
       'Direct bitstream copy (-c:a copy)',
       'Zero quality loss extraction',
       'Instant container stream inspection',
-      'Supports MP4, WebM, MKV, and direct media URLs',
-      '60-minute automatic ephemeral file destruction',
+      'Supports MP4, WebM, MKV, MOV, and AVI',
+      '100% in-browser offline processing (zero server uploads)',
     ],
   });
 
@@ -49,16 +49,16 @@ export default function AudioExtractorLayout({
     path: '/tools/audio-extractor',
     steps: [
       {
-        name: 'Submit Media URL or File',
-        text: 'Paste your media link or upload your container file to inspect the stream layout.',
+        name: 'Select or Drop Video File',
+        text: 'Select or drop your video container file directly in your browser.',
       },
       {
         name: 'Select Audio Extraction Mode',
-        text: 'Choose Original bitstream copy for zero quality loss, or select 320kbps MP3 / FLAC.',
+        text: 'Choose Original bitstream copy for zero quality loss in 1-2 seconds, or select MP3, AAC, WAV, or FLAC.',
       },
       {
         name: 'Download Extracted Audio Track',
-        text: 'Initiate the extraction process and download your clean, isolated audio track immediately.',
+        text: 'Extract client-side in seconds and download your isolated audio track instantly with zero server round-trips.',
       },
     ],
   });

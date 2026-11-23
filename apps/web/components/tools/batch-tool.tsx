@@ -321,8 +321,8 @@ export function BatchTool() {
                   type="url"
                   value={playlistUrl}
                   onChange={(e) => setPlaylistUrl(e.target.value)}
-                  placeholder="https://www.youtube.com/playlist?list=... or album URL"
-                  className="flex-1 px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-sm text-[var(--muxaro-text-primary)] focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none"
+                  placeholder="Paste playlist link or album URL…"
+                  className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs sm:text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
                 <button
                   type="submit"
@@ -338,8 +338,8 @@ export function BatchTool() {
                   type="url"
                   value={manualUrlInput}
                   onChange={(e) => setManualUrlInput(e.target.value)}
-                  placeholder="Paste video/audio URL to append to queue…"
-                  className="flex-1 px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-sm text-[var(--muxaro-text-primary)] focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none"
+                  placeholder="Paste video or audio link to queue…"
+                  className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs sm:text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
                 <button
                   type="submit"

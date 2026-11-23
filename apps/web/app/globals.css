@@ -428,6 +428,24 @@ input:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--dark-text-primary);
 }
 
+/* Input Placeholders: High-Contrast Graceful Ellipsis & Prevent Mid-Word Clipping */
+input::placeholder,
+textarea::placeholder {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--muxaro-text-tertiary);
+  opacity: 1;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder,
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--dark-text-tertiary);
+  opacity: 1;
+}
+
 input[type="text"]:focus,
 input[type="text"]:focus-visible,
 input[type="email"]:focus,

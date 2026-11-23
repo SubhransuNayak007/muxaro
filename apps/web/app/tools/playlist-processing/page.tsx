@@ -330,8 +330,8 @@ export default function PlaylistProcessingPage() {
                     setPlaylistUrl(e.target.value);
                     if (inspectError) setInspectError(null);
                   }}
-                  placeholder="Paste playlist link (e.g. youtube.com/playlist?list=...)"
-                  className="flex-1 px-4 py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted text-sm transition-colors"
+                  placeholder="Paste playlist link or album URL…"
+                  className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-surface border border-line text-content placeholder:text-content-muted placeholder:truncate truncate text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
                 />
                 <button
                   type="submit"

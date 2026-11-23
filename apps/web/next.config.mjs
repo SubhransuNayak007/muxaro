@@ -66,6 +66,32 @@ const nextConfig = {
         ],
       },
       {
+        source: '/tools/:path*',
+        headers: [
+          {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp',
+          },
+        ],
+      },
+      {
+        source: '/(ffmpeg|workers)/:path*',
+        headers: [
+          {
+            key: 'Cross-Origin-Resource-Policy',
+            value: 'cross-origin',
+          },
+          {
+            key: 'Access-Control-Allow-Origin',
+            value: '*',
+          },
+        ],
+      },
+      {
         source: '/(robots.txt|sitemap.xml|llms.txt|llms-full.txt)',
         headers: [
           {

@@ -277,7 +277,20 @@ let isDirectBridgeVerified = false;
 export function pingMuxaroDirect(): void {
   if (typeof window === 'undefined') return;
   try {
-    window.postMessage({ type: 'MUXARO_DIRECT_PING' }, '*');
+    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const origin =
+      window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : '*';
+    window.postMessage(
+      {
+        type: 'MUXARO_DIRECT_PING',
+        source: 'MUXARO_APP',
+        timestamp: Date.now(),
+        nonce,
+      },
+      origin
+    );
   } catch {
     // Ignore postMessage transmission failures in sandboxed contexts
   }
@@ -290,12 +303,24 @@ if (typeof window !== 'undefined') {
       try {
         if (e.source !== window) return;
         if (e.origin && e.origin !== 'null' && e.origin !== window.location.origin) return;
-        if (e.data && typeof e.data === 'object' && e.data.type === 'MUXARO_DIRECT_READY') {
+        if (
+          e.data &&
+          typeof e.data === 'object' &&
+          (e.data.type === 'MUXARO_DIRECT_PONG' ||
+            e.data.type === 'MUXARO_DIRECT_READY' ||
+            (e.data.source === 'MUXARO_BRIDGE' && e.data.type === 'PONG'))
+        ) {
           isDirectBridgeVerified = true;
+          try {
+            sessionStorage.setItem('muxaro_direct_connected', 'true');
+            if (typeof e.data.version === 'string') {
+              sessionStorage.setItem('muxaro_direct_version', e.data.version);
+            }
+          } catch (_) {}
           window.dispatchEvent(
             new CustomEvent('muxaro:direct-ready', {
               detail: {
-                version: typeof e.data.version === 'string' ? e.data.version : '1.0.0',
+                version: typeof e.data.version === 'string' ? e.data.version : '1.2.0',
                 active: true,
               },
             })
@@ -342,7 +367,13 @@ export function initiateDirectDetection(onActive?: () => void): () => void {
     try {
       if (e.source !== window) return;
       if (e.origin && e.origin !== 'null' && e.origin !== window.location.origin) return;
-      if (e.data && typeof e.data === 'object' && e.data.type === 'MUXARO_DIRECT_READY') {
+      if (
+        e.data &&
+        typeof e.data === 'object' &&
+        (e.data.type === 'MUXARO_DIRECT_PONG' ||
+          e.data.type === 'MUXARO_DIRECT_READY' ||
+          (e.data.source === 'MUXARO_BRIDGE' && e.data.type === 'PONG'))
+      ) {
         isDirectBridgeVerified = true;
         notify();
       }
@@ -369,7 +400,7 @@ export function initiateDirectDetection(onActive?: () => void): () => void {
 
 /**
  * Detects whether the MUXARO Direct companion userscript or bridge is active in the current browser window.
- * Checks window global, DOM attributes/dataset, and verified message-bridge state.
+ * Checks verified message-bridge state, session storage, and DOM attributes.
  */
 export function isMuxaroDirectActive(): boolean {
   if (typeof window === 'undefined') return false;
@@ -378,10 +409,12 @@ export function isMuxaroDirectActive(): boolean {
     return true;
   }
 
-  if ((window as any).__MUXARO_DIRECT_ACTIVE__ === true) {
-    isDirectBridgeVerified = true;
-    return true;
-  }
+  try {
+    if (sessionStorage.getItem('muxaro_direct_connected') === 'true') {
+      isDirectBridgeVerified = true;
+      return true;
+    }
+  } catch (_) {}
 
   if (typeof document !== 'undefined' && document.documentElement) {
     const el = document.documentElement;

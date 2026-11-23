@@ -56,7 +56,25 @@ export class ApiClientError extends Error {
   public readonly actionableFeedback: string;
   public readonly userAdvice: string;
 
-  constructor(classified: ClassifiedError, originalError?: unknown) {
+  constructor(classifiedOrMessage: ClassifiedError | string, originalErrorOrStatus?: unknown, options?: { code?: string }) {
+    if (typeof classifiedOrMessage === 'string') {
+      super(classifiedOrMessage);
+      this.name = 'ApiClientError';
+      this.status = typeof originalErrorOrStatus === 'number' ? originalErrorOrStatus : undefined;
+      this.code = options?.code;
+      this.isNetworkError = false;
+      this.isCircuitOpen = false;
+      this.isDnsFailure = false;
+      this.isTimeout = false;
+      this.isServerError = false;
+      this.canRetry = false;
+      this.actionableFeedback = classifiedOrMessage;
+      this.userAdvice = classifiedOrMessage;
+      return;
+    }
+
+    const classified = classifiedOrMessage;
+    const originalError = originalErrorOrStatus;
     super(classified.message);
     this.name = 'ApiClientError';
     this.status = classified.statusCode;

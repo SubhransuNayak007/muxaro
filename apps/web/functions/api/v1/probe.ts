@@ -34,8 +34,12 @@ export const onRequestPost: PagesFunction = async (context) => {
   } catch {
     return jsonResponse(
       {
+        ok: false,
+        code: 'INVALID_URL',
+        status: 400,
+        rawMessage: 'Malformed JSON payload.',
         success: false,
-        error: { code: 'ERR_INVALID_PAYLOAD', message: 'Malformed JSON payload.' },
+        error: { code: 'INVALID_URL', message: 'Malformed JSON payload.' },
         requestId: reqId,
       },
       400,
@@ -48,8 +52,12 @@ export const onRequestPost: PagesFunction = async (context) => {
   if (!rawUrl) {
     return jsonResponse(
       {
+        ok: false,
+        code: 'INVALID_URL',
+        status: 400,
+        rawMessage: 'Please provide a valid media link.',
         success: false,
-        error: { code: 'ERR_EMPTY_URL', message: 'Please provide a valid media link.' },
+        error: { code: 'INVALID_URL', message: 'Please provide a valid media link.' },
         requestId: reqId,
       },
       400,
@@ -81,37 +89,7 @@ export const onRequestPost: PagesFunction = async (context) => {
   let durationSec = 180;
   let isCarousel = false;
   let items: any[] = [];
-
-  // Try Cobalt API or public instances for direct media stream links if available
-  let cobaltStreamUrl: string | undefined;
-  try {
-    const cobaltInstances = [
-      'https://api.cobalt.tools',
-      'https://co.wuk.sh',
-      'https://cobalt.canine.tools',
-      'https://cobalt-api.kwiatekm.com',
-    ];
-    for (const inst of cobaltInstances) {
-      try {
-        const cRes = await fetch(inst.endsWith('/api/json') ? inst : `${inst}/api/json`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MUXARO/8.0',
-          },
-          body: JSON.stringify({ url: rawUrl, videoQuality: '1080' }),
-        });
-        if (cRes.ok) {
-          const cData: any = await cRes.json();
-          if (cData?.url) {
-            cobaltStreamUrl = cData.url;
-            break;
-          }
-        }
-      } catch {}
-    }
-  } catch {}
+  let cobaltStreamUrl: string | undefined = undefined;
 
   // Platform-specific metadata extraction
   if (platform === 'youtube') {
