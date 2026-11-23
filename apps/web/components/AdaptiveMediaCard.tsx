@@ -14,7 +14,9 @@ import {
   Loader2,
   CheckCircle2,
   ArrowDown,
+  Zap,
 } from 'lucide-react';
+import Link from 'next/link';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
 import { api, extractDisplayError } from '@/lib/api-client';
@@ -24,6 +26,8 @@ import {
   NormalizedVideoOption,
 } from '@/lib/format-normalizer';
 import { useJobStream } from '@/hooks/use-job-stream';
+import { useMuxaroBridge } from '@/hooks/useMuxaroBridge';
+import { useMuxaroSettings } from '@/lib/settings-store';
 import { PlatformIcon, detectPlatform, SupportedPlatform } from './HeroOmnibox';
 
 export type SegmentedControlTab = 'video' | 'audio' | 'subtitles' | 'carousel';
@@ -163,8 +167,18 @@ export default function AdaptiveMediaCard({
   onReset,
   onJobStarted,
 }: AdaptiveMediaCardProps) {
-  // Normalize Video & Audio Options up to 8K
-  const videoOptions = useMemo(() => normalizeVideoOptions(manifest), [manifest]);
+  const { isMobile, isInstalled: isDirectBridgeInstalled } = useMuxaroBridge();
+  const { settings, mounted: settingsMounted } = useMuxaroSettings();
+
+  // Normalize Video & Audio Options (Mobile capped to 2K, Desktop up to 8K)
+  const allVideoOptions = useMemo(() => normalizeVideoOptions(manifest), [manifest]);
+  const videoOptions = useMemo(() => {
+    if (isMobile) {
+      return allVideoOptions.filter((opt) => opt.height <= 1440);
+    }
+    return allVideoOptions;
+  }, [allVideoOptions, isMobile]);
+
   const audioTracks = useMemo(() => normalizeAudioOptions(manifest), [manifest]);
 
   // Detected Platform
@@ -182,6 +196,26 @@ export default function AdaptiveMediaCard({
 
   // Audio State
   const [selectedAudioId, setSelectedAudioId] = useState<AudioFormatId>('mp3');
+
+  // Sync with persistent user settings
+  useEffect(() => {
+    if (!settingsMounted) return;
+    if (settings.containerFormat !== 'auto') {
+      setVideoContainer(settings.containerFormat);
+    }
+    if (settings.audioFormat) {
+      setSelectedAudioId(settings.audioFormat);
+    }
+    if (settings.videoQuality !== 'auto') {
+      const targetHeight = parseInt(settings.videoQuality, 10);
+      if (Number.isFinite(targetHeight)) {
+        const match = videoOptions.find((o) => o.height === targetHeight);
+        if (match) {
+          setSelectedVideoId(match.id);
+        }
+      }
+    }
+  }, [settingsMounted, settings.containerFormat, settings.audioFormat, settings.videoQuality, videoOptions]);
 
   // Subtitles State
   const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('English');
@@ -657,6 +691,15 @@ export default function AdaptiveMediaCard({
             <span>{humanizeCodec(opt.codec)}</span>
 
             {/* Restrained Micro-Tags: HDR & Best balance */}
+            {opt.height > 1440 && (
+              <>
+                <span className="text-content-muted">·</span>
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-brand-violet/10 text-brand-violet border border-brand-violet/20">
+                  Direct Local
+                </span>
+              </>
+            )}
+
             {opt.hdr && (
               <>
                 <span className="text-content-muted">·</span>
@@ -901,6 +944,36 @@ export default function AdaptiveMediaCard({
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Desktop 8K/4K Direct Banner */}
+            {!isMobile && selectedVideoOption && selectedVideoOption.height > 1440 && (
+              <div className="p-3.5 rounded-xl border border-line bg-surface-elevated text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 text-content">
+                  <Zap className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                  <span>
+                    {isDirectBridgeInstalled
+                      ? '⚡ MUXARO Direct Active — 8K/4K processes locally in your browser with zero cloud restrictions.'
+                      : '8K/4K media requires MUXARO Direct companion for in-browser local stream processing.'}
+                  </span>
+                </div>
+                {!isDirectBridgeInstalled && (
+                  <Link
+                    href={`/tools/direct-helper?url=${encodeURIComponent(manifest.sourceUrl)}`}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-violet hover:underline shrink-0"
+                  >
+                    <span>Install Helper Script</span>
+                    <ArrowDown className="w-3 h-3" />
+                  </Link>
+                )}
+              </div>
+            )}
+
+            {/* Mobile Device 2K Notice */}
+            {isMobile && (
+              <div className="p-3 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-center gap-2">
+                <span>📱 Mobile Mode: Server-side stream copy (Up to 2K). Files download natively without browser extensions.</span>
               </div>
             )}
           </div>

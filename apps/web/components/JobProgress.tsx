@@ -189,6 +189,22 @@ export default function JobProgress({
   const [autoDownloadEnabled, setAutoDownloadEnabled] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
   const [serverlessRoutingDetected, setServerlessRoutingDetected] = useState<boolean>(false);
+  const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+    const ua = navigator.userAgent || '';
+    const isDesktopOS = /Windows NT|Macintosh|X11; Linux x86_64/i.test(ua);
+    const isMobileUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+
+    if (isDesktopOS && !isMobileUA) {
+      setIsMobileDevice(false);
+      return;
+    }
+
+    const isSmallScreen = window.innerWidth <= 768;
+    setIsMobileDevice(isMobileUA || (navigator.maxTouchPoints > 0 && isSmallScreen && !isDesktopOS));
+  }, []);
 
   const autoDownloadId = useId();
   const jobRef = useRef<ExtendedProcessingJob>(job);
@@ -1025,11 +1041,17 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            Safe to leave this page — files remain in{' '}
-            <Link href="/downloads" className="text-content hover:underline font-medium">
-              My Downloads
-            </Link>{' '}
-            for 60 minutes.
+            {isRateLimitedOrChallenged ? (
+              <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
+            ) : (
+              <span>
+                Safe to leave this page — server-processed files remain in{' '}
+                <Link href="/downloads" className="text-content hover:underline font-medium">
+                  My Downloads
+                </Link>{' '}
+                for 60 minutes.
+              </span>
+            )}
           </div>
         </div>
       )}
@@ -1072,25 +1094,50 @@ export default function JobProgress({
                   <Zap className="w-4 h-4" aria-hidden="true" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-sm sm:text-base font-semibold text-content leading-tight">
+                  <h3 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
                     Direct browser stream ready
                   </h3>
                   <p className="text-xs text-content-secondary mt-1 leading-relaxed">
-                    Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser.
+                    {isMobileDevice
+                      ? 'Cloud servers encountered host restrictions for this media link. Direct stream options or server proxies are available below.'
+                      : 'Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser.'}
                   </p>
                 </div>
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
-                <Link
-                  href={directHelperHref}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
-                >
-                  <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Stream with MUXARO Direct</span>
-                </Link>
+                {!isMobileDevice ? (
+                  <Link
+                    href={directHelperHref}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Stream with MUXARO Direct</span>
+                  </Link>
+                ) : fallbackDirectStream ? (
+                  <a
+                    href={fallbackDirectStream}
+                    download={job.outputFilename || true}
+                    rel="noreferrer"
+                    referrerPolicy="no-referrer"
+                    onClick={triggerBrowserSave}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Download Direct Stream</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                    <span>Retry via Server Proxy</span>
+                  </button>
+                )}
 
-                {fallbackDirectStream && (
+                {fallbackDirectStream && !isMobileDevice && (
                   <a
                     href={fallbackDirectStream}
                     download={job.outputFilename || true}
@@ -1179,11 +1226,17 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            Safe to leave this page — files remain in{' '}
-            <Link href="/downloads" className="text-content hover:underline font-medium">
-              My Downloads
-            </Link>{' '}
-            for 60 minutes.
+            {isRateLimitedOrChallenged ? (
+              <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
+            ) : (
+              <span>
+                Safe to leave this page — server-processed files remain in{' '}
+                <Link href="/downloads" className="text-content hover:underline font-medium">
+                  My Downloads
+                </Link>{' '}
+                for 60 minutes.
+              </span>
+            )}
           </div>
         </div>
       )}

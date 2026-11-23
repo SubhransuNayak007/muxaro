@@ -968,9 +968,10 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
   } catch {
     // 2. Fallback to oEmbed API
     try {
+      const canonicalYtUrl = `https://www.youtube.com/watch?v=${videoId}`;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3500);
-      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(sourceUrl)}&format=json`, {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(canonicalYtUrl)}&format=json`, {
         signal: controller.signal,
       });
       clearTimeout(timeout);
@@ -1286,14 +1287,10 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     },
   ];
 
-  const videoFormats = fallbackAllFormats.filter(f => {
-    if (f.resolutionHeight === 4320 && !is8K) return false;
-    if (f.resolutionHeight === 2160 && !is4K) return false;
-    if (f.resolutionHeight === 1440 && !is1440) return false;
-    return true;
-  });
+  // Provide the complete resolution matrix so all tiers (8K, 4K, 2K, 1080p, 720p, 480p) are selectable
+  const videoFormats = fallbackAllFormats;
 
-  const maxResLabel = is8K ? '8K Ultra HD' : is4K ? '4K Ultra HD' : is1440 ? '1440p Quad HD' : '1080p Full HD';
+  const maxResLabel = is8K ? '8K Ultra HD' : is4K ? '4K Ultra HD' : '1440p Quad HD';
 
   const audioFormats: AudioFormatOption[] = [
     {

@@ -14,6 +14,7 @@ import {
   LogOut,
   Shield,
   ChevronDown,
+  Settings,
 } from 'lucide-react';
 import { api } from '@/lib/api-client';
 import { QuotaStatus } from '@/lib/types';
@@ -218,7 +219,8 @@ export default function Navbar() {
     { href: '/', label: 'Downloader' },
     { href: '/tools', label: 'Tools' },
     { href: '/downloads', label: 'Downloads' },
-    { href: '/dock', label: 'Dock' },
+    { href: '/docs', label: 'Docs' },
+    { href: '/settings', label: 'Settings' },
   ];
 
   const isLinkActive = useCallback(
@@ -472,6 +474,15 @@ export default function Navbar() {
                         <span>Downloads</span>
                       </Link>
                       <Link
+                        href="/settings"
+                        role="menuitem"
+                        onClick={() => setAccountMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3.5 py-2 text-sm text-content-secondary hover:text-content hover:bg-surface-muted transition-colors focus-visible:outline-none focus-visible:bg-surface-muted focus-visible:text-content"
+                      >
+                        <Settings className="w-4 h-4 shrink-0" aria-hidden="true" />
+                        <span>Settings</span>
+                      </Link>
+                      <Link
                         href="/credits"
                         role="menuitem"
                         onClick={() => setAccountMenuOpen(false)}
@@ -538,6 +549,16 @@ export default function Navbar() {
               </Link>
             </div>
           )}
+
+          {/* Settings Shortcut Button */}
+          <Link
+            href="/settings"
+            title="Settings"
+            aria-label="Open settings"
+            className="w-9 h-9 shrink-0 hidden sm:flex items-center justify-center rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+          >
+            <Settings className="w-4 h-4 text-content-secondary" aria-hidden="true" />
+          </Link>
 
           {/* Theme Switcher Button */}
           <button

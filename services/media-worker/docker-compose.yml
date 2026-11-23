@@ -1,0 +1,62 @@
+version: '3.9'
+
+networks:
+  muxaro-worker-net:
+    driver: bridge
+
+volumes:
+  redis_data:
+  worker_scratch:
+
+services:
+  # ----------------------------------------------------------------------------
+  # Redis 7 Message Broker & Job Queue
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: muxaro-worker-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-muxaro_redis_secret}"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - muxaro-worker-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-muxaro_redis_secret}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # Dedicated Media Worker & Stream Pipeline
+  # ----------------------------------------------------------------------------
+  media-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: muxaro-media-worker
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      REDIS_URL: redis://:${REDIS_PASSWORD:-muxaro_redis_secret}@redis:6379/0
+      BULLMQ_CONCURRENCY: 10
+      # Cloudflare R2 / S3 Configuration for Presigned 60-min Downloads
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://<account_id>.r2.cloudflarestorage.com}
+      S3_REGION: auto
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-muxaro-artifacts}
+      S3_PRESIGNED_TTL_SECONDS: 3600
+      TEMP_DIR: /app/temp
+    volumes:
+      - worker_scratch:/app/scratch
+    ports:
+      - "${WORKER_PORT:-5001}:5001"
+    networks:
+      - muxaro-worker-net

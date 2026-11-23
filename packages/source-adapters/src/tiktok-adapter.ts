@@ -21,7 +21,6 @@ import type {
 } from './types.ts';
 import {
   InvalidMediaError,
-  RightsViolationError,
   InspectionTimeoutError,
 } from './errors.ts';
 import { AbuseDetector, RightsValidator } from './rights-validator.ts';
@@ -157,7 +156,7 @@ export class TikTokAdapter implements SourceAdapter {
     } catch (err) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new InspectionTimeoutError(`TikTok inspection timed out after ${effectiveTimeout}ms`);
+        throw new InspectionTimeoutError(effectiveTimeout, url);
       }
       throw err;
     }
@@ -363,12 +362,13 @@ export class TikTokAdapter implements SourceAdapter {
 
   public getCapabilities(): AdapterCapabilities {
     return {
-      canInspect: true,
-      canExtractStreams: true,
-      supportsRangeRequests: true,
-      supportsLiveStreams: false,
-      maxResolution: '1080p',
-      requiresAuthentication: false,
+      canExtractMedia: true,
+      canFetchMetadata: true,
+      canGeneratePreview: true,
+      requiresRightsAttestation: true,
+      supportedContainers: ['mp4'],
+      complianceNotes:
+        'TikTok media adapter inspects public short-form media metadata and streams with user rights attestation.',
     };
   }
 }

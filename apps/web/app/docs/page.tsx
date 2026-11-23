@@ -123,23 +123,23 @@ export default function DocsIndexPage() {
         <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="muxaro-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-md bg-surface-elevated border border-line-subtle flex items-center justify-center text-brand shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-surface-elevated border border-line flex items-center justify-center text-brand shrink-0">
                 <Activity className="w-5 h-5" aria-hidden="true" />
               </div>
               <div>
                 <h2 className="text-base font-semibold text-content">
-                  Studio Dock
+                  Settings &amp; Preferences
                 </h2>
                 <p className="text-sm text-content-secondary mt-1">
-                  Access core studio tools, format specifications, and keyboard shortcuts.
+                  Configure custom media worker instances, 8K stream helpers, appearance, and audio/video options.
                 </p>
               </div>
             </div>
             <Link
-              href="/dock"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-sm bg-surface-elevated border border-line text-sm font-medium text-content hover:border-brand hover:text-brand transition-colors shrink-0"
+              href="/settings"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-surface-elevated border border-line text-sm font-medium text-content hover:border-brand hover:text-brand transition-colors shrink-0"
             >
-              <span>Open Dock</span>
+              <span>Open Settings</span>
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </Link>
           </div>

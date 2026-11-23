@@ -16,6 +16,7 @@
 import * as crypto from 'node:crypto';
 import * as dns from 'node:dns/promises';
 import * as net from 'node:net';
+import * as stream from 'node:stream';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { Agent, type Dispatcher } from 'undici';
@@ -433,11 +434,18 @@ export class SubnetHttpAgent extends http.Agent {
 
   public override createConnection(
     options: http.ClientRequestArgs,
-    callback?: (err: Error | null, socket: net.Socket) => void
-  ): net.Socket {
+    callback?: (err: Error | null, stream: stream.Duplex) => void
+  ): stream.Duplex {
     const enrichedOpts = { ...options };
-    enrichedOpts.localAddress = this.swarm.generateAddress(enrichedOpts.path);
-    return super.createConnection(enrichedOpts, callback);
+    const generated = this.swarm.generateAddress(enrichedOpts.path ?? undefined);
+    if (generated) {
+      enrichedOpts.localAddress = generated;
+    }
+    const result = super.createConnection(enrichedOpts, callback);
+    if (!result) {
+      throw new Error('Failed to create network connection: stream is undefined');
+    }
+    return result;
   }
 }
 
@@ -458,11 +466,18 @@ export class SubnetHttpsAgent extends https.Agent {
 
   public override createConnection(
     options: https.RequestOptions,
-    callback?: (err: Error | null, socket: net.Socket) => void
-  ): net.Socket {
+    callback?: (err: Error | null, stream: stream.Duplex) => void
+  ): stream.Duplex {
     const enrichedOpts = { ...options };
-    enrichedOpts.localAddress = this.swarm.generateAddress(enrichedOpts.path);
-    return super.createConnection(enrichedOpts, callback);
+    const generated = this.swarm.generateAddress(enrichedOpts.path ?? undefined);
+    if (generated) {
+      enrichedOpts.localAddress = generated;
+    }
+    const result = super.createConnection(enrichedOpts, callback);
+    if (!result) {
+      throw new Error('Failed to create network connection: stream is undefined');
+    }
+    return result;
   }
 }
 

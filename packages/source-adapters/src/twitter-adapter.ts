@@ -20,7 +20,6 @@ import type {
 } from './types.ts';
 import {
   InvalidMediaError,
-  RightsViolationError,
   InspectionTimeoutError,
 } from './errors.ts';
 import { AbuseDetector, RightsValidator } from './rights-validator.ts';
@@ -170,7 +169,7 @@ export class TwitterAdapter implements SourceAdapter {
     } catch (err) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new InspectionTimeoutError(`Twitter inspection timed out after ${effectiveTimeout}ms`);
+        throw new InspectionTimeoutError(effectiveTimeout, url);
       }
       throw err;
     }
@@ -359,12 +358,13 @@ export class TwitterAdapter implements SourceAdapter {
 
   public getCapabilities(): AdapterCapabilities {
     return {
-      canInspect: true,
-      canExtractStreams: true,
-      supportsRangeRequests: true,
-      supportsLiveStreams: false,
-      maxResolution: '1080p',
-      requiresAuthentication: false,
+      canExtractMedia: true,
+      canFetchMetadata: true,
+      canGeneratePreview: true,
+      requiresRightsAttestation: true,
+      supportedContainers: ['mp4'],
+      complianceNotes:
+        'Twitter/X media adapter inspects public media metadata and videos with user rights attestation.',
     };
   }
 }

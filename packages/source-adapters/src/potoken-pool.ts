@@ -162,7 +162,7 @@ export class PoTokenPool {
       release: () => {
         // Stateless release
       },
-      reportFailure: (reason: string) => {
+      reportFailure: (_reason: string) => {
         if (candidate) {
           // Accelerate expiry on failure report
           candidate.expiresAt = Date.now() - 1000;

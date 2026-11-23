@@ -8,7 +8,6 @@ import {
   ArrowRight,
   Loader2,
   Check,
-  SlidersHorizontal,
 } from 'lucide-react';
 
 export type SupportedPlatform =
@@ -302,52 +301,6 @@ export default function HeroOmnibox({
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
-
-            {/* Smart Presets Toggle */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setPresetDropdownOpen((prev) => !prev)}
-                aria-expanded={presetDropdownOpen}
-                aria-label="Smart Presets"
-                title="Choose processing preset"
-                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                <span className="text-[11px] font-semibold">{presetLabels[activePreset]}</span>
-              </button>
-
-              {presetDropdownOpen && (
-                <div
-                  role="menu"
-                  aria-label="Smart Presets"
-                  className="absolute right-0 mt-2 w-48 rounded-xl border border-line bg-surface shadow-lg p-1.5 z-50 text-xs"
-                >
-                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-content-secondary border-b border-line mb-1">
-                    Quality Preset
-                  </div>
-                  {(['best', '1080p', 'mp3', 'lossless'] as SmartPreset[]).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setActivePreset(p);
-                        setPresetDropdownOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors duration-150 ${
-                        activePreset === p
-                          ? 'bg-info-bg text-brand-violet font-semibold'
-                          : 'text-content hover:bg-surface-elevated'
-                      }`}
-                    >
-                      <span>{presetLabels[p]}</span>
-                      {activePreset === p && <Check className="w-3.5 h-3.5 text-brand-violet" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
 
             {/* Paste Button (Clipboard API) */}
             <button

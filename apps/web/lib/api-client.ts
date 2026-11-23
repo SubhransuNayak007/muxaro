@@ -56,8 +56,24 @@ function normalizeApiBase(raw: string): string {
 }
 
 export function getApiBaseUrl(): string {
-  // 1. In browser, default to same-origin '/api/v1' unless an explicitly verified or configured reachable URL is provided
+  // 1. In browser, check custom self-hosted worker endpoint from localStorage first
   if (typeof window !== 'undefined') {
+    try {
+      const customWorker = window.localStorage.getItem('muxaro_custom_worker_url')?.trim();
+      if (customWorker && !isDeadOrUnresolvableHost(customWorker)) {
+        // Guard against browser Mixed Content (cannot fetch http:// API from https:// origin)
+        if (
+          typeof window.location !== 'undefined' &&
+          window.location.protocol === 'https:' &&
+          customWorker.toLowerCase().startsWith('http://')
+        ) {
+          // If mixed content would occur, return fallback or warn
+        } else {
+          return normalizeApiBase(customWorker);
+        }
+      }
+    } catch {}
+
     const explicitlyVerified = (
       (window as any).__MUXARO_VERIFIED_API_URL__ ||
       process.env.NEXT_PUBLIC_VERIFIED_API_URL ||

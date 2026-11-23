@@ -1,0 +1,17 @@
+{
+  "name": "@muxaro/media-worker",
+  "version": "1.1.0",
+  "description": "MUXARO Dedicated Media Worker Fleet with native FFmpeg & BullMQ",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.500.0",
+    "@aws-sdk/s3-request-presigner": "^3.500.0",
+    "bullmq": "^5.8.0",
+    "fastify": "^4.26.0",
+    "ioredis": "^5.3.2"
+  }
+}

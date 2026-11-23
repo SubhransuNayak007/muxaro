@@ -34,6 +34,7 @@ import {
 import { api } from '@/lib/api-client';
 import { MediaManifest } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
+import { useMuxaroBridge } from '@/hooks/useMuxaroBridge';
 
 function DirectHelperSkeleton() {
   return (
@@ -51,8 +52,9 @@ function DirectHelperContent() {
 
   const [targetUrl, setTargetUrl] = useState<string>('');
   const [inputValue, setInputValue] = useState<string>('');
+  const { isInstalled: isBridgeInstalled, bridgeVersion: hookBridgeVersion, isMobile } = useMuxaroBridge();
   const [isCompanionActive, setIsCompanionActive] = useState<boolean>(false);
-  const [companionVersion, setCompanionVersion] = useState<string>('v1.0.0');
+  const [companionVersion, setCompanionVersion] = useState<string>('v1.1.0');
   const [checking, setChecking] = useState<boolean>(true);
   const [selectedFormat, setSelectedFormat] = useState<'mp4' | 'mp3'>('mp4');
   const [selectedQuality, setSelectedQuality] = useState<string>('best');
@@ -132,6 +134,17 @@ function DirectHelperContent() {
       active = false;
     };
   }, [targetUrl]);
+
+  // Sync bidirectional useMuxaroBridge state
+  useEffect(() => {
+    if (isBridgeInstalled) {
+      setIsCompanionActive(true);
+      setChecking(false);
+      if (hookBridgeVersion) {
+        setCompanionVersion(hookBridgeVersion.startsWith('v') ? hookBridgeVersion : `v${hookBridgeVersion}`);
+      }
+    }
+  }, [isBridgeInstalled, hookBridgeVersion]);
 
   // Monitor MUXARO Direct companion userscript bridge
   useEffect(() => {
@@ -890,15 +903,19 @@ function DirectHelperContent() {
               aria-hidden="true"
             />
             <div>
-              <h2 className="text-base font-semibold text-content">
-                {isCompanionActive
+              <h2 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                {isMobile
+                  ? 'Mobile Server-Side Download Ready'
+                  : isCompanionActive
                   ? `MUXARO Direct is Active (${companionVersion})`
                   : checking
                   ? 'Detecting MUXARO Direct…'
-                  : 'MUXARO Direct Not Installed Yet'}
+                  : 'MUXARO Direct (Desktop Companion)'}
               </h2>
               <p className="text-xs text-content-secondary mt-0.5">
-                {isCompanionActive
+                {isMobile
+                  ? 'Mobile devices use our high-speed serverless and media worker pipeline. Stream directly to your phone storage with zero browser extensions.'
+                  : isCompanionActive
                   ? 'Browser stream bridge is active and ready. All downloads run with zero cloud restrictions at your ISP speed.'
                   : 'Install the lightweight companion script below for direct browser streaming without cloud rate limits.'}
               </p>
@@ -906,7 +923,15 @@ function DirectHelperContent() {
           </div>
 
           <div className="self-end sm:self-center">
-            {isCompanionActive ? (
+            {isMobile ? (
+              <Link
+                href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+                className="muxaro-btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold"
+              >
+                <Download className="w-4 h-4" aria-hidden="true" />
+                <span>Download on Mobile</span>
+              </Link>
+            ) : isCompanionActive ? (
               <Link
                 href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
                 className="muxaro-btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold"
@@ -962,113 +987,145 @@ function DirectHelperContent() {
         </div>
       </section>
 
-      {/* 2-Step Setup Instructions */}
-      <section className="p-6 sm:p-8 rounded-2xl border border-line bg-surface space-y-6">
-        <h2 className="text-lg font-bold text-content">Easy 2-Step Setup (Takes 30 Seconds)</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Step 1 */}
-          <div className="p-5 rounded-xl border border-line bg-surface-elevated space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center text-xs font-bold">
-                1
-              </span>
-              <h3 className="text-sm font-semibold text-content">Install a Script Manager</h3>
+      {/* 2-Step Setup Instructions (Desktop) OR Mobile Guidance Card */}
+      {isMobile ? (
+        <section className="p-6 sm:p-8 rounded-2xl border border-line bg-surface space-y-5">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-brand text-white flex items-center justify-center shrink-0">
+              <Download className="w-5 h-5" aria-hidden="true" />
             </div>
-            <p className="text-xs text-content-secondary leading-relaxed">
-              Install Violentmonkey (recommended, fast, open-source) or Tampermonkey on your favorite browser:
-            </p>
-            <div className="flex flex-wrap gap-2 text-xs">
-              <a
-                href="https://violentmonkey.github.io/get-it/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-              >
-                <span>Violentmonkey (All Browsers)</span>
-                <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
-              </a>
-              <a
-                href="https://www.tampermonkey.net/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-              >
-                <span>Tampermonkey</span>
-                <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
-              </a>
+            <div>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                Mobile Native Download Enabled
+              </h2>
+              <p className="text-xs text-content-secondary mt-0.5 leading-relaxed">
+                Mobile browsers (Android Chrome, iOS Safari, Firefox Mobile) do not support userscript managers. MUXARO routes your media through our high-speed server pipeline with zero client extensions required.
+              </p>
             </div>
           </div>
 
-          {/* Step 2 */}
-          <div className="p-5 rounded-xl border border-line bg-surface-elevated space-y-4">
-            <div className="flex items-center gap-3">
-              <span
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                  isCompanionActive ? 'bg-success text-white' : 'bg-brand text-white'
-                }`}
-              >
-                {isCompanionActive ? <Check className="w-4 h-4" aria-hidden="true" /> : '2'}
-              </span>
-              <h3 className="text-sm font-semibold text-content">Activate MUXARO Direct</h3>
+          <div className="p-4 rounded-xl border border-line bg-surface-elevated flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="text-xs text-content-secondary space-y-0.5">
+              <p className="font-semibold text-content">Ready to download on your phone:</p>
+              <p>Streams save directly to your mobile downloads folder with native playback metadata.</p>
             </div>
-            <p className="text-xs text-content-secondary leading-relaxed">
-              {isCompanionActive
-                ? 'MUXARO Direct userscript is running in your browser. All streaming requests route seamlessly through your local connection.'
-                : 'Click the button below. Your script manager will automatically open a confirmation tab. Click Install.'}
-            </p>
-            <div>
-              {isCompanionActive ? (
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-bg text-success text-xs font-semibold border border-success/30">
-                    <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-                    <span>Active &amp; Connected ({companionVersion})</span>
-                  </span>
-                  <Link
-                    href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                  >
-                    <span>Go to Downloader</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
-                  </Link>
-                </div>
-              ) : (
+            <Link
+              href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+              className="muxaro-btn-primary inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold shrink-0"
+            >
+              <Download className="w-4 h-4" aria-hidden="true" />
+              <span>Open Mobile Downloader</span>
+            </Link>
+          </div>
+        </section>
+      ) : (
+        <section className="p-6 sm:p-8 rounded-2xl border border-line bg-surface space-y-6">
+          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">Easy 2-Step Setup (Takes 30 Seconds)</h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Step 1 */}
+            <div className="p-5 rounded-xl border border-line bg-surface-elevated space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="w-7 h-7 rounded-full bg-brand text-white flex items-center justify-center text-xs font-bold">
+                  1
+                </span>
+                <h3 className="text-sm font-semibold text-content">Install a Script Manager</h3>
+              </div>
+              <p className="text-xs text-content-secondary leading-relaxed">
+                Install Violentmonkey (recommended, fast, open-source) or Tampermonkey on your favorite browser:
+              </p>
+              <div className="flex flex-wrap gap-2 text-xs">
                 <a
-                  href="/muxaro-direct.user.js"
+                  href="https://violentmonkey.github.io/get-it/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="muxaro-btn-primary inline-flex items-center gap-2 px-4 py-2 text-xs font-bold"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 >
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Install MUXARO Direct Script</span>
+                  <span>Violentmonkey (All Browsers)</span>
+                  <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
                 </a>
-              )}
+                <a
+                  href="https://www.tampermonkey.net/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  <span>Tampermonkey</span>
+                  <ExternalLink className="w-3 h-3 text-content-muted" aria-hidden="true" />
+                </a>
+              </div>
+            </div>
+
+            {/* Step 2 */}
+            <div className="p-5 rounded-xl border border-line bg-surface-elevated space-y-4">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                    isCompanionActive ? 'bg-success text-white' : 'bg-brand text-white'
+                  }`}
+                >
+                  {isCompanionActive ? <Check className="w-4 h-4" aria-hidden="true" /> : '2'}
+                </span>
+                <h3 className="text-sm font-semibold text-content">Activate MUXARO Direct</h3>
+              </div>
+              <p className="text-xs text-content-secondary leading-relaxed">
+                {isCompanionActive
+                  ? 'MUXARO Direct userscript is running in your browser. All streaming requests route seamlessly through your local connection.'
+                  : 'Click the button below. Your script manager will automatically open a confirmation tab. Click Install.'}
+              </p>
+              <div>
+                {isCompanionActive ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-success-bg text-success text-xs font-semibold border border-success/30">
+                      <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                      <span>Active &amp; Connected ({companionVersion})</span>
+                    </span>
+                    <Link
+                      href={targetUrl ? `/?url=${encodeURIComponent(targetUrl)}` : '/'}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-muted text-content text-xs font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                      <span>Go to Downloader</span>
+                      <ArrowRight className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
+                    </Link>
+                  </div>
+                ) : (
+                  <a
+                    href="/muxaro-direct.user.js"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="muxaro-btn-primary inline-flex items-center gap-2 px-4 py-2 text-xs font-bold"
+                  >
+                    <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Install MUXARO Direct Script</span>
+                  </a>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Chrome Manifest V3 instructions callout */}
-        <div className="p-4 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-start gap-3">
-          <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <div className="space-y-1">
-            <p className="font-semibold text-content">Using Chrome, Brave, or Edge?</p>
-            <p className="leading-relaxed">
-              Enable &apos;Allow User Scripts&apos; in{' '}
-              <code className="px-1.5 py-0.5 rounded bg-surface border border-line font-mono text-content text-[11px]">
-                chrome://extensions
-              </code>
-              {' '}➔ Tampermonkey/Violentmonkey Details if the script does not activate automatically.
+          {/* Chrome Manifest V3 instructions callout */}
+          <div className="p-4 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-start gap-3">
+            <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="space-y-1">
+              <p className="font-semibold text-content">Using Chrome, Brave, or Edge?</p>
+              <p className="leading-relaxed">
+                Enable &apos;Allow User Scripts&apos; in{' '}
+                <code className="px-1.5 py-0.5 rounded bg-surface border border-line font-mono text-content text-[11px]">
+                  chrome://extensions
+                </code>
+                {' '}➔ Tampermonkey/Violentmonkey Details if the script does not activate automatically.
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-surface-muted text-xs text-content-secondary flex items-start gap-3">
+            <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <p>
+              Once installed, whenever you visit YouTube, a convenient <strong>[⚡ MUXARO Direct]</strong> button will appear right under videos. You can also click <strong>Download with MUXARO Direct</strong> from any download error card to stream immediately with zero cloud restrictions.
             </p>
           </div>
-        </div>
-
-        <div className="p-4 rounded-xl bg-surface-muted text-xs text-content-secondary flex items-start gap-3">
-          <Info className="w-4 h-4 text-brand flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <p>
-            Once installed, whenever you visit YouTube, a convenient <strong>[⚡ MUXARO Direct]</strong> button will appear right under videos. You can also click <strong>Download with MUXARO Direct</strong> from any download error card to stream immediately with zero cloud restrictions.
-          </p>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Architecture Transparency Note */}
       <section className="text-center text-xs text-content-muted space-y-1">

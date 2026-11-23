@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         MUXARO Direct - High-Speed Stream Downloader
 // @namespace    https://muxaro.pages.dev/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Client-side high-speed stream downloader for MUXARO. Enables direct browser streaming with zero limits.
 // @author       MUXARO Engineering
 // @match        *://muxaro.pages.dev/*
 // @match        *://*.muxaro.pages.dev/*
 // @match        *://*-muxaro.pages.dev/*
-// @match        https://muxaro.vercel.app/*
 // @match        https://*.vercel.app/*
+// @match        https://muxaro.vercel.app/*
 // @match        http://localhost:*/*
 // @match        http://127.0.0.1:*/*
 // @match        https://www.youtube.com/*
@@ -26,7 +26,7 @@
 (function () {
   'use strict';
 
-  const MUXARO_VERSION = '1.0.0';
+  const MUXARO_VERSION = '1.1.0';
 
   // 1. Integration on MUXARO Web Application (muxaro.pages.dev / *.muxaro.pages.dev / localhost / 127.0.0.1)
   const isMuxaroHost =
@@ -67,7 +67,17 @@
       try {
         const targetOrigin = getSafeTargetOrigin();
 
-        // 1. Overcome Sandbox Isolation via window.postMessage handshake
+        // 1. Overcome Sandbox Isolation via window.postMessage handshake (Dual-Format for 100% Interop)
+        window.postMessage(
+          {
+            source: 'MUXARO_BRIDGE',
+            type: 'PONG',
+            version: MUXARO_VERSION,
+            active: true,
+          },
+          targetOrigin
+        );
+
         window.postMessage(
           {
             type: 'MUXARO_DIRECT_READY',
@@ -118,7 +128,11 @@
       if (event.source !== window || !event.data || typeof event.data !== 'object') return;
       if (event.origin && event.origin !== 'null' && event.origin !== window.location.origin) return;
 
-      if (event.data.type === 'MUXARO_DIRECT_PING') {
+      if (
+        event.data.type === 'MUXARO_DIRECT_PING' ||
+        (event.data.source === 'MUXARO_APP' && event.data.type === 'PING') ||
+        event.data.type === 'PING'
+      ) {
         announce();
         return;
       }
