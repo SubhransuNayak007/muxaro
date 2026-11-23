@@ -13,7 +13,19 @@
       "@muxaro/shared": ["../../packages/shared/src/index.ts"],
       "@muxaro/shared/*": ["../../packages/shared/src/*"],
       "@muxaro/db": ["../../packages/db/src/index.ts"],
-      "@muxaro/db/*": ["../../packages/db/src/*"]
+      "@muxaro/db/*": ["../../packages/db/src/*"],
+      "@vyro/security": ["../../security/src/index.ts"],
+      "@vyro/security/*": ["../../security/src/*"],
+      "@vyro/entitlements": ["../../packages/entitlements/src/index.ts"],
+      "@vyro/entitlements/*": ["../../packages/entitlements/src/*"],
+      "@vyro/source-adapters": ["../../packages/source-adapters/src/index.ts"],
+      "@vyro/source-adapters/*": ["../../packages/source-adapters/src/*"],
+      "@muxaro/security": ["../../security/src/index.ts"],
+      "@muxaro/security/*": ["../../security/src/*"],
+      "@muxaro/entitlements": ["../../packages/entitlements/src/index.ts"],
+      "@muxaro/entitlements/*": ["../../packages/entitlements/src/*"],
+      "@muxaro/source-adapters": ["../../packages/source-adapters/src/index.ts"],
+      "@muxaro/source-adapters/*": ["../../packages/source-adapters/src/*"]
     }
   },
   "include": [

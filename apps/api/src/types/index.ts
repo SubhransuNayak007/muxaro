@@ -103,6 +103,7 @@ export interface MediaAssetInfo {
 }
 
 export interface CreateJobInput {
+  jobId?: string;
   mediaAssetId?: string;
   mediaUrl?: string;
   sourceUrl?: string;
@@ -124,6 +125,7 @@ export interface CreateJobInput {
 }
 
 export interface MergeJobInput {
+  jobId?: string;
   videoAssetId?: string;
   videoUrl?: string;
   audioAssetId?: string;
@@ -131,6 +133,11 @@ export interface MergeJobInput {
   targetFormat: string;
   audioOffsetMs?: number;
   idempotencyKey: string;
+  title?: string;
+  userId?: string;
+  ownerTier?: PriorityTier;
+  requestId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface JobOutputArtifact {

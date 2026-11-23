@@ -14,6 +14,7 @@ import {
   classifyMedia,
   deriveTitleFromUrl,
   type MediaManifest,
+  type MediaStream as SourceMediaStream,
   type RightsDeclaration,
 } from '@vyro/source-adapters';
 import { validateUrlForSsrf, validateSafePath } from '@vyro/security';
@@ -690,7 +691,7 @@ export class AdapterService {
           thumbnailUrl: manifest.thumbnailUrl,
           durationSeconds: manifest.durationSeconds,
           container: manifest.container || 'mp4',
-          streams: manifest.streams.map((stream, idx) => ({
+          streams: manifest.streams.map((stream: SourceMediaStream, idx: number) => ({
             index: idx,
             type: stream.streamType === 'audio' ? 'AUDIO' : 'VIDEO',
             codec: stream.codec || (stream.streamType === 'audio' ? 'aac' : 'h264'),

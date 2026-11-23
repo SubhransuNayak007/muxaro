@@ -719,7 +719,7 @@ export class QueueService extends EventEmitter {
   ): Promise<JobRecord> {
     this.assertBackpressureCapacity();
 
-    const jobId = generateJobId();
+    const jobId = input.jobId || generateJobId();
     const now = new Date().toISOString();
     const resolvedUrl = input.mediaUrl || input.sourceUrl;
     const sourceAsset = input.mediaAssetId ? adapterService.getAsset(input.mediaAssetId) : undefined;
@@ -816,7 +816,7 @@ export class QueueService extends EventEmitter {
   ): Promise<JobRecord> {
     this.assertBackpressureCapacity();
 
-    const jobId = generateJobId();
+    const jobId = input.jobId || generateJobId();
     const now = new Date().toISOString();
     const sourceAsset = input.videoAssetId ? adapterService.getAsset(input.videoAssetId) : undefined;
     const priorityWeight = TIER_PRIORITY_WEIGHTS[ownerTier];

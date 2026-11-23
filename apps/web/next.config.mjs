@@ -2,11 +2,13 @@
 const isCloudflarePages = process.env.CLOUDFLARE_PAGES === '1';
 
 const externalApiUrl = process.env.API_INTERNAL_URL?.trim();
+const enableExplicitProxy = process.env.ENABLE_BACKEND_PROXY === '1' || process.env.ENABLE_BACKEND_PROXY === 'true';
 const hasExternalBackend = Boolean(
   externalApiUrl &&
-  !externalApiUrl.includes('127.0.0.1') &&
-  !externalApiUrl.includes('localhost') &&
-  !/api\.muxaro\.app|muxaro-api\.internal/i.test(externalApiUrl)
+  (enableExplicitProxy ||
+    (!externalApiUrl.includes('127.0.0.1') &&
+     !externalApiUrl.includes('localhost') &&
+     !/api\.muxaro\.app|muxaro-api\.internal/i.test(externalApiUrl)))
 );
 
 const nextConfig = {

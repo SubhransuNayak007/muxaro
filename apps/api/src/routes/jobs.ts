@@ -41,6 +41,7 @@ import {
 } from '@muxaro/db';
 import { getFastIoQueue, getTranscodeQueue, getBatchQueue } from '../lib/queues.js';
 import { getS3Client, getStorageConfig, generateSignedDownloadUrl } from '../lib/s3.js';
+import { queueService } from '../services/queue.service.js';
 import {
   mintScopedWorkerTicket,
   verifyProgressToken,
@@ -493,10 +494,12 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
           'Connection': 'keep-alive',
         });
 
+        const isYouTube = /youtu\.?be/i.test(sourceUrl);
         const ytdlpArgs = [
           '--no-warnings',
           '--no-playlist',
           '--js-runtimes', 'deno,node',
+          ...(isYouTube ? ['--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web', '--force-ipv4'] : []),
           '-f', rawBody.formatId || (targetExt === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best'),
           '-o', '-',
           '--',
@@ -793,8 +796,8 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     // 11. Dispatch Job to Designated BullMQ Queue with Scoped Worker Ticket
+    let resolvedInputStorageKey: string | undefined;
     try {
-      let resolvedInputStorageKey: string | undefined;
       if (body.uploadSessionId) {
         const uploadCandidates = [
           path.resolve(process.cwd(), '.muxaro-uploads', body.uploadSessionId),
@@ -882,7 +885,31 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         );
       }
     } catch (queueErr) {
-      request.log.error({ err: queueErr, jobId }, '[Jobs] Failed to push job to BullMQ lane queue');
+      request.log.warn({ err: queueErr, jobId }, '[Jobs] Failed to push job to BullMQ lane queue, activating in-process QueueService fallback');
+      try {
+        await queueService.enqueueJob(
+          {
+            jobId,
+            operation:
+              body.tool === 'extract_audio'
+                ? 'EXTRACT_AUDIO'
+                : body.tool === 'merge_av'
+                ? 'MERGE_AUDIO_VIDEO'
+                : 'TRANSCODE_VIDEO',
+            sourceUrl: body.sourceUrl,
+            mediaUrl: body.sourceUrl,
+            localFilePath: resolvedInputStorageKey,
+            targetFormat: body.targetFormat,
+            targetResolution: body.targetResolution,
+            formatId: (body as { formatId?: string }).formatId,
+            idempotencyKey: body.idempotencyKey,
+            ownerTier: userTier === 'pro' ? 'PREMIUM' : userTier === 'free_account' ? 'REGISTERED' : 'GUEST',
+          },
+          request.user?.id || `guest:${guestHash}`
+        );
+      } catch (fallbackErr) {
+        request.log.error({ err: fallbackErr, jobId }, '[Jobs] In-process fallback execution failed');
+      }
     }
 
     const responseData = formatJobResponse(insertedJob);
@@ -960,10 +987,12 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       'Connection': 'keep-alive',
     });
 
+    const isYouTube = /youtu\.?be/i.test(targetUrl);
     const ytdlpArgs = [
       '--no-warnings',
       '--no-playlist',
       '--js-runtimes', 'deno,node',
+      ...(isYouTube ? ['--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web', '--force-ipv4'] : []),
       '-f', targetFormat === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best',
       '-o', '-',
       '--',
@@ -1014,12 +1043,34 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       .where(eq(mediaJobs.id, id))
       .limit(1);
 
-    if (!dbJob && !redisState) {
+    const inProcessJob = !dbJob && !redisState ? queueService.getJob(id) : undefined;
+
+    if (!dbJob && !redisState && !inProcessJob) {
       throw MuxaroError.notFound(`Job ${id} not found`);
     }
 
-    const job = { ...(dbJob || {}), ...(redisState || {}) };
-    assertJobOwnership(job as any, request);
+    let job: any;
+    if (inProcessJob) {
+      job = {
+        id: inProcessJob.jobId,
+        tool: inProcessJob.operation === 'EXTRACT_AUDIO' ? 'extract_audio' : 'convert_video',
+        status: inProcessJob.status.toLowerCase(),
+        lane: inProcessJob.processingLane || 'fast_io',
+        priority: inProcessJob.priorityWeight,
+        targetFormat: inProcessJob.targetFormat,
+        targetResolution: inProcessJob.targetResolution,
+        progressPercent: String(inProcessJob.progress || 0),
+        stage: inProcessJob.stage,
+        stageMessage: inProcessJob.stageMessage,
+        downloadUrl: inProcessJob.downloadUrl,
+        expiresAt: inProcessJob.expiresAt || new Date(Date.now() + 3600 * 1000).toISOString(),
+        createdAt: inProcessJob.createdAt,
+        updatedAt: inProcessJob.updatedAt,
+      };
+    } else {
+      job = { ...(dbJob || {}), ...(redisState || {}) };
+      assertJobOwnership(job as any, request);
+    }
 
     const responseData = formatJobResponse(job as any);
     return reply.status(200).send({

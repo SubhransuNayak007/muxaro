@@ -182,12 +182,30 @@ export class StreamPipeline {
       const safeInfo = await assertSafeMediaUrl(inputSource);
       inputSource = safeInfo.canonicalUrl || inputSource;
 
+      const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(inputSource);
+
       // 1b. Spawn yt-dlp in streaming mode (--js-runtimes deno,node -q --no-warnings -o -)
       const ytdlpArgs = [
         '--js-runtimes', 'deno,node',
         '-q',
         '--no-warnings',
+        '--force-ipv4',
       ];
+      if (isYouTube) {
+        ytdlpArgs.push('--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web');
+      }
+
+      const cookieCandidates = [
+        process.env.YTDLP_COOKIES_FILE,
+        path.resolve(process.cwd(), '.muxaro-data', 'cookies.txt'),
+        path.resolve(process.cwd(), 'storage', 'cookies.txt'),
+        path.resolve(os.tmpdir(), 'muxaro-data', 'cookies.txt'),
+      ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
+
+      if (cookieCandidates.length > 0) {
+        ytdlpArgs.push('--cookies', cookieCandidates[0]);
+      }
+
       if (!safeInfo.isPlaylist && job.tool !== 'batch_playlist') {
         ytdlpArgs.push('--no-playlist');
       }
@@ -197,6 +215,8 @@ export class StreamPipeline {
       } else if (isRedditOrFacebook || job.targetResolution === '4K' || job.targetResolution === '8K') {
         // Enforce 8K Lossless Remuxing Rules: Reddit/Facebook HD & 4K/8K: bestvideo+bestaudio/best so audio is never dropped
         ytdlpArgs.push('-f', 'bestvideo+bestaudio/best');
+      } else {
+        ytdlpArgs.push('-f', 'bv*[height<=1080]+ba/b[height<=1080]/best');
       }
       ytdlpArgs.push('-o', '-', inputSource);
 

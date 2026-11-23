@@ -135,6 +135,7 @@ export function isBotBlockMessage(msg: string): boolean {
  */
 async function runYtDlpDump(targetUrl: string): Promise<any> {
   return new Promise((resolve, reject) => {
+    const isYt = /(?:youtube\.com|youtu\.be)/i.test(targetUrl);
     const args = [
       '--dump-single-json',
       '--force-ipv4',
@@ -143,7 +144,8 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
       '--skip-download',
       '--retries', '0',
       '--fragment-retries', '0',
-      '--socket-timeout', '8',
+      '--socket-timeout', '12',
+      ...(isYt ? ['--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web'] : []),
       ...getJsRuntimeArgs(),
       targetUrl,
     ];

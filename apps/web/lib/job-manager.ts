@@ -496,6 +496,8 @@ class JobManager {
         return;
       }
 
+      const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(job.sourceUrl);
+
       // Configure yt-dlp arguments with high-speed cut-through flags
       const args: string[] = [
         '--force-ipv4',
@@ -506,8 +508,21 @@ class JobManager {
         '--force-overwrites',
         '--no-part',
         '--socket-timeout', '30',
+        ...(isYouTube ? ['--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web'] : []),
         ...getJsRuntimeArgs(),
       ];
+
+      // Attach cookies if available on disk or from env
+      const cookieCandidates = [
+        process.env.YTDLP_COOKIES_FILE,
+        path.resolve(process.cwd(), '.muxaro-data', 'cookies.txt'),
+        path.resolve(process.cwd(), 'storage', 'cookies.txt'),
+        path.resolve(os.tmpdir(), 'muxaro-data', 'cookies.txt'),
+      ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
+
+      if (cookieCandidates.length > 0) {
+        args.push('--cookies', cookieCandidates[0]);
+      }
 
       // Format selection with resilient fallback to avoid format errors
       const height = parseInt(job.targetResolution || '1080', 10) || 1080;
@@ -544,7 +559,16 @@ class JobManager {
       try {
         await this.runYtDlpDownload(job, args, signal, isAudioOnly);
       } catch (dlErr: any) {
-        if (dlErr?.code === 'ENOENT' || dlErr?.message?.includes('ENOENT')) {
+        const isRecoverable =
+          dlErr?.code === 'ENOENT' ||
+          dlErr?.message?.includes('ENOENT') ||
+          dlErr?.message?.includes('403') ||
+          dlErr?.message?.includes('Forbidden') ||
+          dlErr?.message?.includes('bot') ||
+          dlErr?.code === 'ERR_PROCESS_EXIT';
+
+        if (isRecoverable) {
+          console.warn('[JobManager] Direct yt-dlp download encountered an issue, attempting cloud fallback:', dlErr?.message);
           await this.executeCloudFallback(job, finalPath, isAudioOnly, signal);
           return;
         }
@@ -1027,8 +1051,7 @@ class JobManager {
           errMessage.includes('429') ||
           errMessage.includes('LOGIN_REQUIRED') ||
           errMessage.includes('bot') ||
-          errMessage.includes('Status code') ||
-          isServerless();
+          errMessage.includes('Status code');
 
         if (isBotOrDatacenterBlock) {
           const botMsg = 'YouTube requires session verification on cloud servers (BotGuard check). Use MUXARO Direct companion or the browser stream helper below to stream and save this media directly to your device.';
