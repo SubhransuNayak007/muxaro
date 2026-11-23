@@ -36,6 +36,8 @@ export interface VideoProcessingOptions {
   maxBitrateKbps?: number;
   audioCodec?: AudioCodecTarget;
   audioBitrateKbps?: number;
+  threads?: number;
+  isFragmentedMp4?: boolean;
   timeoutMs?: number;
   onProgress?: ProgressCallback;
 }
@@ -72,8 +74,11 @@ export interface MergeOptions {
   audioInputPath: string;
   outputPath: string;
   targetContainer?: VideoContainer;
+  targetResolution?: ResolutionTier;
   audioOffsetMs?: number; // Positive = audio delayed; Negative = audio advanced
   preferStreamCopy?: boolean; // Attempt -c:v copy -c:a copy if codecs are compatible
+  threads?: number;
+  isFragmentedMp4?: boolean;
   timeoutMs?: number;
   onProgress?: ProgressCallback;
 }

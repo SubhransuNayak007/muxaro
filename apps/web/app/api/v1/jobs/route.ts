@@ -49,7 +49,38 @@ export async function POST(req: NextRequest) {
       audioFormatId: body?.audioFormatId,
       title: body?.title,
       operation: body?.operation,
+      executionMode: body?.executionMode,
+      allowCloudFallback: body?.allowCloudFallback ?? body?.fallbackToCloud,
     });
+
+    if (job.status === 'failed' && job.error?.code === 'RESOLUTION_REQUIRES_LOCAL_WORKER') {
+      return NextResponse.json(
+        {
+          ok: false,
+          success: false,
+          code: 'RESOLUTION_REQUIRES_LOCAL_WORKER',
+          error: {
+            code: 'RESOLUTION_REQUIRES_LOCAL_WORKER',
+            message: job.error.message,
+          },
+          notice: job.stageMessage,
+          requiresLocalWorker: true,
+          requestedResolution: job.requestedResolution || '8K',
+          suggestedResolution: job.suggestedResolution || '1440p',
+          cloudReadyAlternatives: job.cloudReadyAlternatives || [
+            { resolution: '1440p', label: '2K Quad HD (Cloud-Ready Instant Stream)', instantStream: true },
+            { resolution: '1080p', label: '1080p Full HD (Cloud-Ready Instant Stream)', instantStream: true },
+            { resolution: '720p', label: '720p HD (Cloud-Ready Instant Stream)', instantStream: true },
+          ],
+          data: job,
+          requestId,
+        },
+        {
+          status: 422,
+          headers: CORS_HEADERS,
+        }
+      );
+    }
 
     if (
       job.status === 'failed' &&

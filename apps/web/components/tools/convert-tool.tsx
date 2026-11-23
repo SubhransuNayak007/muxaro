@@ -38,7 +38,7 @@ import { normalizeMediaUrl } from '@/lib/url-utils';
 
 export type VideoContainer = 'mp4' | 'mkv' | 'webm' | 'mov';
 export type VideoCodec = 'copy' | 'h264' | 'hevc' | 'vp9' | 'av1';
-export type Resolution = 'source' | '2160p' | '1440p' | '1080p' | '720p' | '480p';
+export type Resolution = 'source' | '4320p' | '2160p' | '1440p' | '1080p' | '720p' | '480p';
 
 export function ConvertTool() {
   const { settings: ecoSettings, toggleEco, recordSavedJob } = useEcoStore();
@@ -517,10 +517,12 @@ export function ConvertTool() {
                       className="w-full px-3 py-2 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)]"
                     >
                       <option value="source">Match Source</option>
-                      <option value="2160p">4K UHD (2160p)</option>
-                      <option value="1440p">2K QHD (1440p)</option>
-                      <option value="1080p">Full HD (1080p)</option>
-                      <option value="720p">HD (720p)</option>
+                      <option value="4320p">8K UHD (4320p) · Local Ultra HD</option>
+                      <option value="2160p">4K UHD (2160p) · Ultra HD</option>
+                      <option value="1440p">2K QHD (1440p) · Cloud & Local Ready</option>
+                      <option value="1080p">Full HD (1080p) · Cloud Ready</option>
+                      <option value="720p">HD (720p) · Cloud Ready</option>
+                      <option value="480p">SD (480p) · Cloud Ready</option>
                     </select>
                   </div>
 

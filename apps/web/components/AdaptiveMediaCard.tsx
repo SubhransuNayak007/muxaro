@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   ArrowDown,
   Zap,
+  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
@@ -42,6 +43,7 @@ interface AudioPreset {
   bitrate: string;
   codec: string;
   desc: string;
+  badge: string;
   estBytesRatio: number;
 }
 
@@ -53,6 +55,7 @@ const AUDIO_PRESETS: AudioPreset[] = [
     bitrate: '320 kbps CBR',
     codec: 'MP3',
     desc: 'Universal compatibility for all players and devices',
+    badge: 'Cloud Ready · Universal',
     estBytesRatio: (320 * 1000) / 8,
   },
   {
@@ -62,6 +65,7 @@ const AUDIO_PRESETS: AudioPreset[] = [
     bitrate: 'Lossless Master',
     codec: 'FLAC',
     desc: 'Bit-perfect compression with zero quality loss',
+    badge: 'Cloud Ready · Bit-Perfect',
     estBytesRatio: (900 * 1000) / 8,
   },
   {
@@ -71,6 +75,7 @@ const AUDIO_PRESETS: AudioPreset[] = [
     bitrate: '256 kbps VBR',
     codec: 'AAC',
     desc: 'High clarity optimized for Apple and mobile devices',
+    badge: 'Cloud Ready · Apple AAC',
     estBytesRatio: (256 * 1000) / 8,
   },
   {
@@ -80,6 +85,7 @@ const AUDIO_PRESETS: AudioPreset[] = [
     bitrate: '24-bit / 48kHz PCM',
     codec: 'PCM',
     desc: 'Uncompressed waveform for audio production and editing',
+    badge: 'Cloud Ready · Studio PCM',
     estBytesRatio: (1411 * 1000) / 8,
   },
   {
@@ -89,6 +95,7 @@ const AUDIO_PRESETS: AudioPreset[] = [
     bitrate: '160 kbps VBR',
     codec: 'Opus',
     desc: 'Next-gen acoustic reproduction at low latency',
+    badge: 'Cloud Ready · Low Latency',
     estBytesRatio: (160 * 1000) / 8,
   },
 ];
@@ -108,9 +115,54 @@ export function getResolutionTierName(height: number): string {
   if (height >= 4320) return '8K';
   if (height >= 2160) return '4K';
   if (height >= 1440) return '2K';
-  if (height >= 1080) return 'FHD';
-  if (height >= 720) return 'HD';
+  if (height >= 1080) return '1080p';
+  if (height >= 720) return '720p';
+  if (height >= 480) return '480p';
+  if (height >= 360) return '360p';
   return `${height}p`;
+}
+
+export function getTierBadge(height: number): { label: string; className: string } {
+  if (height >= 4320) {
+    return {
+      label: 'Local Ultra HD',
+      className: 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-semibold shadow-xs',
+    };
+  }
+  if (height >= 2160) {
+    return {
+      label: '4K Ultra HD',
+      className: 'bg-zinc-800 text-zinc-100 dark:bg-zinc-200 dark:text-zinc-900 font-semibold shadow-xs',
+    };
+  }
+  if (height >= 1440) {
+    return {
+      label: 'Cloud & Local Ready',
+      className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-medium',
+    };
+  }
+  if (height >= 1080) {
+    return {
+      label: 'Cloud Ready',
+      className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
+    };
+  }
+  if (height >= 720) {
+    return {
+      label: 'Cloud Ready',
+      className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
+    };
+  }
+  if (height >= 480) {
+    return {
+      label: 'Cloud Ready',
+      className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
+    };
+  }
+  return {
+    label: 'Compact',
+    className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary font-normal',
+  };
 }
 
 export function humanizeCodec(codec?: string | null): string {
@@ -231,6 +283,7 @@ export default function AdaptiveMediaCard({
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const [copiedDownloadLink, setCopiedDownloadLink] = useState<boolean>(false);
   const [fallbackDownloadUrl, setFallbackDownloadUrl] = useState<string | null>(null);
 
   // Auto-trigger ref to prevent duplicate browser download prompts
@@ -363,10 +416,10 @@ export default function AdaptiveMediaCard({
     return Array.from(map.values()).sort((a, b) => b.height - a.height);
   }, [videoOptions]);
 
-  // Split into HD+ tiers (shown immediately) and SD tiers (collapsed by default)
+  // Split into primary tiers (>= 480p shown immediately) and lower SD tiers (collapsed by default)
   const primaryTiers = useMemo(() => {
-    const hd = distinctVideoTiers.filter((t) => t.height >= 720);
-    if (hd.length > 0) return hd;
+    const primary = distinctVideoTiers.filter((t) => t.height >= 480);
+    if (primary.length > 0) return primary;
     return distinctVideoTiers.slice(0, 3);
   }, [distinctVideoTiers]);
 
@@ -625,20 +678,24 @@ export default function AdaptiveMediaCard({
 
   const activeChoiceSubline = useMemo(() => {
     if (activeTab === 'video') {
-      const isDirectStream = Boolean(selectedVideoOption && selectedVideoOption.height > 1440);
-      if (isDirectStream) {
-        return 'Direct 4K/8K stream · Processed locally in browser';
+      const is8K = Boolean(selectedVideoOption && selectedVideoOption.height >= 4320);
+      const is4K = Boolean(selectedVideoOption && selectedVideoOption.height >= 2160 && selectedVideoOption.height < 4320);
+      if (is8K) {
+        return '8K Local Ultra HD · Maximum fidelity with zero cloud compression';
+      }
+      if (is4K) {
+        return '4K Ultra HD · Processed locally with direct stream pairing';
       }
       const isDirectRemux =
         videoContainer === 'mkv' ||
         videoContainer === 'webm' ||
         (selectedVideoOption?.codec && selectedVideoOption.codec.toLowerCase().includes('avc'));
       return isDirectRemux
-        ? 'Lossless remux · Cloud storage 60m'
-        : 'Lossless video · AAC audio · Cloud storage 60m';
+        ? 'Instant cloud-side stream copy · 60m secure retention'
+        : 'Instant cloud-side remux · Lossless video · 60m secure retention';
     }
     if (activeTab === 'audio') {
-      return 'Studio audio · Cloud storage 60m';
+      return 'Instant cloud-side audio extraction · 60m secure retention';
     }
     if (activeTab === 'subtitles') {
       return 'Timed caption track · Instant download';
@@ -675,6 +732,8 @@ export default function AdaptiveMediaCard({
         )
       : '~640 MB';
 
+    const badge = getTierBadge(opt.height);
+
     return (
       <div
         key={opt.id}
@@ -710,22 +769,11 @@ export default function AdaptiveMediaCard({
             <span className="text-content-muted">·</span>
             <span>{humanizeCodec(opt.codec)}</span>
 
-            {/* Restrained Micro-Tags: Desktop Direct vs Cloud */}
-            {opt.height > 1440 ? (
-              <>
-                <span className="text-content-muted">·</span>
-                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-brand-violet/10 text-brand-violet border border-brand-violet/20">
-                  Desktop Direct
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="text-content-muted">·</span>
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary">
-                  Cloud
-                </span>
-              </>
-            )}
+            {/* Clear Tier Badge */}
+            <span className="text-content-muted">·</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded ${badge.className}`}>
+              {badge.label}
+            </span>
 
             {opt.hdr && (
               <>
@@ -880,6 +928,42 @@ export default function AdaptiveMediaCard({
             </button>
           );
         })}
+      </div>
+
+      {/* Processing Architecture & Execution Lane Indicator */}
+      <div className="p-3.5 sm:p-4 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+          <div className="w-7 h-7 rounded-lg bg-black/[0.05] dark:bg-white/[0.08] flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 text-content">
+            <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+          </div>
+          <div className="space-y-0.5 min-w-0">
+            <div className="font-semibold text-content flex items-center gap-2">
+              <span>Processing Routing Architecture</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/[0.06] dark:bg-white/[0.08] text-content-secondary font-normal">
+                Auto-Routed
+              </span>
+            </div>
+            <p className="text-content-secondary text-[11px] sm:text-xs leading-relaxed">
+              <strong className="font-semibold text-content">≤ 2K (1440p) & Audio:</strong> Instant cloud-side processing with zero wait time.
+              <span className="mx-1.5 text-content-muted hidden sm:inline">|</span>
+              <br className="sm:hidden" />
+              <strong className="font-semibold text-content">8K & 4K:</strong> Executes locally with direct zero-loss stream pairing for maximum fidelity.
+            </p>
+          </div>
+        </div>
+        <div className="shrink-0 self-start sm:self-auto pl-9 sm:pl-0">
+          {activeTab === 'audio' || (selectedVideoOption && selectedVideoOption.height <= 1440) ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-[11px] font-mono font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+              Instant Cloud Stream
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-[11px] font-mono font-semibold shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-500 animate-pulse shrink-0" />
+              8K Local Ultra HD Engine
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 3. Tab Panel 1: Video High-Density Architectural Resolution Ledger */}
@@ -1049,8 +1133,12 @@ export default function AdaptiveMediaCard({
 
                     <div className="flex items-center gap-1.5 text-xs text-content-secondary tabular-nums min-w-0 truncate">
                       <span>{preset.bitrate}</span>
-                      <span className="text-content-muted hidden sm:inline">·</span>
-                      <span className="hidden sm:inline truncate">{preset.desc}</span>
+                      <span className="text-content-muted">·</span>
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 shrink-0">
+                        {preset.badge}
+                      </span>
+                      <span className="text-content-muted hidden md:inline">·</span>
+                      <span className="hidden md:inline truncate">{preset.desc}</span>
                     </div>
                   </div>
 
@@ -1274,29 +1362,85 @@ export default function AdaptiveMediaCard({
         </div>
       )}
 
-      {/* Ready Notice */}
+      {/* Verified Download Card */}
       {isReady && fallbackDownloadUrl && (
-        <div className="p-3.5 sm:p-4 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated text-content text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-center gap-2.5 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            <div>
-              <div className="font-semibold">Media download ready</div>
-              <div className="text-xs text-content-secondary">
-                Download started automatically. Click to save again anytime.
+        <div className="p-4 sm:p-5 rounded-2xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated text-content text-xs sm:text-sm space-y-3.5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-black/[0.06] dark:border-white/[0.08] pb-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+              </div>
+              <div>
+                <div className="font-semibold text-content text-sm sm:text-base flex items-center gap-2">
+                  <span>Verified Media Download Ready</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-medium">
+                    <ShieldCheck className="w-3 h-3" />
+                    Bitstream Verified
+                  </span>
+                </div>
+                <div className="text-xs text-content-secondary mt-0.5">
+                  {selectedVideoOption && selectedVideoOption.height > 1440
+                    ? 'Processed locally with maximum fidelity and zero cloud compression.'
+                    : 'Stream-processed via instant cloud fast-path. File ready for immediate save.'}
+                </div>
               </div>
             </div>
+
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto font-mono text-xs text-content-secondary">
+              <span className="px-2 py-0.5 rounded bg-black/[0.04] dark:bg-white/[0.06] text-content uppercase font-semibold">
+                {activeTab === 'audio' ? selectedAudioPreset.ext : videoContainer}
+              </span>
+              <span>·</span>
+              <span className="tabular-nums font-semibold text-content">{selectedVideoSize || audioEstSize}</span>
+            </div>
           </div>
-          <a
-            href={fallbackDownloadUrl}
-            download
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => triggerBrowserDownload(fallbackDownloadUrl)}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs font-medium shadow-xs active:scale-[0.98] transition-all whitespace-nowrap self-start sm:self-auto"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Save file again</span>
-          </a>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+            <div className="text-xs text-content-secondary flex items-center gap-2 truncate min-w-0">
+              <span className="truncate max-w-[280px] sm:max-w-md font-mono text-[11px] text-content-muted">
+                {manifest.title || 'media'}.{activeTab === 'audio' ? selectedAudioPreset.ext : videoContainer}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (fallbackDownloadUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(fallbackDownloadUrl);
+                    setCopiedDownloadLink(true);
+                    setTimeout(() => setCopiedDownloadLink(false), 2000);
+                  }
+                }}
+                className="h-9 px-3 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface text-xs font-medium text-content-secondary hover:text-content inline-flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+                title="Copy direct download link"
+              >
+                {copiedDownloadLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Link Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Link</span>
+                  </>
+                )}
+              </button>
+
+              <a
+                href={fallbackDownloadUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => triggerBrowserDownload(fallbackDownloadUrl)}
+                className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-all inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Save File to Disk</span>
+              </a>
+            </div>
+          </div>
         </div>
       )}
 

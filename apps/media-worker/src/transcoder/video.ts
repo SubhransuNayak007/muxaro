@@ -54,7 +54,13 @@ export class VideoTranscoder {
       options.targetCodec
     );
 
-    const args: string[] = ['-y', '-v', 'error', '-i', validatedInput];
+    const args: string[] = ['-y', '-v', 'error'];
+
+    // Bounded thread allocation to avoid CPU starvation
+    const threadCount = options.threads ?? 4;
+    args.push('-threads', threadCount.toString());
+
+    args.push('-i', validatedInput);
 
     let actionTaken: ProcessingResult['actionTaken'];
 
@@ -74,9 +80,13 @@ export class VideoTranscoder {
         }
       }
 
-      // Faststart for MP4 streaming
+      // Faststart or fragmented MP4 for MP4 streaming
       if (options.targetContainer === 'mp4') {
-        args.push('-movflags', '+faststart');
+        if (options.isFragmentedMp4) {
+          args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof');
+        } else {
+          args.push('-movflags', '+faststart');
+        }
       }
     } else {
       // TRANSCODE PIPELINE

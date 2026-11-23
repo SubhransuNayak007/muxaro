@@ -208,7 +208,7 @@ export default function HomePage() {
         (err as any)?.code === 'HOST_BLOCKED' ||
         /blocks free cloud servers|bot detection|confirm you're not a bot|login_required/i.test(message)
       ) {
-        message = 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.';
+        message = 'This host restricts free datacenter IPs. You can process 8K locally with MUXARO Direct, or save direct streams up to 2K.';
         console.info('[MUXARO Probe] Target host restricted in cloud mode. Suggesting Desktop Direct:', trimmed);
       } else if (!message || message === '[object Object]' || message.includes('[object Object]')) {
         message = 'We could not analyse that link. Please check the URL and try again.';

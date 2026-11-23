@@ -61,11 +61,21 @@ export class MediaMerger {
     const durationDriftSeconds = Math.abs(videoDuration - audioDuration);
     const totalDuration = Math.min(videoDuration, audioDuration) || Math.max(videoDuration, audioDuration);
 
+    const is8K =
+      videoStream.resolutionTier === '8K' ||
+      videoStream.height >= 4320 ||
+      videoStream.width >= 7680 ||
+      options.targetResolution === '8K';
+
     // 2. Evaluate codec compatibility with target container
     const canCopyVideo = MediaClassifier.isVideoCodecCompatibleWithContainer(videoStream.codec, targetContainer);
     const canCopyAudio = MediaClassifier.isAudioCodecCompatibleWithContainer(audioStream.codec, targetContainer);
 
     const args: string[] = ['-y', '-v', 'error'];
+
+    // Bounded thread allocation to avoid CPU starvation
+    const threadCount = options.threads ?? 4;
+    args.push('-threads', threadCount.toString());
 
     // Handle audio offset correction if specified
     const offsetMs = options.audioOffsetMs ?? 0;
@@ -92,6 +102,20 @@ export class MediaMerger {
     if (canCopyVideo && canCopyAudio && options.preferStreamCopy !== false) {
       actionTaken = 'MERGE_STREAM_COPY';
       args.push('-c:v', 'copy', '-c:a', 'copy');
+    } else if (is8K || (canCopyVideo && options.preferStreamCopy !== false)) {
+      // 8K Lossless Remuxing Rule: NEVER re-encode 8K video (-c:v copy).
+      // Transcode only audio to match target container if necessary.
+      actionTaken = canCopyAudio ? 'MERGE_STREAM_COPY' : 'MERGE_TRANSCODE';
+      args.push('-c:v', 'copy');
+      if (canCopyAudio) {
+        args.push('-c:a', 'copy');
+      } else {
+        if (targetContainer === 'webm') {
+          args.push('-c:a', 'libopus', '-b:a', '160k');
+        } else {
+          args.push('-c:a', 'aac', '-b:a', '256k');
+        }
+      }
     } else {
       actionTaken = 'MERGE_TRANSCODE';
       if (canCopyVideo) {
@@ -115,7 +139,11 @@ export class MediaMerger {
     args.push('-shortest');
 
     if (targetContainer === 'mp4') {
-      args.push('-movflags', '+faststart');
+      if (options.isFragmentedMp4) {
+        args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof');
+      } else {
+        args.push('-movflags', '+faststart');
+      }
     }
 
     args.push('-progress', 'pipe:1', validatedOutput);

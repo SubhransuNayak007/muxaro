@@ -174,6 +174,7 @@ export class StreamPipeline {
     }
 
     const isRemoteUrl = !isExplicitStream && (Boolean(job.sourceUrl) || /^https?:\/\//i.test(inputSource));
+    const targetExt = (job.targetFormat || 'mp4').toLowerCase() as ContainerFormat;
     let isPipedInput = isExplicitStream;
     let upstreamChild: ChildProcess | null = null;
     let upstreamStderr = '';
@@ -213,11 +214,35 @@ export class StreamPipeline {
         ytdlpArgs.push('--no-playlist');
       }
       const isRedditOrFacebook = /(?:reddit\.com|redd\.it|facebook\.com|fb\.watch)/i.test(inputSource);
+      const is8K = Boolean(
+        (job.targetResolution && /^(?:8k|4320p?)/i.test(job.targetResolution)) ||
+        (job.targetResolution && job.targetResolution.includes('4320'))
+      );
+      const is4K = Boolean(
+        (job.targetResolution && /^(?:4k|2160p?)/i.test(job.targetResolution)) ||
+        (job.targetResolution && job.targetResolution.includes('2160'))
+      );
+
       if (job.tool === 'extract_audio') {
         ytdlpArgs.push('-f', 'ba/b');
-      } else if (isRedditOrFacebook || job.targetResolution === '4K' || job.targetResolution === '8K') {
-        // Enforce 8K Lossless Remuxing Rules: Reddit/Facebook HD & 4K/8K: bestvideo+bestaudio/best so audio is never dropped
-        ytdlpArgs.push('-f', 'bestvideo+bestaudio/best');
+      } else if (is8K) {
+        // Enforce 8K Lossless Remuxing Rules: Pair best 8K video stream with best audio
+        const format8k = targetExt === 'mp4'
+          ? 'bestvideo[height>=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best'
+          : 'bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best';
+        ytdlpArgs.push(
+          '-f', format8k,
+          '--merge-output-format', 'mkv',
+          '--buffer-size', '32M',
+          '--http-chunk-size', '10M'
+        );
+      } else if (isRedditOrFacebook || is4K) {
+        // Enforce 4K Lossless Remuxing Rules: Reddit/Facebook HD & 4K: bestvideo+bestaudio/best so audio is never dropped
+        ytdlpArgs.push(
+          '-f', 'bestvideo+bestaudio/best',
+          '--merge-output-format', 'mkv',
+          '--buffer-size', '16M'
+        );
       } else {
         ytdlpArgs.push('-f', 'bv*[height<=1080]+ba/b[height<=1080]/best');
       }
@@ -309,7 +334,6 @@ export class StreamPipeline {
     const savings = EcoModeEngine.estimateSavings(plan, durationSeconds);
 
     // 4. Construct target storage key & content type
-    const targetExt = job.targetFormat.toLowerCase() as ContainerFormat;
     const storageKey = `outputs/${job.retentionTier}/${job.jobId}.${targetExt}`;
     const outputFilename = `${job.title ? sanitizeFilename(job.title) : job.jobId}.${targetExt}`;
     const mimeType = CONTAINER_MIME_TYPES[targetExt] || 'application/octet-stream';
@@ -687,8 +711,13 @@ export class StreamPipeline {
     // Hard limits:
     // -t 14400 (4 hours maximum duration ceiling)
     // -fs 4294967296 (4 GB maximum output file size ceiling to prevent storage exhaustion bombs)
+    // For 8K video streams, raise size ceiling to 32 GB (34359738368) to prevent premature truncation of high-bitrate 8K media
+    const is8K = Boolean(
+      (plan.targetResolution && /^(?:8k|4320p?)/i.test(plan.targetResolution)) ||
+      (plan.targetHeight && plan.targetHeight >= 4320)
+    );
     args.push('-t', '14400');
-    args.push('-fs', '4294967296');
+    args.push('-fs', is8K ? '34359738368' : '4294967296');
 
     // Output to stdout pipe
     args.push('pipe:1');
@@ -700,7 +729,9 @@ export class StreamPipeline {
     args: string[],
     inputStream?: Readable
   ): { childProcess: ChildProcess; outputStream: PassThrough } {
-    const outputStream = new PassThrough({ highWaterMark: 16 * 1024 * 1024 });
+    const is8K = args.some((a) => a.includes('4320') || a.includes('8k') || a === '34359738368');
+    const highWaterMark = is8K ? 32 * 1024 * 1024 : 16 * 1024 * 1024;
+    const outputStream = new PassThrough({ highWaterMark });
 
     // Guarantee spawn with { shell: false }, never exec()
     const child = spawn(FFMPEG_BIN, args, {

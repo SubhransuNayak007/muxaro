@@ -154,13 +154,18 @@ export class EcoModeEngine {
     // -------------------------------------------------------------------------
     if (isVideoTarget) {
       const userRequestedResolution = options.targetResolution;
-      const is4K8K = Boolean(
-        (probe.video && (probe.video.height >= 2160 || probe.video.width >= 3840)) ||
-        (userRequestedResolution && /^(?:4k|8k|2160p?|4320p?)/i.test(userRequestedResolution))
+      const isUserRequested4K8K = Boolean(
+        userRequestedResolution && /^(?:4k|8k|2160p?|4320p?)/i.test(userRequestedResolution)
+      );
+      const isSource4K8K = Boolean(
+        probe.video && (probe.video.height >= 2160 || probe.video.width >= 3840)
       );
 
-      // 8K / 4K LOSSLESS REMUXING RULE: NEVER re-encode 4K/8K video (-c:v copy)
-      if (is4K8K) {
+      // 8K / 4K LOSSLESS REMUXING RULE:
+      // When 4K/8K is requested by user, or when ecoMode is disabled on a 4K/8K source, NEVER re-encode 4K/8K video (-c:v copy)
+      const shouldPreserve4K8K = isUserRequested4K8K || (!isEcoRequested && isSource4K8K);
+
+      if (shouldPreserve4K8K) {
         if (targetFormat === 'mkv' || targetFormat === 'webm') {
           return {
             isStreamCopy: true,
@@ -174,17 +179,18 @@ export class EcoModeEngine {
             reason: `8K Lossless Remuxing Rule: MKV/WebM -c copy. Never re-encode 4K/8K video.`,
           };
         } else {
-          // MP4 at 4K/8K: -c:v copy -c:a aac -b:a 192k -movflags +faststart
+          // MP4 at 4K/8K: -c:v copy. If audio is natively AAC/mp4a, copy audio too; otherwise encode to AAC.
+          const audioDirectCopy = audioCodec === 'aac' || audioCodec === 'mp4a';
           return {
             isStreamCopy: true,
             action: 'STREAM_COPY_REMUX',
             ffmpegVideoArgs: ['-c:v', 'copy'],
-            ffmpegAudioArgs: ['-c:a', 'aac', '-b:a', '192k'],
+            ffmpegAudioArgs: audioDirectCopy ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '192k'],
             ffmpegFilterArgs: [],
-            ffmpegFormatArgs: ['-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart'],
+            ffmpegFormatArgs: ['-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof'],
             scaleCapApplied: false,
             targetResolution: probe.video?.height ? `${probe.video.height}p` : userRequestedResolution,
-            reason: `8K Lossless Remuxing Rule: MP4 at 4K/8K -c:v copy -c:a aac -b:a 192k -movflags +faststart.`,
+            reason: `8K Lossless Remuxing Rule: MP4 at 4K/8K -c:v copy ${audioDirectCopy ? '-c:a copy' : '-c:a aac -b:a 192k'}.`,
           };
         }
       }

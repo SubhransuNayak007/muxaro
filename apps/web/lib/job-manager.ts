@@ -33,6 +33,8 @@ export interface CreateJobParams {
   audioFormatId?: string;
   title?: string;
   operation?: string;
+  executionMode?: 'cloud' | 'local' | 'auto';
+  allowCloudFallback?: boolean;
 }
 
 export interface JobRecord {
@@ -59,6 +61,16 @@ export interface JobRecord {
   completedAt?: string;
   expiresAt: string;
   error?: JobError;
+  requiresLocalWorker?: boolean;
+  requestedResolution?: string;
+  suggestedResolution?: string;
+  cloudNotice?: {
+    type: string;
+    message: string;
+    requestedResolution: string;
+    resolvedResolution: string;
+  };
+  cloudReadyAlternatives?: Array<{ resolution: string; label: string; instantStream?: boolean }> | string[];
   artifact?: {
     filename: string;
     downloadUrl: string;
@@ -403,6 +415,45 @@ class JobManager {
       expiresAt,
     };
 
+    // 8K Cloud Guard: Gracefully handle 8K requests on cloud serverless mode
+    const reqHeight = parseResolutionHeight(params.targetResolution);
+    const is8k = reqHeight >= 4320 || String(params.targetResolution || '').toLowerCase().includes('8k');
+    const isServerlessEnv = isServerless() || params.executionMode === 'cloud';
+
+    if (is8k && isServerlessEnv) {
+      if (params.allowCloudFallback) {
+        job.targetResolution = '1440p';
+        job.cloudNotice = {
+          type: 'routed_to_cloud_resolution',
+          message: '8K requested — automatically routed to 2K (1440p) Quad HD cloud-ready instant stream (local worker required for full 8K fidelity).',
+          requestedResolution: '8K',
+          resolvedResolution: '1440p',
+        };
+        job.stageMessage = '8K requested — automatically routed to 2K (1440p) Quad HD cloud-ready instant stream (local worker required for full 8K fidelity).';
+      } else {
+        const guidanceMessage = '8K Ultra HD media processing requires local worker execution for full-fidelity remuxing and raw bandwidth. For instant cloud delivery, 2K (1440p) Quad HD and 1080p Full HD are cloud-ready.';
+        job.status = 'failed';
+        job.stage = 'REQUIRES_LOCAL_WORKER';
+        job.stageMessage = guidanceMessage;
+        job.error = {
+          code: 'RESOLUTION_REQUIRES_LOCAL_WORKER',
+          message: guidanceMessage,
+          retryable: false,
+        };
+        job.requiresLocalWorker = true;
+        job.requestedResolution = '8K';
+        job.suggestedResolution = '1440p';
+        job.cloudReadyAlternatives = [
+          { resolution: '1440p', label: '2K Quad HD (Cloud-Ready Instant Stream)', instantStream: true },
+          { resolution: '1080p', label: '1080p Full HD (Cloud-Ready Instant Stream)', instantStream: true },
+          { resolution: '720p', label: '720p HD (Cloud-Ready Instant Stream)', instantStream: true },
+        ];
+        persistJob(job);
+        this.notify(job);
+        return job;
+      }
+    }
+
     this.jobs.set(jobId, job);
     // Persist immediately so any other serverless instance can find this job
     persistJob(job);
@@ -410,9 +461,9 @@ class JobManager {
     const abortController = new AbortController();
     this.abortControllers.set(jobId, abortController);
 
-    // PHASE 1.1: ZERO-HOP CLIENT HANDOVER
+    // PHASE 1.1: ZERO-HOP CLIENT HANDOVER & CLOUD TUNNEL MODE
     // For Pinterest, TikTok, Twitter/X, Instagram, Vimeo progressive streams, and direct media,
-    // immediately transition to READY with direct origin CDN stream URL without downloading to server disk or /tmp.
+    // immediately transition to READY with direct origin CDN stream URL or cut-through tunnel URL without downloading to server disk or /tmp.
     const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(params.sourceUrl);
     if (!isYouTube && (params.sourceUrl.startsWith('http://') || params.sourceUrl.startsWith('https://'))) {
       try {
@@ -421,7 +472,9 @@ class JobManager {
           job.status = 'ready';
           job.progress = 100;
           job.stage = 'READY';
-          job.stageMessage = 'Zero-hop direct stream ready for instant download';
+          job.stageMessage = is8k && params.allowCloudFallback
+            ? '8K requested — routed to 2K (1440p) Quad HD zero-hop direct stream'
+            : 'Zero-hop direct stream ready for instant download';
           job.deliveryMode = 'zero-hop';
           job.directStreamUrl = streamInfo.mediaUrl;
           job.directMimeType = streamInfo.mimeType || 'video/mp4';
@@ -437,6 +490,39 @@ class JobManager {
           job.artifact = {
             filename: job.filename,
             downloadUrl: streamInfo.mediaUrl,
+            sizeBytes: job.fileSizeBytes || 0,
+            format: job.targetFormat,
+          };
+          persistJob(job);
+          this.notify(job);
+          return job;
+        }
+
+        if (streamInfo?.deliveryMode === 'tunnel' && streamInfo.mediaUrl && isServerlessEnv) {
+          job.status = 'ready';
+          job.progress = 100;
+          job.stage = 'READY';
+          job.stageMessage = is8k && params.allowCloudFallback
+            ? '8K requested — routed to 2K (1440p) Quad HD cloud tunnel stream'
+            : 'Cloud tunnel stream ready for instant download';
+          job.deliveryMode = 'tunnel';
+          job.directStreamUrl = streamInfo.mediaUrl;
+          job.directMimeType = streamInfo.mimeType || 'video/mp4';
+          if (streamInfo.contentLength) {
+            job.fileSizeBytes = streamInfo.contentLength;
+          }
+          if (streamInfo.title && (!job.title || job.title === 'media_download')) {
+            job.title = streamInfo.title;
+            job.filename = sanitizeFilename(streamInfo.title, job.targetFormat);
+          }
+          const dlParams = new URLSearchParams();
+          dlParams.set('filename', job.filename);
+          dlParams.set('stream', streamInfo.mediaUrl);
+          job.downloadUrl = `/api/v1/jobs/${encodeURIComponent(job.id)}/download?${dlParams.toString()}`;
+          job.completedAt = new Date().toISOString();
+          job.artifact = {
+            filename: job.filename,
+            downloadUrl: job.downloadUrl,
             sizeBytes: job.fileSizeBytes || 0,
             format: job.targetFormat,
           };
@@ -1011,7 +1097,8 @@ class JobManager {
             job.status = 'ready';
             job.progress = 100;
             job.stage = 'READY';
-            job.stageMessage = 'Stream ready for instant cut-through download';
+            job.stageMessage = 'Cloud tunnel stream ready for instant download';
+            job.deliveryMode = 'tunnel';
             const dlParams = new URLSearchParams();
             dlParams.set('filename', job.filename);
             if (job.directStreamUrl) {
@@ -1111,6 +1198,35 @@ class JobManager {
             job.artifact = {
               filename: job.filename,
               downloadUrl: directUrl,
+              sizeBytes: job.fileSizeBytes || 0,
+              format: job.targetFormat,
+            };
+            persistJob(job);
+            this.notify(job);
+            return;
+          }
+
+          // On serverless environments, deliver via Cloud Tunnel Mode
+          // without writing multi-hundred-megabyte files to ephemeral disk or exceeding memory/timeout limits.
+          if (isServerless()) {
+            job.status = 'ready';
+            job.progress = 100;
+            job.stage = 'READY';
+            job.stageMessage = 'Cloud tunnel stream ready for instant download';
+            job.deliveryMode = 'tunnel';
+            job.directStreamUrl = directUrl;
+            job.directMimeType = streamInfo.mimeType || 'video/mp4';
+            if (streamInfo.contentLength) {
+              job.fileSizeBytes = streamInfo.contentLength;
+            }
+            const dlParams = new URLSearchParams();
+            dlParams.set('filename', job.filename);
+            dlParams.set('stream', directUrl);
+            job.downloadUrl = `/api/v1/jobs/${encodeURIComponent(job.id)}/download?${dlParams.toString()}`;
+            job.completedAt = new Date().toISOString();
+            job.artifact = {
+              filename: job.filename,
+              downloadUrl: job.downloadUrl,
               sizeBytes: job.fileSizeBytes || 0,
               format: job.targetFormat,
             };

@@ -78,10 +78,12 @@ export function resolveResolutionTier(height: number): string {
 }
 
 function resolveQualityBadge(height: number, fps: number, isHdr: boolean): string | undefined {
-  if (height >= 4320) return '8K Ultra HD';
+  if (height >= 4320) return '8K Ultra HD (Local Worker)';
   if (height >= 2160) return isHdr ? '4K HDR' : '4K UHD';
-  if (height === 1080 && fps >= 50) return '1080p60';
-  if (height === 1080) return 'Full HD';
+  if (height >= 1440) return isHdr ? '2K HDR (Cloud Ready)' : '2K Quad HD (Cloud Ready)';
+  if (height === 1080 && fps >= 50) return '1080p60 (Cloud Ready)';
+  if (height === 1080) return '1080p Full HD (Cloud Ready)';
+  if (height >= 720) return '720p HD (Cloud Ready)';
   if (fps >= 50) return `${fps}fps`;
   if (isHdr) return 'HDR';
   return undefined;
@@ -634,6 +636,17 @@ function transformYtDlpOutput(
     new Set(sortedVideoFormats.map((f) => f.label))
   );
 
+  // Determine delivery mode:
+  // If a progressive format with combined audio exists and direct URL is available, zero-hop direct stream is optimal.
+  // Otherwise (adaptive DASH stream requiring remux/tunnel), tunnel delivery mode is used.
+  const progressiveVideo = rawFormats.find((f: any) =>
+    f.vcodec && f.vcodec !== 'none' && f.acodec && f.acodec !== 'none' && f.url && String(f.url).startsWith('http')
+  );
+  const bestVideoStream = sortedVideoStreams[0];
+  const directStreamUrl = progressiveVideo?.url || bestVideoStream?.url;
+  const isProgressive = Boolean(progressiveVideo);
+  const deliveryMode: 'zero-hop' | 'tunnel' = isProgressive ? 'zero-hop' : 'tunnel';
+
   return {
     id,
     assetId: id,
@@ -669,6 +682,9 @@ function transformYtDlpOutput(
     items,
     entries: items,
     analyzedAt: new Date().toISOString(),
+    directStreamUrl,
+    directMimeType: isProgressive ? 'video/mp4' : (bestVideoStream?.codec?.includes('vp9') ? 'video/webm' : 'video/mp4'),
+    deliveryMode,
   };
 }
 
@@ -829,6 +845,9 @@ function transformFFprobeOutput(
     items: [],
     entries: [],
     analyzedAt: new Date().toISOString(),
+    directStreamUrl: sourceUrl,
+    directMimeType: 'video/mp4',
+    deliveryMode: 'zero-hop',
   };
 }
 
@@ -847,6 +866,23 @@ function createDirectMediaFallback(
 
   const videoFormats: VideoFormatOption[] = [
     {
+      id: 'v_1440p',
+      videoFormatId: '1440p',
+      label: '1440p Quad HD',
+      resolutionHeight: 1440,
+      width: 2560,
+      fps: 30,
+      vcodec: 'h264',
+      acodec: 'aac',
+      container: 'mp4',
+      targetContainer: 'mp4',
+      isHdr: false,
+      requiresMerge: false,
+      estimatedBytes: 60000000,
+      bitrateKbps: 9000,
+      badge: '2K Quad HD (Cloud Ready)',
+    },
+    {
       id: 'v_1080p',
       videoFormatId: '1080p',
       label: '1080p Full HD',
@@ -861,7 +897,7 @@ function createDirectMediaFallback(
       requiresMerge: false,
       estimatedBytes: 35000000,
       bitrateKbps: 4500,
-      badge: 'Full HD',
+      badge: '1080p Full HD (Cloud Ready)',
     },
     {
       id: 'v_720p',
@@ -878,7 +914,7 @@ function createDirectMediaFallback(
       requiresMerge: false,
       estimatedBytes: 18000000,
       bitrateKbps: 2200,
-      badge: 'HD',
+      badge: '720p HD (Cloud Ready)',
     },
   ];
 
@@ -906,6 +942,27 @@ function createDirectMediaFallback(
       streamIndex: 0,
       streamType: 'video',
       codec: 'h264',
+      bitrateKbps: 9000,
+      formatId: '1440p',
+      width: 2560,
+      height: 1440,
+      resolutionLabel: '1440p',
+      frameRate: 30,
+      fps: 30,
+      hdr: false,
+      estimatedSizeBytes: 60000000,
+      sizeIsEstimate: true,
+      recommended: true,
+      isNativeLossless: true,
+      isStreamCopyCandidate: true,
+      transcodeRequired: false,
+      notes: 'Direct progressive 1440p Quad HD stream (zero-hop)',
+      url: sourceUrl,
+    },
+    {
+      streamIndex: 1,
+      streamType: 'video',
+      codec: 'h264',
       bitrateKbps: 4500,
       formatId: '1080p',
       width: 1920,
@@ -916,11 +973,11 @@ function createDirectMediaFallback(
       hdr: false,
       estimatedSizeBytes: 35000000,
       sizeIsEstimate: true,
-      recommended: true,
+      recommended: false,
       isNativeLossless: true,
       isStreamCopyCandidate: true,
       transcodeRequired: false,
-      notes: 'Direct progressive video stream',
+      notes: 'Direct progressive 1080p stream (zero-hop)',
       url: sourceUrl,
     },
   ];
@@ -958,15 +1015,15 @@ function createDirectMediaFallback(
     sourceUrl,
     originalUrl: sourceUrl,
     container: 'mp4',
-    fileSizeBytes: 35000000,
-    maxResolutionLabel: '1080p Full HD',
+    fileSizeBytes: 60000000,
+    maxResolutionLabel: '1440p Quad HD',
     videoFormats,
     audioFormats,
     videoStreams,
     audioStreams,
     streams: [...videoStreams, ...audioStreams],
     availableFormats: {
-      videoResolutions: ['1080p Full HD', '720p HD'],
+      videoResolutions: ['1440p Quad HD', '1080p Full HD', '720p HD'],
       audioCodecs: ['mp3', 'm4a'],
     },
     rightsCheck: {
@@ -979,6 +1036,9 @@ function createDirectMediaFallback(
     items: [],
     entries: [],
     analyzedAt: new Date().toISOString(),
+    directStreamUrl: sourceUrl,
+    directMimeType: 'video/mp4',
+    deliveryMode: 'zero-hop',
   };
 }
 
@@ -1239,6 +1299,7 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
       rightsNote: 'Publicly accessible media stream',
       directStreamUrl: sortedVideoStreams[0]?.url,
       directMimeType: sortedVideoStreams[0]?.codec?.includes('vp9') ? 'video/webm' : 'video/mp4',
+      deliveryMode: 'tunnel',
     };
   }
 
@@ -1258,6 +1319,23 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
 
   const videoFormats: VideoFormatOption[] = [
     {
+      id: 'v_1440p',
+      videoFormatId: '1440p',
+      label: '1440p Quad HD',
+      resolutionHeight: 1440,
+      width: 1440,
+      fps: 30,
+      vcodec: 'h264',
+      acodec: 'aac',
+      container: 'mp4',
+      targetContainer: 'mp4',
+      isHdr: false,
+      requiresMerge: false,
+      estimatedBytes: 45000000,
+      bitrateKbps: 6000,
+      badge: '2K Quad HD (Cloud Ready)',
+    },
+    {
       id: 'v_1080p',
       videoFormatId: '1080p',
       label: '1080p Full HD',
@@ -1272,7 +1350,7 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       requiresMerge: false,
       estimatedBytes: 25000000,
       bitrateKbps: 3500,
-      badge: 'Full HD',
+      badge: '1080p Full HD (Cloud Ready)',
     },
     {
       id: 'v_720p',
@@ -1289,7 +1367,7 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       requiresMerge: false,
       estimatedBytes: 15000000,
       bitrateKbps: 2000,
-      badge: 'HD',
+      badge: '720p HD (Cloud Ready)',
     },
   ];
 
@@ -1309,6 +1387,27 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       streamIndex: 0,
       streamType: 'video',
       codec: 'h264',
+      bitrateKbps: 6000,
+      formatId: '1440p',
+      width: 1440,
+      height: 1440,
+      resolutionLabel: '1440p Quad HD',
+      frameRate: 30,
+      fps: 30,
+      hdr: false,
+      estimatedSizeBytes: 45000000,
+      sizeIsEstimate: true,
+      recommended: true,
+      isNativeLossless: true,
+      isStreamCopyCandidate: true,
+      transcodeRequired: false,
+      notes: 'Direct 1440p Quad HD stream (zero-hop)',
+      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
+    },
+    {
+      streamIndex: 1,
+      streamType: 'video',
+      codec: 'h264',
       bitrateKbps: 3500,
       formatId: '1080p',
       width: 1080,
@@ -1319,18 +1418,18 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
       hdr: false,
       estimatedSizeBytes: 25000000,
       sizeIsEstimate: true,
-      recommended: true,
+      recommended: false,
       isNativeLossless: true,
       isStreamCopyCandidate: true,
       transcodeRequired: false,
-      notes: 'Direct MP4 stream',
+      notes: 'Direct 1080p progressive stream (zero-hop)',
       url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
     },
   ];
 
   const audioStreams: MediaStream[] = [
     {
-      streamIndex: 1,
+      streamIndex: 2,
       streamType: 'audio',
       codec: 'aac',
       bitrateKbps: 192,
@@ -1362,15 +1461,15 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
     sourceUrl,
     originalUrl: sourceUrl,
     container: 'mp4',
-    fileSizeBytes: 25000000,
-    maxResolutionLabel: '1080p Full HD',
+    fileSizeBytes: 45000000,
+    maxResolutionLabel: '1440p Quad HD',
     videoFormats,
     audioFormats,
     videoStreams,
     audioStreams,
     streams: [...videoStreams, ...audioStreams],
     availableFormats: {
-      videoResolutions: ['1080p Full HD', '720p HD'],
+      videoResolutions: ['1440p Quad HD', '1080p Full HD', '720p HD'],
       audioCodecs: ['mp3'],
     },
     rightsCheck: {
@@ -1383,5 +1482,8 @@ function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatf
     items: [],
     entries: [],
     analyzedAt: new Date().toISOString(),
+    directStreamUrl: sourceUrl,
+    directMimeType: 'video/mp4',
+    deliveryMode: 'zero-hop',
   };
 }

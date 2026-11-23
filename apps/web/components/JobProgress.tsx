@@ -23,6 +23,8 @@ import {
   Play,
   EyeOff,
   Zap,
+  ShieldCheck,
+  Copy,
 } from 'lucide-react';
 
 export interface JobProgressProps {
@@ -186,6 +188,7 @@ export default function JobProgress({
   const [retrying, setRetrying] = useState<boolean>(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   const [downloadInitiated, setDownloadInitiated] = useState<boolean>(false);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [autoDownloadEnabled, setAutoDownloadEnabled] = useState<boolean>(false);
   const [showPreview, setShowPreview] = useState<boolean>(false);
   const [serverlessRoutingDetected, setServerlessRoutingDetected] = useState<boolean>(false);
@@ -831,7 +834,7 @@ export default function JobProgress({
           >
             {hasRealProgress && safeProgress > 0 ? (
               <div
-                className="h-full bg-content rounded-full transition-transform duration-200 origin-left ease-out"
+                className="h-full bg-content rounded-full transition-transform duration-150 origin-left ease-out will-change-transform"
                 style={{
                   transform: `scaleX(${Math.max(0.02, safeProgress / 100)})`,
                 }}
@@ -937,18 +940,24 @@ export default function JobProgress({
         </div>
       )}
 
-      {/* 2. Ready View: Clean, Confident Completion */}
+      {/* 2. Ready View: Clean, Confident Verified Artifact Completion */}
       {job.status === 'READY' && (
         <div className="space-y-4">
-          <div className="flex items-start sm:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-line pb-3.5">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
                 <CheckCircle2 className="w-5 h-5" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-base font-semibold text-content truncate leading-tight">
-                  {readyHeading}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-semibold text-content truncate leading-tight">
+                    {readyHeading}
+                  </h3>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-medium">
+                    <ShieldCheck className="w-3 h-3" />
+                    Bitstream Verified
+                  </span>
+                </div>
                 <p className="text-xs text-content-secondary truncate mt-0.5">
                   {friendlyTitle}
                   {shortDomain ? ` · ${shortDomain}` : ''}
@@ -956,7 +965,7 @@ export default function JobProgress({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
               <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-surface-elevated text-xs font-mono font-medium text-content border border-line">
                 {formatPillLabel}
               </span>
@@ -968,6 +977,27 @@ export default function JobProgress({
             </div>
           </div>
 
+          {/* SHA-256 Checksum badge if available */}
+          {(job.checksumSha256 || job.artifact?.checksumSha256) && (
+            <div className="p-2.5 rounded-xl border border-line bg-surface-elevated/60 flex items-center justify-between gap-2 text-xs font-mono">
+              <span className="text-content-secondary truncate">
+                SHA-256: {(job.checksumSha256 || job.artifact?.checksumSha256 || '').slice(0, 16)}…
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  const hash = job.checksumSha256 || job.artifact?.checksumSha256;
+                  if (hash && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(hash);
+                  }
+                }}
+                className="text-[11px] font-semibold text-content hover:underline shrink-0"
+              >
+                Copy Hash
+              </button>
+            </div>
+          )}
+
           {/* Primary CTA + Secondary Actions */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
             <a
@@ -976,7 +1006,7 @@ export default function JobProgress({
               rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
               referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
               onClick={triggerBrowserSave}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-xs cursor-pointer select-none"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-xs cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
             >
               {downloadInitiated ? (
                 <Check className="w-4 h-4" aria-hidden="true" />
@@ -986,11 +1016,37 @@ export default function JobProgress({
               <span>{downloadInitiated ? 'Saving to browser…' : downloadLabel}</span>
             </a>
 
+            <button
+              type="button"
+              onClick={async () => {
+                const url = job.deliveryMode === 'zero-hop' ? (job.directStreamUrl || job.downloadUrl || resolvedDownloadUrl) : resolvedDownloadUrl;
+                if (url && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                  await navigator.clipboard.writeText(url);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                }
+              }}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+              title="Copy direct download URL"
+            >
+              {copiedLink ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Link</span>
+                </>
+              )}
+            </button>
+
             {previewUrl && (
               <button
                 type="button"
                 onClick={() => setShowPreview((prev) => !prev)}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
               >
                 {showPreview ? (
                   <EyeOff className="w-3.5 h-3.5" aria-hidden="true" />
@@ -1005,7 +1061,7 @@ export default function JobProgress({
               <button
                 type="button"
                 onClick={onDismiss}
-                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none"
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
               >
                 <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Process another</span>

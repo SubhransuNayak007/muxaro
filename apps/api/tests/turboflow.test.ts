@@ -12,6 +12,8 @@ import {
   mapHumanFriendlyError,
   selectTurboFlowStrategy,
   YTDLP_DEFAULT_PLAYER_CLIENTS,
+  is8KResolution,
+  get8KYtDlpFormatSelector,
 } from '../src/services/turboflow.service.js';
 import {
   mediaProcessorService,
@@ -120,5 +122,46 @@ describe('TurboFlow yt-dlp Anti-Bot & Extractor Suite', () => {
     assert.ok(args.join(' ').includes('player_client=android,web'));
     const mapped = mediaProcessorService.mapError('ERR_BOT_VERIFICATION_REQUIRED');
     assert.ok(mapped.includes('MUXARO Direct'));
+  });
+
+  // Test 8: 8K Ultra HD Detection, Stream Pairing Selector & TurboFlow Strategy
+  test('8K Ultra HD Resolution Detection & Stream Pairing Selector', () => {
+    assert.equal(is8KResolution('8K'), true);
+    assert.equal(is8KResolution('8k (4320p)'), true);
+    assert.equal(is8KResolution('4320p'), true);
+    assert.equal(is8KResolution(undefined, 4320), true);
+    assert.equal(is8KResolution(undefined, undefined, 7680), true);
+    assert.equal(is8KResolution('1080p'), false);
+
+    const mp4Selector = get8KYtDlpFormatSelector('mp4');
+    assert.ok(mp4Selector.includes('bestvideo[height>=4320]'));
+    assert.ok(mp4Selector.includes('bestaudio'));
+
+    const webmSelector = get8KYtDlpFormatSelector('webm');
+    assert.ok(webmSelector.includes('bestvideo[height>=4320]'));
+  });
+
+  test('selectTurboFlowStrategy routes 8K compatible streams to Instant Lane lossless remux', () => {
+    const strategy = selectTurboFlowStrategy({
+      operation: 'CONVERT_FORMAT',
+      targetFormat: 'mp4',
+      targetResolution: '8K',
+      streamCopy: true,
+      sourceAsset: {
+        id: 'asset-8k-1',
+        title: '8K Test Asset',
+        durationSeconds: 120,
+        streams: [
+          { type: 'VIDEO', codec: 'h264', width: 7680, height: 4320 },
+          { type: 'AUDIO', codec: 'aac', sampleRate: 48000 },
+        ],
+      },
+    });
+
+    assert.equal(strategy.processingLane, 'instant');
+    assert.equal(strategy.queueClass, 'instant-processing');
+    assert.equal(strategy.losslessPreserved, true);
+    assert.equal(strategy.requiresVideoTranscode, false);
+    assert.equal(strategy.strategyLabel, '8K Lossless Stream Remux');
   });
 });

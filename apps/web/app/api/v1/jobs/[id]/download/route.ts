@@ -80,8 +80,25 @@ export async function GET(
 
   const job = jobManager.getJob(id);
 
-  // Early exit: if the job failed due to host bot detection / 403, fail immediately with 403
+  // Early exit: if the job failed due to 8K local worker requirement or host bot detection / 403
   if (job?.status === 'failed') {
+    if (job.error?.code === 'RESOLUTION_REQUIRES_LOCAL_WORKER') {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: 'RESOLUTION_REQUIRES_LOCAL_WORKER',
+          message: job.error.message,
+          requiresLocalWorker: true,
+          suggestedResolution: '1440p',
+          cloudReadyAlternatives: [
+            { resolution: '1440p', label: '2K Quad HD (Cloud-Ready Instant Stream)' },
+            { resolution: '1080p', label: '1080p Full HD (Cloud-Ready Instant Stream)' },
+            { resolution: '720p', label: '720p HD (Cloud-Ready Instant Stream)' },
+          ],
+        },
+        { status: 422, headers: DOWNLOAD_CORS_HEADERS }
+      );
+    }
     const isBot =
       job.error?.code === 'HOST_BLOCKED' ||
       job.error?.code === 'ERR_YOUTUBE_BOT_CHECK' ||

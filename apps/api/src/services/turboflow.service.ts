@@ -265,6 +265,32 @@ export function parseResolutionHeight(targetResolution?: string): number | null 
   return null;
 }
 
+/**
+ * Detects whether a resolution string or dimension corresponds to 8K Ultra HD.
+ */
+export function is8KResolution(
+  resolution?: string | null,
+  height?: number | null,
+  width?: number | null
+): boolean {
+  if (height && height >= 4320) return true;
+  if (width && width >= 7680) return true;
+  if (!resolution) return false;
+  const lower = resolution.toLowerCase().trim();
+  return lower.includes('8k') || lower.includes('4320');
+}
+
+/**
+ * Constructs an optimized yt-dlp format selector for 8K video + audio stream pairing.
+ */
+export function get8KYtDlpFormatSelector(targetFormat: string = 'mp4'): string {
+  const ext = targetFormat.toLowerCase().replace(/^\./, '');
+  if (ext === 'mp4') {
+    return 'bestvideo[height>=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best';
+  }
+  return 'bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best';
+}
+
 function codecBase(codec?: string): string {
   return (codec || '').toLowerCase().split('.')[0].trim();
 }
@@ -357,21 +383,57 @@ export function selectTurboFlowStrategy(input: TurboFlowInput): TurboFlowDecisio
     };
   }
 
-  // 3. Smart Lane — Audio/Video Merge
+  const is8K =
+    (targetHeight !== null && targetHeight >= 4320) ||
+    (sourceHeight !== null && sourceHeight >= 4320) ||
+    Boolean(input.targetResolution && /^(?:8k|4320p?)/i.test(input.targetResolution));
+
+  // 3. Smart / Instant Lane — Audio/Video Merge
   if (input.operation === 'MERGE_AUDIO_VIDEO') {
     const compatibleCopy = isVideoStreamCopyCompatible(
       primaryVideo?.codec,
       primaryAudio?.codec,
       targetExt
     );
+    if (is8K && compatibleCopy && input.streamCopy !== false) {
+      return {
+        processingLane: 'instant',
+        queueClass: 'instant-processing',
+        strategyLabel: '8K Lossless Stream Remux',
+        losslessPreserved: true,
+        retentionMinutes: DEFAULT_RETENTION_MINUTES,
+        canDirectAudioCopy: true,
+        requiresVideoTranscode: false,
+      };
+    }
     return {
       processingLane: 'smart',
       queueClass: 'merge-processing',
-      strategyLabel: compatibleCopy ? 'Smart A/V Remux' : 'Smart A/V Merge',
+      strategyLabel: is8K ? '8K Lossless Stream Remux' : (compatibleCopy ? 'Smart A/V Remux' : 'Smart A/V Merge'),
       losslessPreserved: compatibleCopy && input.streamCopy !== false,
       retentionMinutes: DEFAULT_RETENTION_MINUTES,
       canDirectAudioCopy: false,
       requiresVideoTranscode: !compatibleCopy,
+    };
+  }
+
+  // 8K Lossless Remuxing Rule: When 8K media natively matches target container and streamCopy is not false,
+  // execute in Instant Lane without transcoding
+  const compatibleCopy = isVideoStreamCopyCompatible(
+    primaryVideo?.codec,
+    primaryAudio?.codec,
+    targetExt
+  );
+
+  if (is8K && compatibleCopy && input.streamCopy !== false) {
+    return {
+      processingLane: 'instant',
+      queueClass: 'instant-processing',
+      strategyLabel: '8K Lossless Stream Remux',
+      losslessPreserved: true,
+      retentionMinutes: DEFAULT_RETENTION_MINUTES,
+      canDirectAudioCopy: true,
+      requiresVideoTranscode: false,
     };
   }
 
@@ -407,12 +469,6 @@ export function selectTurboFlowStrategy(input: TurboFlowInput): TurboFlowDecisio
   }
 
   // 5. Instant Lane — Direct stream copy / remux (zero decode/re-encode)
-  const compatibleCopy = isVideoStreamCopyCompatible(
-    primaryVideo?.codec,
-    primaryAudio?.codec,
-    targetExt
-  );
-
   if (compatibleCopy) {
     return {
       processingLane: 'instant',

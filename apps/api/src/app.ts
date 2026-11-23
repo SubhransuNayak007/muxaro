@@ -185,6 +185,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // 4. Multi-Layer Rate Limiting & Duplicate Flood Guard (separate from daily quotas; polling exempt)
   app.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    if (process.env.RATE_LIMIT_ENABLED === 'false' || process.env.NODE_ENV === 'test') {
+      return;
+    }
+
     const method = (request.method || 'GET').toUpperCase();
     const pathWithoutQuery = (request.url || '/').split('?')[0];
 

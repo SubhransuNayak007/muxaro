@@ -24,32 +24,40 @@ export type SupportedPlatform =
   | null;
 
 export type SmartPreset =
+  | '8k'
+  | '4k'
   | '2k'
   | '1080p'
   | '720p'
+  | '480p'
   | 'audio'
   | 'desktop-direct'
   | 'best'
   | 'mp3'
   | 'lossless';
 
-export const PRESET_OPTIONS: { id: SmartPreset; label: string }[] = [
-  { id: '2k', label: '2K (1440p) · Cloud' },
-  { id: '1080p', label: '1080p · Cloud' },
-  { id: '720p', label: '720p · Cloud' },
-  { id: 'audio', label: 'Audio Only · Cloud' },
-  { id: 'desktop-direct', label: '4K / 8K · Desktop Direct' },
+export const PRESET_OPTIONS: { id: SmartPreset; label: string; badge: string }[] = [
+  { id: '8k', label: '8K Ultra HD', badge: 'Local Ultra HD' },
+  { id: '4k', label: '4K Ultra HD', badge: '4K Ultra HD' },
+  { id: '2k', label: '2K (1440p)', badge: 'Cloud & Local Ready' },
+  { id: '1080p', label: '1080p FHD', badge: 'Cloud Ready' },
+  { id: '720p', label: '720p HD', badge: 'Cloud Ready' },
+  { id: '480p', label: '480p SD', badge: 'Cloud Ready' },
+  { id: 'audio', label: 'Audio Only', badge: 'MP3 · FLAC' },
 ];
 
 export const presetLabels: Record<SmartPreset, string> = {
-  '2k': '2K (1440p) · Cloud',
-  '1080p': '1080p · Cloud',
-  '720p': '720p · Cloud',
+  '8k': '8K · Local Ultra HD',
+  '4k': '4K · Ultra HD',
+  '2k': '2K (1440p) · Cloud Ready',
+  '1080p': '1080p · Cloud Ready',
+  '720p': '720p · Cloud Ready',
+  '480p': '480p · Cloud Ready',
   audio: 'Audio Only · Cloud',
-  'desktop-direct': '4K / 8K · Desktop Direct',
-  best: '4K / 8K · Desktop Direct',
-  mp3: 'Audio Only · Cloud',
-  lossless: 'Audio Only · Cloud',
+  'desktop-direct': '8K / 4K · Local Direct',
+  best: '8K / 4K · Local Direct',
+  mp3: 'MP3 Audio · Cloud',
+  lossless: 'Studio FLAC · Cloud',
 };
 
 export interface PlatformConfig {
@@ -372,10 +380,11 @@ export default function HeroOmnibox({
                 <div
                   role="menu"
                   aria-label="Quality preset options"
-                  className="absolute right-0 mt-2 w-56 rounded-xl border border-line bg-surface shadow-lg p-1.5 z-50 text-xs"
+                  className="absolute right-0 mt-2 w-72 rounded-xl border border-line bg-surface shadow-lg p-1.5 z-50 text-xs"
                 >
-                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-content-secondary border-b border-line mb-1">
-                    Quality Preset
+                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-content-secondary border-b border-line mb-1 flex items-center justify-between">
+                    <span>Quality Preset</span>
+                    <span className="font-mono text-[9px] text-content-muted">Cloud & Local</span>
                   </div>
                   {PRESET_OPTIONS.map((opt) => {
                     const isSelected = activePreset === opt.id;
@@ -388,14 +397,19 @@ export default function HeroOmnibox({
                           setActivePreset(opt.id);
                           setPresetDropdownOpen(false);
                         }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors duration-150 ${
+                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors duration-150 ${
                           isSelected
                             ? 'bg-interactive text-brand-violet dark:text-content font-semibold'
                             : 'text-content hover:bg-surface-elevated'
                         }`}
                       >
-                        <span>{opt.label}</span>
-                        {isSelected && <Check className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="truncate">{opt.label}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary shrink-0">
+                            {opt.badge}
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-brand-violet shrink-0 ml-2" aria-hidden="true" />}
                       </button>
                     );
                   })}

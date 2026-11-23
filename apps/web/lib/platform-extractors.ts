@@ -1034,5 +1034,8 @@ export function buildExtractorResultFromPlatformMedia(
     items: [],
     entries: [],
     analyzedAt: new Date().toISOString(),
+    directStreamUrl: streamUrl || extracted.mediaUrl || extracted.url,
+    directMimeType: extracted.mimeType || 'video/mp4',
+    deliveryMode: extracted.deliveryMode || 'zero-hop',
   };
 }
