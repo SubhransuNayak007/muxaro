@@ -19,6 +19,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { sanitizeFilename } from './security-validator.ts';
 import { muxMedia, extractAudio, transcodeVideo } from './ffmpeg-muxer.ts';
+import { parseResolutionHeight } from './format-normalizer.ts';
+import { isBotBlockMessage } from './extractor-ytdlp.ts';
 import type { JobStatus, JobError } from './contracts.ts';
 import { extractPlatformMedia, buildExtractorResultFromPlatformMedia } from './platform-extractors.ts';
 
@@ -110,10 +112,39 @@ function jobMetaPath(id: string): string {
 /** Persist a job record to its JSON sidecar atomically */
 function persistJob(job: JobRecord): void {
   try {
-    fs.writeFileSync(jobMetaPath(job.id), JSON.stringify(job, null, 2), 'utf8');
+    const target = jobMetaPath(job.id);
+    const tmp = `${target}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(job, null, 2), 'utf8');
+    fs.renameSync(tmp, target);
   } catch {
-    // Non-fatal: in-memory state is still the source of truth for this instance
+    try {
+      fs.writeFileSync(jobMetaPath(job.id), JSON.stringify(job, null, 2), 'utf8');
+    } catch {}
   }
+}
+
+/** Standardized failure applicator ensuring accurate error codes (bot block / 403 / timeout) */
+function applyJobFailure(job: JobRecord, err: any): void {
+  if (job.status === 'cancelled') return;
+  const errMsg = String(err?.message || err || 'Failed to process media.');
+  const isBot =
+    isBotBlockMessage(errMsg) ||
+    err?.code === 'HOST_BLOCKED' ||
+    err?.code === 'ERR_YOUTUBE_BOT_CHECK';
+  const isTimeout =
+    err?.code === 'ERR_DOWNLOAD_TIMEOUT' ||
+    err?.code === 'TIMEOUT' ||
+    errMsg.toLowerCase().includes('timeout') ||
+    errMsg.toLowerCase().includes('timed out');
+
+  job.status = 'failed';
+  job.stage = 'FAILED';
+  job.stageMessage = errMsg;
+  job.error = {
+    code: isBot ? 'HOST_BLOCKED' : isTimeout ? 'ERR_DOWNLOAD_TIMEOUT' : (err?.code || 'ERR_PIPELINE_FAILED'),
+    message: errMsg,
+    retryable: !isBot,
+  };
 }
 
 /** Load a job from disk sidecar (returns undefined if not found or malformed) */
@@ -183,15 +214,20 @@ class JobManager {
   public getJob(id: string): JobRecord | undefined {
     // Fast path: in-memory hit
     const cached = this.jobs.get(id);
-    if (cached) return cached;
+    if (cached && (cached.status === 'ready' || cached.status === 'failed' || cached.status === 'cancelled')) {
+      return cached;
+    }
 
     // Slow path: check disk sidecar (handles cross-instance scenarios on Vercel)
     const fromDisk = loadJobFromDisk(id);
     if (fromDisk) {
-      // Warm the in-memory cache for subsequent requests on this instance
-      this.jobs.set(id, fromDisk);
-      return fromDisk;
+      if (!cached || fromDisk.status === 'ready' || fromDisk.status === 'failed' || fromDisk.status === 'cancelled' || fromDisk.progress > cached.progress) {
+        this.jobs.set(id, fromDisk);
+        return fromDisk;
+      }
     }
+
+    if (cached) return cached;
 
     // SOLUTION 2: Reconstruct a ready/downloadable job if the artifact file exists on disk
     return this.reconstructJobIfArtifactExists(id);
@@ -425,14 +461,7 @@ class JobManager {
           // For local test files on serverless — still run async (file I/O is fast)
           this.executePipeline(job, params, abortController.signal).catch((err: any) => {
             if (job.status !== 'cancelled') {
-              job.status = 'failed';
-              job.stage = 'FAILED';
-              job.stageMessage = err?.message || 'Processing pipeline encountered an error.';
-              job.error = {
-                code: 'ERR_PIPELINE_FAILED',
-                message: err?.message || 'Failed to process media.',
-                retryable: true,
-              };
+              applyJobFailure(job, err);
               this.notify(job);
             }
           });
@@ -442,14 +471,7 @@ class JobManager {
         }
       } catch (err: any) {
         if (job.status !== 'cancelled') {
-          job.status = 'failed';
-          job.stage = 'FAILED';
-          job.stageMessage = err?.message || 'Processing pipeline encountered an error.';
-          job.error = {
-            code: 'ERR_PIPELINE_FAILED',
-            message: err?.message || 'Failed to process media.',
-            retryable: true,
-          };
+          applyJobFailure(job, err);
           this.notify(job);
         }
       }
@@ -459,14 +481,7 @@ class JobManager {
     // Non-serverless: run pipeline asynchronously as before
     this.executePipeline(job, params, abortController.signal).catch((err: any) => {
       if (job.status !== 'cancelled') {
-        job.status = 'failed';
-        job.stage = 'FAILED';
-        job.stageMessage = err?.message || 'Processing pipeline encountered an error.';
-        job.error = {
-          code: 'ERR_PIPELINE_FAILED',
-          message: err?.message || 'Failed to process media.',
-          retryable: true,
-        };
+        applyJobFailure(job, err);
         this.notify(job);
       }
     });
@@ -525,7 +540,7 @@ class JobManager {
       }
 
       // Format selection with resilient fallback to avoid format errors
-      const height = parseInt(job.targetResolution || '1080', 10) || 1080;
+      const height = parseResolutionHeight(job.targetResolution);
       if (isAudioOnly) {
         if (params.audioFormatId && params.audioFormatId !== 'source') {
           args.push('-f', `${params.audioFormatId}/ba/b`);
@@ -565,6 +580,7 @@ class JobManager {
           dlErr?.message?.includes('403') ||
           dlErr?.message?.includes('Forbidden') ||
           dlErr?.message?.includes('bot') ||
+          dlErr?.code === 'HOST_BLOCKED' ||
           dlErr?.code === 'ERR_PROCESS_EXIT';
 
         if (isRecoverable) {
@@ -583,7 +599,20 @@ class JobManager {
         throw new Error('yt-dlp completed but downloaded file was not found.');
       }
 
-      const downloadedFile = path.join(tempDir, files[0]);
+      // Check if yt-dlp downloaded separate video and audio streams
+      const videoExts = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.flv'];
+      const audioExts = ['.m4a', '.opus', '.aac', '.mp3', '.ogg', '.wav', '.flac'];
+
+      let videoFilename: string | undefined;
+      let audioFilename: string | undefined;
+
+      if (files.length >= 2 && !isAudioOnly) {
+        audioFilename = files.find((f) => audioExts.some((e) => f.toLowerCase().endsWith(e)));
+        videoFilename = files.find((f) => f !== audioFilename && videoExts.some((e) => f.toLowerCase().endsWith(e)));
+      }
+
+      const downloadedFile = path.join(tempDir, videoFilename || files[0]);
+      const downloadedAudio = audioFilename ? path.join(tempDir, audioFilename) : undefined;
       const ext = path.extname(downloadedFile).replace('.', '').toLowerCase();
 
       // Post-processing / Muxing
@@ -617,15 +646,16 @@ class JobManager {
           : 'mp4') as any;
 
         // If downloaded file already matches target format and doesn't need audio remux
-        if (ext === targetContainer && targetContainer !== 'mp4') {
+        if (!downloadedAudio && ext === targetContainer && targetContainer !== 'mp4') {
           fs.copyFileSync(downloadedFile, finalPath);
         } else {
           // Remux with FFmpeg (and transcode Opus audio if target container is MP4)
           await muxMedia({
             videoPath: downloadedFile,
+            audioPath: downloadedAudio,
             outputPath: finalPath,
             targetContainer,
-            sourceAudioCodec: ext === 'webm' ? 'opus' : undefined,
+            sourceAudioCodec: ext === 'webm' || (downloadedAudio && (downloadedAudio.includes('opus') || downloadedAudio.includes('webm'))) ? 'opus' : undefined,
             signal,
             onProgress: (p) => {
               if (p.speed) job.speed = p.speed;
@@ -821,17 +851,6 @@ class JobManager {
         if (watchdogTimer) clearTimeout(watchdogTimer);
         signal.removeEventListener('abort', abortHandler);
         resolved = true;
-        if (err?.code !== 'ENOENT') {
-          job.status = 'failed';
-          job.stage = 'FAILED';
-          job.stageMessage = err.message;
-          job.error = {
-            code: 'ERR_PROCESS_SPAWN',
-            message: err.message,
-            retryable: true,
-          };
-          this.notify(job);
-        }
         reject(err);
       });
 
@@ -844,16 +863,11 @@ class JobManager {
         } else {
           const lastLines = stderrLines.slice(-5).join('; ');
           const message = lastLines || stderrLog.trim() || `yt-dlp exited with error code ${code}`;
-          job.status = 'failed';
-          job.stage = 'FAILED';
-          job.stageMessage = message;
-          job.error = {
-            code: 'ERR_PROCESS_EXIT',
-            message,
-            retryable: true,
-          };
-          this.notify(job);
-          reject(new Error(message));
+          const isBot = isBotBlockMessage(message);
+          const isTimeout = message.toLowerCase().includes('timeout') || message.toLowerCase().includes('timed out');
+          const err = new Error(message);
+          (err as any).code = isBot ? 'HOST_BLOCKED' : isTimeout ? 'ERR_DOWNLOAD_TIMEOUT' : 'ERR_PROCESS_EXIT';
+          reject(err);
         }
       });
     });
@@ -973,7 +987,7 @@ class JobManager {
             info.formats.find((f: any) => f.hasAudio && !f.hasVideo) ||
             info.formats.find((f: any) => f.hasAudio);
         } else {
-          const reqHeight = parseInt(job.targetResolution || '1080', 10) || 1080;
+          const reqHeight = parseResolutionHeight(job.targetResolution);
           const vFormats = info.formats.filter((f: any) => f.hasVideo);
           selectedFormat =
             vFormats.find((f: any) => f.height === reqHeight) ||
@@ -1059,7 +1073,7 @@ class JobManager {
           job.stage = 'FAILED';
           job.stageMessage = botMsg;
           job.error = {
-            code: 'ERR_YOUTUBE_BOT_CHECK',
+            code: 'HOST_BLOCKED',
             message: botMsg,
             retryable: false,
           };
@@ -1273,6 +1287,12 @@ class JobManager {
         if (job.filePath && fs.existsSync(job.filePath)) {
           try {
             fs.unlinkSync(job.filePath);
+          } catch {}
+        }
+        const metaPath = jobMetaPath(id);
+        if (fs.existsSync(metaPath)) {
+          try {
+            fs.unlinkSync(metaPath);
           } catch {}
         }
         this.jobs.delete(id);

@@ -5,7 +5,7 @@
  */
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import {
+import type {
   ContainerFormat,
   AudioFormat,
   ConvertTaskOptions,
@@ -14,7 +14,7 @@ import {
   CustomExecTaskOptions,
   FFmpegProgress,
   FFmpegTaskResult,
-} from './types';
+} from './types.ts';
 
 const MIME_MAP: Record<string, string> = {
   mp4: 'video/mp4',

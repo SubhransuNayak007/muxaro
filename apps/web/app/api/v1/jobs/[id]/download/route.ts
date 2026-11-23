@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { jobManager, OUTPUTS_DIR } from '@/lib/job-manager';
 import { formatContentDisposition, sanitizeFilename } from '@/lib/security-validator';
+import { parseResolutionHeight } from '@/lib/format-normalizer';
 import { streamTier0ToResponse, inferMime } from '@/lib/pipeline/tier0-passthrough';
 import { createApiErrorResponse } from '@/lib/api-error';
 
@@ -114,7 +115,7 @@ export async function GET(
       });
       const info = await ytdl.getInfo(job.sourceUrl);
       const isAudio = ['mp3', 'm4a', 'flac', 'wav', 'opus'].includes((job.targetFormat || '').toLowerCase());
-      const reqHeight = parseInt(job.targetResolution || '1080', 10) || 1080;
+      const reqHeight = parseResolutionHeight(job.targetResolution);
       let selectedFormat: any;
       if (isAudio) {
         selectedFormat =

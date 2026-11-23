@@ -5,7 +5,7 @@
  * cancellation with AbortSignal, and typed promise resolution.
  */
 
-import {
+import type {
   ConvertTaskOptions,
   ExtractAudioTaskOptions,
   MergeTaskOptions,
@@ -15,8 +15,8 @@ import {
   FFmpegProgress,
   WorkerRequestMessage,
   WorkerResponseMessage,
-} from './types';
-import { FFmpegEngine } from './ffmpeg-engine';
+} from './types.ts';
+import { FFmpegEngine } from './ffmpeg-engine.ts';
 
 export class FFmpegWorkerClient {
   private static instance: FFmpegWorkerClient | null = null;

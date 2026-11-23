@@ -544,7 +544,15 @@ export async function stopMediaWorkerFleet(): Promise<void> {
   console.log('[WorkerMedia] Media worker fleet shut down cleanly.');
 }
 
-// Register OS termination signal listeners
+// Register global error and OS termination signal listeners
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[WorkerMedia] Unhandled Promise Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[WorkerMedia] Uncaught Exception:', err);
+});
+
 process.on('SIGTERM', async () => {
   console.log('[WorkerMedia] Received SIGTERM');
   await stopMediaWorkerFleet();

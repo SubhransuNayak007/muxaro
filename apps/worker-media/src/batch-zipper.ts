@@ -10,11 +10,15 @@
 
 import archiver from 'archiver';
 import { PassThrough, type Readable } from 'node:stream';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Upload } from '@aws-sdk/lib-storage';
 import { S3Client } from '@aws-sdk/client-s3';
-import { MuxaroError, type JobProgressEvent } from '@muxaro/shared';
+import { MuxaroError, assertSafeMediaUrl, type JobProgressEvent } from '@muxaro/shared';
 import { getMuxaroRedis, type MuxaroRedisClient } from '@muxaro/db';
 import { getS3Client, getR2BucketName } from './s3-client.js';
+import { StreamPipeline, getStorageArtifactPath } from './stream-pipeline.js';
+import { validateSandboxPath } from './security/hardened-ffprobe.js';
 import type { BatchJobPayload, BatchItemInput, BatchPackagingResult } from './types.js';
 
 export interface BatchZipperOptions {
@@ -24,12 +28,13 @@ export interface BatchZipperOptions {
   readonly redisClient?: MuxaroRedisClient;
   readonly signal?: AbortSignal;
   readonly concurrency?: number;
+  readonly timeoutMs?: number;
 }
 
 export class BatchZipper {
   /**
    * Packages a playlist or item list into a streaming STORE-mode ZIP archive
-   * piped directly to Cloudflare R2 / S3.
+   * piped directly to Cloudflare R2 / S3 or resilient local disk fallback.
    */
   public static async execute(options: BatchZipperOptions): Promise<BatchPackagingResult> {
     const startTime = Date.now();
@@ -45,6 +50,7 @@ export class BatchZipper {
 
     const storageKey = `outputs/${job.retentionTier}/${job.jobId}.zip`;
     const outputFilename = `${job.title ? sanitizeZipName(job.title) : job.jobId}.zip`;
+    const { artifactPath, directPath } = getStorageArtifactPath(storageKey);
 
     // 1. Initialize STORE-mode archiver (Level 0 compression)
     const archive = archiver('zip', {
@@ -54,30 +60,103 @@ export class BatchZipper {
     });
 
     const passThrough = new PassThrough({ highWaterMark: 16 * 1024 * 1024 });
+    passThrough.on('error', () => {
+      // Suppress unhandled stream error
+    });
     archive.pipe(passThrough);
 
-    // 2. Setup S3 Multipart Upload directly from archiver stream
-    const upload = new Upload({
-      client: s3Client,
-      params: {
-        Bucket: bucketName,
-        Key: storageKey,
-        Body: passThrough,
-        ContentType: 'application/zip',
-      },
-      partSize: 8 * 1024 * 1024,
-      queueSize: 4,
-      leavePartsOnError: false,
-    });
+    // 2. Setup storage sink: check if S3 / MinIO is offline
+    const isS3Offline = await StreamPipeline.checkIfS3Offline(s3Client, bucketName);
+    let upload: Upload | null = null;
+    let localFilePromise: Promise<number> | null = null;
+    let fileWriter: fs.WriteStream | null = null;
+
+    if (isS3Offline) {
+      fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+      fs.mkdirSync(path.dirname(directPath), { recursive: true });
+
+      fileWriter = fs.createWriteStream(artifactPath);
+      passThrough.pipe(fileWriter);
+
+      localFilePromise = new Promise<number>((resolve, reject) => {
+        fileWriter!.on('finish', () => {
+          try {
+            const stats = fs.statSync(artifactPath);
+            try {
+              if (artifactPath !== directPath) {
+                if (fs.existsSync(directPath)) {
+                  fs.unlinkSync(directPath);
+                }
+                fs.linkSync(artifactPath, directPath);
+              }
+            } catch {
+              try {
+                fs.copyFileSync(artifactPath, directPath);
+              } catch {}
+            }
+            resolve(stats.size);
+          } catch {
+            resolve(0);
+          }
+        });
+        fileWriter!.on('error', (err) => {
+          reject(new MuxaroError(`Failed writing zip artifact to disk: ${err.message}`, 'INTERNAL_ERROR', 500));
+        });
+      });
+    } else {
+      upload = new Upload({
+        client: s3Client,
+        params: {
+          Bucket: bucketName,
+          Key: storageKey,
+          Body: passThrough,
+          ContentType: 'application/zip',
+        },
+        partSize: 8 * 1024 * 1024,
+        queueSize: 4,
+        leavePartsOnError: false,
+      });
+    }
+
+    let isTerminated = false;
+    let timedOut = false;
+
+    const terminateArchiver = (reason: string) => {
+      if (isTerminated) return;
+      isTerminated = true;
+
+      try {
+        archive.abort();
+      } catch {}
+
+      if (upload) {
+        upload.abort().catch(() => {});
+      }
+      if (fileWriter) {
+        try {
+          fileWriter.destroy();
+        } catch {}
+      }
+      try {
+        passThrough.destroy();
+      } catch {}
+    };
+
+    const timeoutMs = options.timeoutMs ?? (30 * 60 * 1000); // 30 minutes ceiling
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      terminateArchiver('Batch archiver timed out');
+    }, timeoutMs);
+    timeoutTimer.unref?.();
 
     if (signal) {
       if (signal.aborted) {
-        archive.abort();
+        clearTimeout(timeoutTimer);
+        terminateArchiver('Batch job initially cancelled');
         throw new MuxaroError('Batch job cancelled by client', 'CANCELLED', 499);
       }
       signal.addEventListener('abort', () => {
-        archive.abort();
-        upload.abort().catch(() => {});
+        terminateArchiver('Batch job abort signal received');
       });
     }
 
@@ -104,9 +183,13 @@ export class BatchZipper {
       redis.publishJobEvent(job.jobId, event).catch(() => {});
     });
 
-    archive.on('error', (err: Error) => {
-      upload.abort().catch(() => {});
-      throw new MuxaroError(`Archiver error: ${err.message}`, 'INTERNAL_ERROR', 500);
+    const archivePromise = new Promise<void>((resolve, reject) => {
+      archive.on('error', (err: Error) => {
+        terminateArchiver('Archiver error emitted');
+        reject(new MuxaroError(`Archiver error: ${err.message}`, 'INTERNAL_ERROR', 500));
+      });
+      archive.on('end', () => resolve());
+      archive.on('finish', () => resolve());
     });
 
     // 4. Concurrently fetch and append items into ZIP
@@ -122,7 +205,7 @@ export class BatchZipper {
 
     const processItemsPromise = (async () => {
       for (let i = 0; i < items.length; i += itemConcurrency) {
-        if (signal?.aborted) {
+        if (signal?.aborted || isTerminated) {
           throw new MuxaroError('Batch packaging aborted', 'CANCELLED', 499);
         }
 
@@ -168,9 +251,28 @@ export class BatchZipper {
       await archive.finalize();
     })();
 
-    // 5. Await both upload completion and archiver finalization
+    // 5. Await upload completion, items processing, and archiver finalization
     try {
-      const [uploadResult] = await Promise.all([upload.done(), processItemsPromise]);
+      const storagePromise = isS3Offline ? localFilePromise! : upload!.done();
+
+      // Attach catch handlers immediately to prevent UnhandledPromiseRejection in cross-failure races
+      storagePromise.catch(() => {});
+      processItemsPromise.catch(() => {});
+      archivePromise.catch(() => {});
+
+      const [storageResult] = await Promise.all([storagePromise, processItemsPromise, archivePromise]);
+      clearTimeout(timeoutTimer);
+
+      let sizeBytes = 0;
+      if (isS3Offline && typeof storageResult === 'number') {
+        sizeBytes = storageResult;
+      } else {
+        try {
+          if (fs.existsSync(artifactPath)) {
+            sizeBytes = fs.statSync(artifactPath).size;
+          }
+        } catch {}
+      }
 
       const processingTimeMs = Date.now() - startTime;
 
@@ -190,16 +292,21 @@ export class BatchZipper {
         jobId: job.jobId,
         storageKey,
         filename: outputFilename,
-        sizeBytes: 0,
+        sizeBytes,
         totalEntries,
         processingTimeMs,
       };
-    } catch (err) {
-      archive.abort();
-      try {
-        await upload.abort();
-      } catch {
-        // ignore
+    } catch (err: any) {
+      clearTimeout(timeoutTimer);
+      terminateArchiver('Error during batch execution');
+
+      if (isS3Offline) {
+        try { if (fs.existsSync(artifactPath)) fs.unlinkSync(artifactPath); } catch {}
+        try { if (fs.existsSync(directPath)) fs.unlinkSync(directPath); } catch {}
+      }
+
+      if (timedOut) {
+        throw new MuxaroError('Batch packaging timed out', 'GATEWAY_TIMEOUT', 504);
       }
       throw err;
     }
@@ -213,7 +320,10 @@ export class BatchZipper {
     signal?: AbortSignal
   ): Promise<Readable> {
     if (sourceUrl.startsWith('http://') || sourceUrl.startsWith('https://')) {
-      const response = await fetch(sourceUrl, {
+      const safeInfo = await assertSafeMediaUrl(sourceUrl);
+      const targetUrl = safeInfo.canonicalUrl || sourceUrl;
+
+      const response = await fetch(targetUrl, {
         signal,
         headers: {
           'User-Agent': 'MuxaroMediaWorker/1.0',
@@ -233,9 +343,10 @@ export class BatchZipper {
       return NodeReadable.fromWeb(response.body as any);
     }
 
-    // Local file fallback
+    // Local file fallback with strict sandbox path validation
+    const validatedPath = validateSandboxPath(sourceUrl);
     const fs = await import('node:fs');
-    return fs.createReadStream(sourceUrl);
+    return fs.createReadStream(validatedPath);
   }
 }
 

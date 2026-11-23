@@ -429,3 +429,31 @@ export function normalizeAudioOptions(
 
   return tracks;
 }
+
+/**
+ * Universal resolution height parser for 8K to 144p resolution strings
+ */
+export function parseResolutionHeight(res?: string | number): number {
+  if (!res) return 1080;
+  if (typeof res === 'number') return res;
+  const str = String(res).trim().toUpperCase();
+  if (str.includes('8K') || str.includes('4320')) return 4320;
+  if (str.includes('4K') || str.includes('2160') || str.includes('UHD')) return 2160;
+  if (str.includes('1440') || str.includes('2K') || str.includes('QHD')) return 1440;
+  if (str.includes('1080') || str.includes('FHD')) return 1080;
+  if (str.includes('720') || str.includes('HD')) return 720;
+  if (str.includes('480') || str.includes('SD')) return 480;
+  if (str.includes('360')) return 360;
+  if (str.includes('240')) return 240;
+  if (str.includes('144')) return 144;
+  const match = str.match(/\d+/);
+  if (match) {
+    const val = parseInt(match[0], 10);
+    if (val === 8) return 4320;
+    if (val === 4) return 2160;
+    if (val === 2) return 1440;
+    if (val >= 144) return val;
+  }
+  return 1080;
+}
+

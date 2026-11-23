@@ -95,10 +95,13 @@ function getExecutionEnv(): NodeJS.ProcessEnv {
  */
 export function getStorageArtifactPath(storageKey: string): { artifactPath: string; directPath: string } {
   let rootDir = process.cwd();
-  if (!fs.existsSync(path.join(rootDir, 'package.json')) && !fs.existsSync(path.join(rootDir, 'apps'))) {
-    const parent = path.resolve(rootDir, '../..');
-    if (fs.existsSync(path.join(parent, 'apps'))) {
-      rootDir = parent;
+  if (!fs.existsSync(path.join(rootDir, 'apps'))) {
+    const parent1 = path.resolve(rootDir, '..');
+    const parent2 = path.resolve(rootDir, '../..');
+    if (fs.existsSync(path.join(parent1, 'apps'))) {
+      rootDir = parent1;
+    } else if (fs.existsSync(path.join(parent2, 'apps'))) {
+      rootDir = parent2;
     }
   }
 
@@ -227,6 +230,10 @@ export class StreamPipeline {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
+      upstreamChild.stdout?.on('error', () => {});
+      upstreamChild.stderr?.on('error', () => {});
+      upstreamChild.stdin?.on('error', () => {});
+
       upstreamChild.stderr?.on('data', (d: Buffer) => {
         const text = d.toString('utf-8');
         upstreamStderr = (upstreamStderr + text).slice(-8192);
@@ -234,6 +241,7 @@ export class StreamPipeline {
 
       upstreamChild.on('error', (err) => {
         upstreamError = new MuxaroError(`yt-dlp spawn failed: ${err.message}`, 'INTERNAL_ERROR', 500);
+        terminateChild('yt-dlp spawn error');
       });
 
       upstreamChild.on('close', (code) => {
@@ -248,6 +256,7 @@ export class StreamPipeline {
             const cleanErr = StreamPipeline.extractYtDlpErrorMessage(upstreamStderr);
             upstreamError = new MuxaroError(`yt-dlp exited with code ${code}: ${cleanErr}`, 'EXTRACTION_FAILED', 502);
           }
+          terminateChild(`yt-dlp exited with code ${code}`);
         }
       });
 
@@ -256,6 +265,12 @@ export class StreamPipeline {
         isPipedInput = true;
       }
     } else if (!isPipedInput) {
+      if (!fs.existsSync(inputSource)) {
+        const { directPath } = getStorageArtifactPath(inputSource);
+        if (fs.existsSync(directPath)) {
+          inputSource = directPath;
+        }
+      }
       // Only call validateSandboxPath for local file paths!
       inputSource = validateSandboxPath(inputSource);
     }
@@ -263,7 +278,17 @@ export class StreamPipeline {
     // 2. Run FFprobe on source to extract stream topology & codecs
     let probe: ProbedMediaMetadata;
     if (isPipedInput) {
-      probe = { durationSeconds: job.totalDurationSeconds || 0 };
+      probe = {
+        durationSeconds: job.totalDurationSeconds || 0,
+        video: job.videoCodec ? {
+          codec: job.videoCodec,
+          width: 0,
+          height: job.targetResolution ? (Number.parseInt(job.targetResolution.replace(/[^\d]/g, ''), 10) || 0) : 0,
+        } : undefined,
+        audio: job.audioCodec ? {
+          codec: job.audioCodec,
+        } : undefined,
+      };
     } else {
       try {
         probe = await probeInputMedia(inputSource);
@@ -300,7 +325,9 @@ export class StreamPipeline {
     let accumulatedStderr = '';
     let lastProgressTime = 0;
     let lastProgressPercent = 0;
+    let lastProcessedBytes = 0;
     let timedOut = false;
+    let fileWriter: fs.WriteStream | null = null;
 
     const terminateChild = (reason: string) => {
       if (isTerminated) return;
@@ -309,18 +336,27 @@ export class StreamPipeline {
       const killProc = (proc: ChildProcess | null) => {
         if (!proc || !proc.pid) return;
         try {
+          if (proc.stdin) {
+            try { proc.stdin.destroy(); } catch {}
+          }
           if (process.platform === 'win32') {
-            spawn('taskkill', ['/pid', proc.pid.toString(), '/T', '/F'], {
+            const tk = spawn('taskkill', ['/pid', proc.pid.toString(), '/T', '/F'], {
               shell: false,
               windowsHide: true,
             });
+            tk.on('error', () => {
+              try { proc.kill(); } catch {}
+            });
           } else {
             proc.kill('SIGTERM');
-            setTimeout(() => {
+            const killTimer = setTimeout(() => {
               try {
-                proc.kill('SIGKILL');
+                if (!proc.killed) {
+                  proc.kill('SIGKILL');
+                }
               } catch {}
             }, 2500);
+            killTimer.unref?.();
           }
         } catch {}
       };
@@ -329,13 +365,24 @@ export class StreamPipeline {
         killProc(upstreamChild);
       }
       killProc(childProcess);
+
+      if (fileWriter) {
+        try { fileWriter.destroy(); } catch {}
+      }
+      if (outputStream) {
+        try { outputStream.destroy(); } catch {}
+      }
     };
 
     const executionTimeoutMs = options.timeoutMs ?? (14400 * 1000);
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
       terminateChild('FFmpeg execution timed out');
+      if (upload) {
+        upload.abort().catch(() => {});
+      }
     }, executionTimeoutMs);
+    timeoutTimer.unref?.();
 
     if (signal) {
       if (signal.aborted) {
@@ -345,6 +392,9 @@ export class StreamPipeline {
       }
       signal.addEventListener('abort', () => {
         terminateChild('AbortSignal triggered during processing');
+        if (upload) {
+          upload.abort().catch(() => {});
+        }
       });
     }
 
@@ -359,11 +409,11 @@ export class StreamPipeline {
       fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
       fs.mkdirSync(path.dirname(directPath), { recursive: true });
 
-      const fileWriter = fs.createWriteStream(artifactPath);
+      fileWriter = fs.createWriteStream(artifactPath);
       outputStream.pipe(fileWriter);
 
       localFilePromise = new Promise<number>((resolve, reject) => {
-        fileWriter.on('finish', () => {
+        fileWriter!.on('finish', () => {
           try {
             const stats = fs.statSync(artifactPath);
             // Also link / copy to direct storage path for immediate API route accessibility
@@ -384,7 +434,7 @@ export class StreamPipeline {
             resolve(0);
           }
         });
-        fileWriter.on('error', (err) => {
+        fileWriter!.on('error', (err) => {
           reject(new MuxaroError(`Failed writing artifact to disk: ${err.message}`, 'INTERNAL_ERROR', 500));
         });
       });
@@ -417,6 +467,9 @@ export class StreamPipeline {
 
       const parsed = StreamPipeline.parseStderrProgress(text, durationSeconds);
       if (parsed) {
+        if (parsed.processedBytes) {
+          lastProcessedBytes = parsed.processedBytes;
+        }
         const now = Date.now();
         // Throttle updates to at most once per 400ms unless progress stepped up significantly
         if (now - lastProgressTime >= 400 || parsed.progressPercent - lastProgressPercent >= 3) {
@@ -456,9 +509,13 @@ export class StreamPipeline {
         ? localFilePromise!
         : upload!.done();
 
+      // Attach catch handler immediately to prevent UnhandledPromiseRejection if FFmpeg fails first
+      storagePromise.catch(() => {});
+
       const ffmpegPromise = new Promise<void>((resolve, reject) => {
         childProcess.on('error', (err) => {
           clearTimeout(timeoutTimer);
+          terminateChild('FFmpeg process failed to spawn');
           reject(new MuxaroError(`FFmpeg process failed to spawn: ${err.message}`, 'INTERNAL_ERROR', 500));
         });
 
@@ -483,6 +540,7 @@ export class StreamPipeline {
             );
           }
           if (code !== 0) {
+            terminateChild(`FFmpeg exited with error code ${code}`);
             const msg = StreamPipeline.extractFFmpegErrorMessage(accumulatedStderr) || upstreamStderr.slice(-300);
             return reject(
               new MuxaroError(`FFmpeg exited with error code ${code}: ${msg}`, 'TRANSCODE_FAILED', 500)
@@ -491,6 +549,9 @@ export class StreamPipeline {
           resolve();
         });
       });
+
+      // Attach catch handler immediately to prevent UnhandledPromiseRejection if storage fails first
+      ffmpegPromise.catch(() => {});
 
       const [storageResult] = await Promise.all([storagePromise, ffmpegPromise]);
 
@@ -503,6 +564,9 @@ export class StreamPipeline {
             sizeBytes = fs.statSync(artifactPath).size;
           }
         } catch {}
+      }
+      if (sizeBytes === 0 && lastProcessedBytes > 0) {
+        sizeBytes = lastProcessedBytes;
       }
 
       const processingTimeMs = Date.now() - startTime;
@@ -561,6 +625,11 @@ export class StreamPipeline {
           await upload.abort();
         }
       } catch {}
+
+      if (isS3Offline) {
+        try { if (fs.existsSync(artifactPath)) fs.unlinkSync(artifactPath); } catch {}
+        try { if (fs.existsSync(directPath)) fs.unlinkSync(directPath); } catch {}
+      }
 
       throw err;
     }
@@ -641,13 +710,34 @@ export class StreamPipeline {
       stdio: [inputStream ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     });
 
-    if (inputStream && child.stdin) {
-      inputStream.pipe(child.stdin);
+    if (inputStream) {
+      inputStream.on('error', () => {
+        // Suppress unhandled stream error if upstream stream fails
+      });
+      if (child.stdin) {
+        child.stdin.on('error', () => {
+          // Suppress unhandled EPIPE error when FFmpeg closes stdin early
+        });
+        inputStream.pipe(child.stdin);
+      }
     }
 
     if (child.stdout) {
+      child.stdout.on('error', () => {
+        // Suppress unhandled stream error on child stdout
+      });
       child.stdout.pipe(outputStream);
     }
+
+    if (child.stderr) {
+      child.stderr.on('error', () => {
+        // Suppress unhandled stream error on child stderr
+      });
+    }
+
+    outputStream.on('error', () => {
+      // Suppress unhandled stream error on outputStream
+    });
 
     return { childProcess: child, outputStream };
   }

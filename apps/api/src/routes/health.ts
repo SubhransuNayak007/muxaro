@@ -182,8 +182,12 @@ export const healthRoutes: FastifyPluginAsync = async (fastify) => {
 
     return reply.send({
       success: true,
-      data: healthData,
+      data: {
+        ...healthData,
+        status: dbHealthy ? 'HEALTHY' : 'DEGRADED',
+      },
       ...healthData,
+      status: dbHealthy ? 'healthy' : 'degraded',
       requestId,
     });
   });

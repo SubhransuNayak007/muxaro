@@ -6,11 +6,12 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "test": "node --experimental-strip-types security/tests/ssrf.test.ts && node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts && node --experimental-strip-types security/tests/rate-limiter.test.ts && node --experimental-strip-types security/tests/validation.test.ts",
+    "test": "node --experimental-strip-types security/tests/ssrf.test.ts && node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts && node --experimental-strip-types security/tests/rate-limiter.test.ts && node --experimental-strip-types security/tests/validation.test.ts && node --experimental-strip-types security/tests/token-signer.test.ts",
     "test:ssrf": "node --experimental-strip-types security/tests/ssrf.test.ts",
     "test:ffmpeg": "node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts",
     "test:rate": "node --experimental-strip-types security/tests/rate-limiter.test.ts",
-    "test:val": "node --experimental-strip-types security/tests/validation.test.ts"
+    "test:val": "node --experimental-strip-types security/tests/validation.test.ts",
+    "test:token": "node --experimental-strip-types security/tests/token-signer.test.ts"
   },
   "keywords": [
     "security",

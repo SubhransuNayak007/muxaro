@@ -76,9 +76,35 @@ export class TokenService {
     let payload: SignedDownloadTokenPayload;
     try {
       const decodedJson = Buffer.from(payloadB64, 'base64url').toString('utf8');
-      payload = JSON.parse(decodedJson);
-    } catch {
-      throw new Error('Failed to parse download token payload');
+      const parsed = JSON.parse(decodedJson);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('Malformed payload');
+      }
+      if (
+        Object.prototype.hasOwnProperty.call(parsed, '__proto__') ||
+        Object.prototype.hasOwnProperty.call(parsed, 'constructor') ||
+        Object.prototype.hasOwnProperty.call(parsed, 'prototype')
+      ) {
+        throw new Error('Prototype pollution attempt detected');
+      }
+      if (
+        typeof parsed.jobId !== 'string' || !parsed.jobId ||
+        typeof parsed.artifactId !== 'string' || !parsed.artifactId ||
+        typeof parsed.filename !== 'string' || !parsed.filename ||
+        typeof parsed.userId !== 'string' || !parsed.userId ||
+        typeof parsed.expiresAt !== 'number' || !Number.isFinite(parsed.expiresAt)
+      ) {
+        throw new Error('Invalid download token payload schema');
+      }
+      payload = {
+        jobId: parsed.jobId.trim(),
+        artifactId: parsed.artifactId.trim(),
+        filename: parsed.filename.trim(),
+        userId: parsed.userId.trim(),
+        expiresAt: parsed.expiresAt,
+      };
+    } catch (err: any) {
+      throw new Error(`Failed to parse download token payload: ${err.message || 'invalid payload'}`);
     }
 
     if (Date.now() > payload.expiresAt) {

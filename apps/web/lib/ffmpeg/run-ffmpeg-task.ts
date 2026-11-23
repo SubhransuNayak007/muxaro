@@ -4,8 +4,8 @@
  * Works outside React components, in scripts, background download workers, or utilities.
  */
 
-import { FFmpegWorkerClient } from './ffmpeg-client';
-import {
+import { FFmpegWorkerClient } from './ffmpeg-client.ts';
+import type {
   FFmpegTaskConfig,
   FFmpegTaskResult,
   ConvertTaskOptions,
@@ -13,7 +13,7 @@ import {
   MergeTaskOptions,
   CustomExecTaskOptions,
   FFmpegProgress,
-} from './types';
+} from './types.ts';
 
 /**
  * Executes a media task using the client-side shared ffmpeg worker.

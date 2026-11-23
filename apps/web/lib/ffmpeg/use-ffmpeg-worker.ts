@@ -7,8 +7,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { FFmpegWorkerClient } from './ffmpeg-client';
-import {
+import { FFmpegWorkerClient } from './ffmpeg-client.ts';
+import type {
   ConvertTaskOptions,
   ExtractAudioTaskOptions,
   MergeTaskOptions,
@@ -17,7 +17,7 @@ import {
   FFmpegTaskResult,
   FFmpegProgress,
   FFmpegWorkerState,
-} from './types';
+} from './types.ts';
 
 const INITIAL_PROGRESS: FFmpegProgress = {
   ratio: 0,

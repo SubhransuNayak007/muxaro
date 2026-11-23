@@ -14,6 +14,7 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { parseResolutionHeight } from './format-normalizer.ts';
 
 export type TargetMuxContainer = 'mp4' | 'mkv' | 'webm';
 export type TargetAudioFormat = 'mp3' | 'm4a' | 'opus' | 'flac' | 'wav';
@@ -49,7 +50,7 @@ export interface ExtractAudioOptions {
 export interface TranscodeVideoOptions {
   inputPath: string;
   outputPath: string;
-  targetResolution?: '1080p' | '720p' | '480p' | '360p';
+  targetResolution?: '8K' | '4K' | '1440p' | '1080p' | '720p' | '480p' | '360p' | '240p' | string;
   durationSeconds?: number;
   onProgress?: (progress: MuxProgress) => void;
   signal?: AbortSignal;
@@ -222,12 +223,42 @@ export async function muxMedia(options: MuxMediaOptions): Promise<void> {
         );
       }
     } else {
-      // Video only
-      args.push('-c:v', 'copy', '-movflags', '+faststart');
+      // Single file input containing video (and possibly audio)
+      if (isOpusOrIncompatible) {
+        args.push(
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-movflags', '+faststart'
+        );
+      } else {
+        args.push(
+          '-c:v', 'copy',
+          '-c:a', 'copy',
+          '-movflags', '+faststart'
+        );
+      }
     }
-  } else if (targetContainer === 'mkv' || targetContainer === 'webm') {
-    // Lossless stream-copy for MKV/WebM (-c copy)
+  } else if (targetContainer === 'mkv') {
+    // Lossless stream-copy for MKV (-c copy supports all codecs)
     args.push('-c', 'copy');
+  } else if (targetContainer === 'webm') {
+    // WebM only accepts VP8/VP9/AV1 video and Opus/Vorbis audio.
+    const audioCodecLower = String(sourceAudioCodec || '').toLowerCase();
+    const isOpusOrVorbis = audioCodecLower.includes('opus') || audioCodecLower.includes('vorbis');
+    const isWebmVideo =
+      videoPath.toLowerCase().endsWith('.webm') ||
+      videoPath.toLowerCase().endsWith('.vp9') ||
+      videoPath.toLowerCase().endsWith('.av1');
+
+    if (isWebmVideo && isOpusOrVorbis) {
+      args.push('-c', 'copy');
+    } else if (isWebmVideo) {
+      args.push('-c:v', 'copy', '-c:a', 'libopus', '-b:a', '128k');
+    } else {
+      // Transcode video to VP9 and audio to Opus
+      args.push('-c:v', 'libvpx-vp9', '-crf', '30', '-b:v', '0', '-c:a', 'libopus', '-b:a', '128k');
+    }
   } else {
     // Fallback stream copy
     args.push('-c', 'copy');
@@ -295,7 +326,7 @@ export async function transcodeVideo(options: TranscodeVideoOptions): Promise<vo
     throw new Error(`Input media file does not exist: ${inputPath}`);
   }
 
-  const targetHeight = targetResolution === '480p' ? 480 : targetResolution === '360p' ? 360 : 720;
+  const targetHeight = parseResolutionHeight(targetResolution);
 
   const args: string[] = [
     '-y',

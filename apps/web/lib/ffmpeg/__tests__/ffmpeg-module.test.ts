@@ -13,7 +13,7 @@ import {
   runExtractAudioTask,
   runMergeTask,
   isOPFSSupported,
-} from '../index';
+} from '../index.ts';
 
 async function runTests() {
   console.log('=== TEST 1: Module Exports Verification ===');

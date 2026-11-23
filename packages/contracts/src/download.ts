@@ -113,3 +113,27 @@ export function validateDownloadResponse(data: unknown): {
   if (result.success) return { success: true, data: result.data };
   return { success: false, error: result.error };
 }
+
+// =============================================================================
+// 5. Signed Download Token Contract
+// =============================================================================
+
+export const signedDownloadTokenPayloadSchema = z.object({
+  jobId: z.string().trim().min(1, 'jobId is required'),
+  artifactId: z.string().trim().min(1, 'artifactId is required'),
+  filename: z.string().trim().min(1, 'filename is required'),
+  userId: z.string().trim().min(1, 'userId is required'),
+  expiresAt: z.number().positive('expiresAt must be a positive timestamp'),
+});
+export type SignedDownloadTokenPayload = z.infer<typeof signedDownloadTokenPayloadSchema>;
+
+export function validateSignedDownloadTokenPayload(data: unknown): {
+  success: boolean;
+  data?: SignedDownloadTokenPayload;
+  error?: z.ZodError;
+} {
+  const result = signedDownloadTokenPayloadSchema.safeParse(data);
+  if (result.success) return { success: true, data: result.data };
+  return { success: false, error: result.error };
+}
+

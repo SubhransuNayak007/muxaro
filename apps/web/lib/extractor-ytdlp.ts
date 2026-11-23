@@ -53,7 +53,7 @@ export function detectMediaPlatform(rawUrl: string): SupportedPlatform {
   return 'other';
 }
 
-function resolveResolutionLabel(height: number, width?: number): string {
+export function resolveResolutionLabel(height: number, width?: number): string {
   if (height >= 4320 || (width && width >= 7680)) return '8K Ultra HD';
   if (height >= 2160 || (width && width >= 3840)) return '4K Ultra HD';
   if (height >= 1440 || (width && width >= 2560)) return '1440p Quad HD';
@@ -65,7 +65,7 @@ function resolveResolutionLabel(height: number, width?: number): string {
   return `${height}p`;
 }
 
-function resolveResolutionTier(height: number): string {
+export function resolveResolutionTier(height: number): string {
   if (height >= 4320) return '8K';
   if (height >= 2160) return '4K';
   if (height >= 1440) return '1440p';
@@ -73,6 +73,7 @@ function resolveResolutionTier(height: number): string {
   if (height >= 720) return '720p';
   if (height >= 480) return '480p';
   if (height >= 360) return '360p';
+  if (height >= 240) return '240p';
   return `${height}p`;
 }
 
@@ -1200,9 +1201,8 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
 
     sortedVideoStreams.forEach((s, idx) => { s.streamIndex = idx; });
 
-    const maxResTier = sortedVideoFormats[0]?.resolutionHeight >= 4320 ? '8K Ultra HD'
-      : sortedVideoFormats[0]?.resolutionHeight >= 2160 ? '4K Ultra HD'
-      : sortedVideoFormats[0]?.resolutionHeight >= 1440 ? '1440p Quad HD'
+    const maxResTier = sortedVideoFormats[0]
+      ? resolveResolutionLabel(sortedVideoFormats[0].resolutionHeight, sortedVideoFormats[0].width)
       : '1080p Full HD';
 
     return {

@@ -72,21 +72,35 @@ export class FFmpegExecutor {
         timedOut = isTimeout;
 
         try {
+          if (child.stdin) {
+            try {
+              child.stdin.destroy();
+            } catch {}
+          }
+
           if (process.platform === 'win32' && child.pid) {
             // On Windows, child_process.kill may not terminate child subprocesses; spawn taskkill
-            spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], {
+            const tk = spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], {
               shell: false,
               windowsHide: true
+            });
+            tk.on('error', () => {
+              try {
+                child.kill();
+              } catch {}
             });
           } else {
             child.kill('SIGTERM');
             forceKillTimer = setTimeout(() => {
               try {
-                child.kill('SIGKILL');
+                if (!child.killed) {
+                  child.kill('SIGKILL');
+                }
               } catch {
                 // Ignore if already dead
               }
             }, 3000);
+            forceKillTimer.unref?.();
           }
         } catch {
           // Process might already be dead
@@ -98,6 +112,7 @@ export class FFmpegExecutor {
         timeoutTimer = setTimeout(() => {
           terminateChild(true);
         }, timeoutMs);
+        timeoutTimer.unref?.();
       }
 
       // Handle external abort signal
@@ -107,13 +122,15 @@ export class FFmpegExecutor {
         });
       }
 
+      child.stdin?.on('error', () => {});
+      child.stdout?.on('error', () => {});
+      child.stderr?.on('error', () => {});
+
       // Collect stdout & parse progress if progress pipe:1 is present
       let progressLineBuffer = '';
       child.stdout?.on('data', (chunk: Buffer) => {
         const text = chunk.toString('utf8');
-        if (stdoutBuffer.length < maxBuffer) {
-          stdoutBuffer += text;
-        }
+        stdoutBuffer = (stdoutBuffer + text).slice(-maxBuffer);
 
         // Parse key=value progress lines from FFmpeg -progress pipe:1
         progressLineBuffer += text;
@@ -126,9 +143,7 @@ export class FFmpegExecutor {
       // Collect stderr
       child.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString('utf8');
-        if (stderrBuffer.length < maxBuffer) {
-          stderrBuffer += text;
-        }
+        stderrBuffer = (stderrBuffer + text).slice(-maxBuffer);
 
         // Also fallback to parsing stderr progress lines if -progress pipe:1 was not used
         this.parseStderrProgress(text, stage, totalDuration, options.onProgress);

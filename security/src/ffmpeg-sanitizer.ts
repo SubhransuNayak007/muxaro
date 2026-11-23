@@ -113,6 +113,17 @@ export function sanitizeFilename(filename: string, fallback = 'media_output'): s
     return fallback;
   }
 
+  // Defend against Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+  const baseStem = path.posix.parse(clean).name.toUpperCase();
+  const WINDOWS_RESERVED_NAMES = new Set([
+    'CON', 'PRN', 'AUX', 'NUL',
+    'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+    'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+  ]);
+  if (WINDOWS_RESERVED_NAMES.has(baseStem)) {
+    clean = `media_${clean}`;
+  }
+
   // Cap length to prevent filesystem errors / buffer overflows
   if (clean.length > 200) {
     const ext = path.extname(clean);
@@ -135,14 +146,24 @@ export function validateSafePath(
     return { isSafe: false, error: 'Path must be a non-empty string' };
   }
 
-  // Reject null bytes and shell metacharacters in paths
-  if (filePath.includes('\0') || SHELL_METACHARS_REGEX.test(filePath)) {
-    return { isSafe: false, error: 'Path contains prohibited characters or null bytes' };
+  // Reject URL-encoded path traversal sequences (%2e%2e, %2f, %5c)
+  if (/%2e%2e|%2f|%5c/i.test(filePath)) {
+    return { isSafe: false, error: 'URL-encoded path traversal sequence detected' };
+  }
+
+  // Reject null bytes, carriage returns, newlines, and shell metacharacters in paths
+  if (filePath.includes('\0') || /[\r\n]/.test(filePath) || SHELL_METACHARS_REGEX.test(filePath)) {
+    return { isSafe: false, error: 'Path contains prohibited characters, control characters, or null bytes' };
   }
 
   // Reject path traversal patterns before normalization
   if (filePath.includes('..')) {
     return { isSafe: false, error: 'Directory traversal sequence (..) detected' };
+  }
+
+  // Reject Windows alternate data streams (e.g., file.mp4:stream or ::$DATA)
+  if (/(?<!^[a-zA-Z]):/.test(filePath)) {
+    return { isSafe: false, error: 'Alternate Data Stream or prohibited colon detected in path' };
   }
 
   // Canonicalize path
@@ -170,7 +191,13 @@ export function validateSafePath(
     try {
       const real = fs.realpathSync(resolved);
       const isRealInsideAllowed = resolvedBaseDirs.some(baseDir => {
-        const rel = path.relative(baseDir, real);
+        let realBase = baseDir;
+        try {
+          realBase = fs.realpathSync(baseDir);
+        } catch {
+          // If baseDir doesn't exist on disk yet, keep resolved baseDir
+        }
+        const rel = path.relative(realBase, real);
         return !rel.startsWith('..') && !path.isAbsolute(rel);
       });
       if (!isRealInsideAllowed) {
@@ -224,6 +251,7 @@ export function buildSafeProbeArgs(options: ProbeArgsOptions): string[] {
     '-show_error',
     // Security: restrict protocols so probing local media cannot trigger network SSRF or internal file demuxer exploits
     '-protocol_whitelist', 'file,crypto,data',
+    '--',
     pathCheck.resolvedPath
   ];
 }
@@ -467,7 +495,19 @@ export async function executeSafeFfmpeg(
 
     const timer = setTimeout(() => {
       timedOut = true;
-      proc.kill('SIGKILL');
+      if (process.platform === 'win32' && proc.pid) {
+        try {
+          spawn('taskkill', ['/pid', proc.pid.toString(), '/T', '/F'], {
+            shell: false,
+            windowsHide: true,
+            stdio: 'ignore'
+          });
+        } catch {
+          proc.kill('SIGKILL');
+        }
+      } else {
+        proc.kill('SIGKILL');
+      }
     }, timeoutMs);
 
     proc.stdout.on('data', chunk => {

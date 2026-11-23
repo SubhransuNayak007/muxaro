@@ -12,3 +12,4 @@ export * from './ssrf-guard.ts';
 export * from './ffmpeg-sanitizer.ts';
 export * from './rate-limiter.ts';
 export * from './validation.ts';
+export * from './token-signer.ts';

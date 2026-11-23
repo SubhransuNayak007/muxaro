@@ -1290,18 +1290,22 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         .where(eq(mediaJobs.id, id));
 
       // Release active quota slot in Redis
-      const subject = job.userId ? `user:${job.userId}` : `guest:${job.guestSessionHash || job.guestIpHash}`;
-      await redis.releaseActiveJob(subject, id);
+      try {
+        const subject = job.userId ? `user:${job.userId}` : `guest:${job.guestSessionHash || job.guestIpHash}`;
+        await redis.releaseActiveJob(subject, id);
 
-      // Publish cancellation event to Redis channel
-      await redis.publishJobEvent(id, {
-        jobId: id,
-        status: 'cancelled',
-        stage: 'aborted',
-        progressPercent: Number.parseFloat(String(job.progressPercent || '0')),
-        message: 'Job cancelled by user',
-        timestamp: new Date().toISOString(),
-      });
+        // Publish cancellation event to Redis channel
+        await redis.publishJobEvent(id, {
+          jobId: id,
+          status: 'cancelled',
+          stage: 'aborted',
+          progressPercent: Number.parseFloat(String(job.progressPercent || '0')),
+          message: 'Job cancelled by user',
+          timestamp: new Date().toISOString(),
+        });
+      } catch (redisErr) {
+        request.log.warn({ err: redisErr, jobId: id }, '[Jobs] Failed to release active quota or publish cancel event to Redis');
+      }
     }
 
     const [updatedJob] = await db
@@ -1311,10 +1315,14 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       .limit(1);
 
     const responseData = formatJobResponse(updatedJob);
+    const cancelPayload = {
+      ...responseData,
+      message: 'Job cancelled by user and active quota slot released',
+    };
     return reply.status(200).send({
       success: true,
-      data: responseData,
-      ...responseData,
+      data: cancelPayload,
+      ...cancelPayload,
     });
   });
 

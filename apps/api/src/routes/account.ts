@@ -9,35 +9,49 @@
 
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { getDb, mediaJobs, eq, desc } from '@muxaro/db';
+import { TIER_CONFIGS } from '@muxaro/shared';
 
 export const accountRoutes: FastifyPluginAsync = async (fastify) => {
   const db = getDb();
 
   // GET /account/credits
   fastify.get('/account/credits', async (request: FastifyRequest, reply: FastifyReply) => {
-    const limits = request.tierLimits;
+    const userTier = request.tier || (request.user ? 'free_account' : 'guest');
+    const limits = request.tierLimits || (TIER_CONFIGS as any)[userTier] || TIER_CONFIGS.guest;
     const now = new Date();
     const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
     const resetSeconds = Math.max(0, Math.floor((midnight.getTime() - now.getTime()) / 1000));
 
-    const totalAllowed = limits.dailyJobLimit; // 100 for guest
-    const remaining = request.quota.remainingJobsToday;
+    const totalAllowed = limits?.dailyJobLimit ?? 100; // 100 for guest
+    const remaining = request.quota?.remainingJobsToday ?? totalAllowed;
     const used = Math.max(0, totalAllowed - remaining);
 
     const payload = {
-      tier: request.tier,
-      tierLabel: request.tier === 'pro' ? 'Pro' : request.tier === 'free_account' ? 'Free Account' : 'Guest',
+      tier: userTier,
+      tierLabel: userTier === 'pro' ? 'Pro' : userTier === 'free_account' ? 'Free Account' : 'Guest',
       remainingAllowance: remaining,
       dailyAllowance: totalAllowed,
       usedAllowance: used,
-      concurrencyLimit: limits.maxConcurrentJobs,
-      concurrencyInUse: request.quota.concurrentActiveJobs,
+      concurrencyLimit: limits?.maxConcurrentJobs ?? 2,
+      concurrencyInUse: request.quota?.concurrentActiveJobs ?? 0,
       extraCredits: 0,
       totalAvailableCredits: remaining,
       resetSecondsRemaining: resetSeconds,
       formattedResetCountdown: `${Math.floor(resetSeconds / 3600)}h ${Math.floor((resetSeconds % 3600) / 60)}m`,
-      maxUploadBytes: limits.maxUploadSizeBytes,
-      allowedTools: limits.allowedTools,
+      maxUploadBytes: limits?.maxUploadSizeBytes ?? (1024 * 1024 * 1024),
+      allowedTools: limits?.allowedTools ?? ['convert_video', 'extract_audio', 'merge_av', 'batch_playlist'],
+      individualVideos: {
+        allowance: userTier === 'pro' ? 50 : 10,
+        remaining: Math.min(remaining, userTier === 'pro' ? 50 : 10),
+        used,
+        windowSeconds: 86400,
+      },
+      playlists: {
+        allowance: userTier === 'pro' ? 10 : 1,
+        remaining: userTier === 'pro' ? 10 : 1,
+        used: 0,
+        windowSeconds: 86400,
+      },
     };
 
     return reply.status(200).send({

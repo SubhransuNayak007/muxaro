@@ -9,11 +9,13 @@
  */
 
 import { Worker, Queue, type Job } from 'bullmq';
+import fs from 'node:fs';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { eq, and, lte, ne } from 'drizzle-orm';
 import { RETENTION_SECONDS, type RetentionTier } from '@muxaro/shared';
-import { getDb, mediaJobs } from '@muxaro/db';
+import { getDb, getMuxaroRedis, mediaJobs } from '@muxaro/db';
 import { getS3Client, getR2BucketName } from './s3-client.js';
+import { getStorageArtifactPath } from './stream-pipeline.js';
 import type { CleanupJobPayload } from './types.js';
 
 export const CLEANUP_QUEUE_NAME = 'cleanup';
@@ -108,6 +110,19 @@ export class CleanupWorkerManager {
           throw err;
         }
       }
+
+      // 1b. Delete local disk artifacts if present
+      try {
+        const { artifactPath, directPath } = getStorageArtifactPath(payload.storageKey);
+        if (fs.existsSync(artifactPath)) {
+          fs.unlinkSync(artifactPath);
+        }
+        if (fs.existsSync(directPath)) {
+          fs.unlinkSync(directPath);
+        }
+      } catch (err: any) {
+        console.warn(`[CleanupWorker] Failed deleting local disk artifact for job ${payload.jobId}:`, err.message);
+      }
     }
 
     // 2. Mark media_jobs record as 'expired' in database
@@ -116,7 +131,6 @@ export class CleanupWorkerManager {
       await db
         .update(mediaJobs)
         .set({
-          status: 'failed', // Or retain terminal state with stage 'expired'
           stage: 'expired',
           stageMessage: `Artifact expired after ${payload.retentionTier} retention window and purged from storage.`,
           updatedAt: new Date(),
@@ -124,6 +138,18 @@ export class CleanupWorkerManager {
         .where(eq(mediaJobs.id, payload.jobId));
     } catch {
       // Non-fatal if DB record is already pruned or unavailable
+    }
+
+    // 3. Mark Redis job state expired
+    try {
+      const redis = getMuxaroRedis();
+      await redis.updateJobState(payload.jobId, {
+        stage: 'expired',
+        stageMessage: `Artifact expired after ${payload.retentionTier} retention window and purged from storage.`,
+        downloadUrl: '',
+      });
+    } catch {
+      // Non-fatal
     }
   }
 
@@ -133,12 +159,13 @@ export class CleanupWorkerManager {
   public async deleteImmediately(jobId: string, storageKey: string): Promise<void> {
     // 1. Remove scheduled BullMQ delayed job if still waiting
     const queue = this.getQueue();
-    const delayedJob = await queue.getJob(`cleanup:${jobId}`);
+    const sanitizedJobId = `cleanup_${jobId.replace(/[:]/g, '_')}`;
+    const delayedJob = await queue.getJob(sanitizedJobId);
     if (delayedJob) {
       await delayedJob.remove().catch(() => {});
     }
 
-    // 2. Evict immediately from R2 / S3 and mark expired
+    // 2. Evict immediately from R2 / S3 / local disk and mark expired
     await this.processEviction({
       jobId,
       storageKey,

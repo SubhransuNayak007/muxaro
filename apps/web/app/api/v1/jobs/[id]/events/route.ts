@@ -4,6 +4,13 @@ import { jobManager, JobRecord } from '@/lib/job-manager';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const SSE_CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Range, Content-Type, Authorization, X-Requested-With',
+  'Access-Control-Expose-Headers': 'Content-Disposition',
+};
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -13,12 +20,32 @@ export async function GET(
 
   const stream = new ReadableStream({
     start(controller) {
+      let isClosed = false;
+
+      const safeClose = () => {
+        if (!isClosed) {
+          isClosed = true;
+          try {
+            controller.close();
+          } catch {}
+        }
+      };
+
       const sendEvent = (eventData: any) => {
+        if (isClosed) return;
         try {
-          const payload = `event: progress\ndata: ${JSON.stringify(eventData)}\n\n`;
-          controller.enqueue(encoder.encode(payload));
+          const json = JSON.stringify(eventData);
+          // Broadcast to progress listener and standard onmessage listener
+          controller.enqueue(encoder.encode(`event: progress\ndata: ${json}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+
+          if (eventData.status === 'READY' || eventData.status === 'COMPLETED') {
+            controller.enqueue(encoder.encode(`event: complete\ndata: ${json}\n\nevent: done\ndata: ${json}\n\n`));
+          } else if (eventData.status === 'FAILED' || eventData.status === 'CANCELLED') {
+            controller.enqueue(encoder.encode(`event: error\ndata: ${json}\n\n`));
+          }
         } catch {
-          // Stream might be closed
+          safeClose();
         }
       };
 
@@ -44,7 +71,7 @@ export async function GET(
           stageMessage: 'Job was not found or expired.',
           error: { code: 'ERR_JOB_NOT_FOUND', message: 'Job not found' },
         });
-        controller.close();
+        safeClose();
         return;
       }
 
@@ -53,7 +80,7 @@ export async function GET(
 
       // If job is already terminal, close stream
       if (initialJob.status === 'ready' || initialJob.status === 'failed' || initialJob.status === 'cancelled') {
-        controller.close();
+        safeClose();
         return;
       }
 
@@ -67,9 +94,7 @@ export async function GET(
           updatedJob.status === 'cancelled'
         ) {
           unsubscribe();
-          try {
-            controller.close();
-          } catch {}
+          safeClose();
         }
       });
 
@@ -78,9 +103,7 @@ export async function GET(
         'abort',
         () => {
           unsubscribe();
-          try {
-            controller.close();
-          } catch {}
+          safeClose();
         },
         { once: true }
       );
@@ -93,6 +116,14 @@ export async function GET(
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
+      ...SSE_CORS_HEADERS,
     },
+  });
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: SSE_CORS_HEADERS,
   });
 }

@@ -348,11 +348,33 @@ export const BLOCKED_HOSTNAMES = new Set([
   'metadata.goog',
   'metadata',
   '169.254.169.254',
+  '169.254.170.2',
+  '100.100.100.200',
   'fd00:ec2::254',
   'localhost',
+  'localhost.localdomain',
   'ip6-localhost',
-  'ip6-loopback'
+  'ip6-loopback',
+  'ip6-localnet',
+  'ip6-mcastprefix',
+  'ip6-allnodes',
+  'ip6-allrouters',
+  'ip6-allhosts'
 ]);
+
+/**
+ * Forbidden domain suffixes indicating internal or non-routable local networks
+ */
+export const FORBIDDEN_HOST_SUFFIXES = [
+  '.local',
+  '.internal',
+  '.lan',
+  '.home',
+  '.corp',
+  '.intranet',
+  '.onion',
+  '.arpa'
+];
 
 /**
  * Dangerous internal ports to strictly reject unless explicitly allowed
@@ -523,6 +545,19 @@ export async function validateUrlForSsrf(
       error: `Hostname '${normalizedHost}' is explicitly forbidden`,
       reason: 'FORBIDDEN_HOSTNAME'
     };
+  }
+
+  // Block internal / local domain suffixes
+  for (const suffix of FORBIDDEN_HOST_SUFFIXES) {
+    if (normalizedHost.endsWith(suffix)) {
+      return {
+        isSafe: false,
+        url: rawUrl,
+        hostname: normalizedHost,
+        error: `Domain suffix '${suffix}' indicates an internal private network`,
+        reason: 'FORBIDDEN_DOMAIN_SUFFIX'
+      };
+    }
   }
 
   if (options.blockedHostnames && options.blockedHostnames.includes(normalizedHost)) {

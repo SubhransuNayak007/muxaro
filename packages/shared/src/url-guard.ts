@@ -13,6 +13,7 @@
 import * as dns from 'node:dns/promises';
 import { MuxaroError } from './errors.js';
 import type { MediaPlatform } from './types.js';
+import { isForbiddenIpv4Number, isForbiddenIpv6Address } from './ssrf-fetch.js';
 
 // =============================================================================
 // 1. IPV4 & IPV6 NUMERIC / CIDR UTILITIES
@@ -24,9 +25,9 @@ import type { MediaPlatform } from './types.js';
  */
 export function ipv4ToNumber(ip: string): number | null {
   const trimmed = ip.trim();
-
-  // Dotted notation (e.g. 192.168.1.1 or 0177.0.0.1 or 0x7f.0.0.1)
   const parts = trimmed.split('.');
+
+  // 4 parts: a.b.c.d (each 0..255)
   if (parts.length === 4) {
     let num = 0;
     for (const part of parts) {
@@ -46,6 +47,39 @@ export function ipv4ToNumber(ip: string): number | null {
       num = (num << 8) + n;
     }
     return num >>> 0;
+  }
+
+  // 3 parts: a.b.c (a, b in 0..255, c in 0..65535)
+  if (parts.length === 3) {
+    const parsePart = (p: string) => {
+      if (/^0x[0-9a-f]+$/i.test(p)) return Number.parseInt(p, 16);
+      if (/^0[0-7]+$/.test(p) && p.length > 1) return Number.parseInt(p, 8);
+      if (/^\d+$/.test(p)) return Number.parseInt(p, 10);
+      return NaN;
+    };
+    const a = parsePart(parts[0]);
+    const b = parsePart(parts[1]);
+    const c = parsePart(parts[2]);
+    if (a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 65535) {
+      return (((a << 8) + b << 16) + c) >>> 0;
+    }
+    return null;
+  }
+
+  // 2 parts: a.b (a in 0..255, b in 0..16777215)
+  if (parts.length === 2) {
+    const parsePart = (p: string) => {
+      if (/^0x[0-9a-f]+$/i.test(p)) return Number.parseInt(p, 16);
+      if (/^0[0-7]+$/.test(p) && p.length > 1) return Number.parseInt(p, 8);
+      if (/^\d+$/.test(p)) return Number.parseInt(p, 10);
+      return NaN;
+    };
+    const a = parsePart(parts[0]);
+    const b = parsePart(parts[1]);
+    if (a >= 0 && a <= 255 && b >= 0 && b <= 16777215) {
+      return ((a << 24) + b) >>> 0;
+    }
+    return null;
   }
 
   // Single decimal integer (e.g. 2130706433 = 127.0.0.1)
@@ -72,108 +106,14 @@ export function ipv4ToNumber(ip: string): number | null {
  * link-local, carrier-grade NAT, or reserved CIDR range.
  */
 export function isForbiddenIpv4(num: number): { isForbidden: boolean; reason?: string } {
-  // 0.0.0.0/8 - "This host on this network"
-  if ((num & 0xff000000) === 0x00000000) {
-    return { isForbidden: true, reason: 'Current network (0.0.0.0/8) is forbidden' };
-  }
-  // 10.0.0.0/8 - RFC 1918 Private
-  if ((num & 0xff000000) === 0x0a000000) {
-    return { isForbidden: true, reason: 'Private network (10.0.0.0/8) is forbidden' };
-  }
-  // 100.64.0.0/10 - Carrier Grade NAT (RFC 6598)
-  if (((num & 0xffc00000) >>> 0) === 0x64400000) {
-    return { isForbidden: true, reason: 'Shared address space CGNAT (100.64.0.0/10) is forbidden' };
-  }
-  // 127.0.0.0/8 - Loopback
-  if ((num & 0xff000000) === 0x7f000000) {
-    return { isForbidden: true, reason: 'Loopback address (127.0.0.0/8) is forbidden' };
-  }
-  // 169.254.0.0/16 - Link-local & Cloud Instance Metadata (AWS/GCP/Azure 169.254.169.254)
-  if (((num & 0xffff0000) >>> 0) === 0xa9fe0000) {
-    return { isForbidden: true, reason: 'Link-local/Cloud Metadata (169.254.0.0/16) is forbidden' };
-  }
-  // 172.16.0.0/12 - RFC 1918 Private (172.16.0.0 - 172.31.255.255)
-  if (((num & 0xfff00000) >>> 0) === 0xac100000) {
-    return { isForbidden: true, reason: 'Private network (172.16.0.0/12) is forbidden' };
-  }
-  // 192.0.0.0/24 - IETF Protocol Assignments
-  if (((num & 0xffffff00) >>> 0) === 0xc0000000) {
-    return { isForbidden: true, reason: 'IETF assignment (192.0.0.0/24) is forbidden' };
-  }
-  // 192.0.2.0/24 - Documentation (TEST-NET-1)
-  if (((num & 0xffffff00) >>> 0) === 0xc0000200) {
-    return { isForbidden: true, reason: 'Documentation network (192.0.2.0/24) is forbidden' };
-  }
-  // 192.168.0.0/16 - RFC 1918 Private
-  if (((num & 0xffff0000) >>> 0) === 0xc0a80000) {
-    return { isForbidden: true, reason: 'Private network (192.168.0.0/16) is forbidden' };
-  }
-  // 198.18.0.0/15 - Network benchmark tests
-  if (((num & 0xfffe0000) >>> 0) === 0xc6120000) {
-    return { isForbidden: true, reason: 'Benchmark testing network (198.18.0.0/15) is forbidden' };
-  }
-  // 198.51.100.0/24 - Documentation (TEST-NET-2)
-  if (((num & 0xffffff00) >>> 0) === 0xc6336400) {
-    return { isForbidden: true, reason: 'Documentation network (198.51.100.0/24) is forbidden' };
-  }
-  // 203.0.113.0/24 - Documentation (TEST-NET-3)
-  if (((num & 0xffffff00) >>> 0) === 0xcb007100) {
-    return { isForbidden: true, reason: 'Documentation network (203.0.113.0/24) is forbidden' };
-  }
-  // 224.0.0.0/4 - Multicast
-  if (((num & 0xf0000000) >>> 0) === 0xe0000000) {
-    return { isForbidden: true, reason: 'Multicast address space (224.0.0.0/4) is forbidden' };
-  }
-  // 240.0.0.0/4 - Reserved (including 255.255.255.255 broadcast)
-  if (((num & 0xf0000000) >>> 0) === 0xf0000000) {
-    return { isForbidden: true, reason: 'Reserved/Broadcast address space (240.0.0.0/4) is forbidden' };
-  }
-
-  return { isForbidden: false };
+  return isForbiddenIpv4Number(num);
 }
 
 /**
  * Checks if an IPv6 address falls into loopback, unique local, link-local, or IPv4-mapped.
  */
 export function isForbiddenIpv6(ip: string): { isForbidden: boolean; reason?: string } {
-  const clean = ip.toLowerCase().replace(/^\[|\]$/g, '').trim();
-
-  // IPv6 Loopback (::1)
-  if (clean === '::1' || clean === '0000:0000:0000:0000:0000:0000:0000:0001') {
-    return { isForbidden: true, reason: 'IPv6 loopback (::1) is forbidden' };
-  }
-
-  // IPv6 Unspecified (::)
-  if (clean === '::' || clean === '0000:0000:0000:0000:0000:0000:0000:0000') {
-    return { isForbidden: true, reason: 'IPv6 unspecified (::) is forbidden' };
-  }
-
-  // IPv4-mapped IPv6 (::ffff:127.0.0.1 or ::ffff:7f00:1)
-  if (clean.startsWith('::ffff:') || clean.startsWith('0:0:0:0:0:ffff:')) {
-    const ipv4Part = clean.replace(/^(?:0:0:0:0:0:ffff:|::ffff:)/, '');
-    const num = ipv4ToNumber(ipv4Part);
-    if (num !== null) {
-      return isForbiddenIpv4(num);
-    }
-    return { isForbidden: true, reason: 'IPv4-mapped IPv6 address is forbidden' };
-  }
-
-  // Link-local unicast fe80::/10
-  if (/^fe[89ab][0-9a-f]:/i.test(clean)) {
-    return { isForbidden: true, reason: 'IPv6 link-local (fe80::/10) is forbidden' };
-  }
-
-  // Unique local addresses fc00::/7 (fc00:: - fdff::)
-  if (/^f[cd][0-9a-f]{2}:/i.test(clean)) {
-    return { isForbidden: true, reason: 'IPv6 unique local (fc00::/7) is forbidden' };
-  }
-
-  // Multicast ff00::/8
-  if (/^ff[0-9a-f]{2}:/i.test(clean)) {
-    return { isForbidden: true, reason: 'IPv6 multicast (ff00::/8) is forbidden' };
-  }
-
-  return { isForbidden: false };
+  return isForbiddenIpv6Address(ip);
 }
 
 // =============================================================================
@@ -186,9 +126,16 @@ const FORBIDDEN_EXACT_HOSTNAMES = new Set([
   'ip6-localhost',
   'ip6-loopback',
   'metadata.google.internal',
+  'metadata.goog',
   'metadata',
   'instance-data',
   'internal',
+  '169.254.169.254',
+  '169.254.170.2',
+  '100.100.100.200',
+  'fd00:ec2::254',
+  '127.0.0.1',
+  '0.0.0.0',
 ]);
 
 const FORBIDDEN_HOST_SUFFIXES = [
@@ -290,6 +237,10 @@ export function normalizeMediaUrl(rawInput: unknown): string {
     if (!parsed.hostname || parsed.hostname.length < 1) {
       return '';
     }
+    // Reject embedded credentials in URLs (e.g. user:pass@host)
+    if (parsed.username || parsed.password) {
+      return '';
+    }
     return parsed.href;
   } catch {
     return '';
@@ -319,7 +270,28 @@ export async function validateUrlSafety(
 
   const hostname = parsed.hostname;
 
-  // 1. Static hostname / literal IP checks
+  // 1. Credentials & Destination Port checks
+  if (parsed.username || parsed.password) {
+    return { safe: false, reason: 'URLs containing embedded credentials (user:pass@host) are strictly forbidden', hostname };
+  }
+
+  const effectivePort = parsed.port
+    ? Number.parseInt(parsed.port, 10)
+    : (parsed.protocol === 'https:' ? 443 : 80);
+  if (Number.isNaN(effectivePort) || effectivePort < 1 || effectivePort > 65535) {
+    return { safe: false, reason: 'Invalid destination port', hostname };
+  }
+
+  const BLOCKED_PORTS = new Set([
+    20, 21, 22, 23, 25, 53, 69, 110, 111, 135, 137, 138, 139, 143, 389, 445, 465, 587,
+    636, 993, 995, 1433, 1521, 2049, 2375, 2376, 3306, 3389, 5432, 5984, 6379, 8500,
+    9000, 9090, 9200, 9300, 11211, 27017, 27018
+  ]);
+  if (BLOCKED_PORTS.has(effectivePort)) {
+    return { safe: false, reason: `Destination port ${effectivePort} is blocked for security reasons`, hostname };
+  }
+
+  // 2. Static hostname / literal IP checks
   const hostCheck = isForbiddenHostname(hostname);
   if (hostCheck.isForbidden) {
     return { safe: false, reason: hostCheck.reason, hostname };
