@@ -9,6 +9,9 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "paths": {
       "@muxaro/shared": ["../../packages/shared/src/index.ts"],
       "@muxaro/shared/*": ["../../packages/shared/src/*"],
