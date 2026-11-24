@@ -195,9 +195,6 @@ export class StreamPipeline {
         '--no-warnings',
         '--force-ipv4',
       ];
-      if (isYouTube) {
-        ytdlpArgs.push('--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web');
-      }
 
       const cookieCandidates = [
         process.env.YTDLP_COOKIES_FILE,

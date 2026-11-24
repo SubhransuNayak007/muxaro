@@ -66,8 +66,8 @@ export class FFmpegWorkerClient {
               const id = `init_${Date.now()}`;
               const timer = setTimeout(() => {
                 this.callbacks.delete(id);
-                reject(new Error('FFmpeg worker init timeout (15s).'));
-              }, 15000);
+                reject(new Error('FFmpeg worker init timeout (60s).'));
+              }, 60000);
 
               this.callbacks.set(id, {
                 resolve: () => {

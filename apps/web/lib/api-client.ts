@@ -1677,6 +1677,15 @@ class ApiClient {
     if ((params as any).audioFormatId) {
       payload.audioFormatId = (params as any).audioFormatId;
     }
+    if ((params as any).directStreamUrl) {
+      payload.directStreamUrl = (params as any).directStreamUrl;
+    }
+    if ((params as any).directMimeType) {
+      payload.directMimeType = (params as any).directMimeType;
+    }
+    if ((params as any).fileSizeBytes) {
+      payload.fileSizeBytes = (params as any).fileSizeBytes;
+    }
 
     const raw = await this.requestStrict<any>('/jobs', {
       method: 'POST',

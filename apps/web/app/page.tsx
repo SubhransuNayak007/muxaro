@@ -202,12 +202,11 @@ export default function HomePage() {
       });
     } catch (err: unknown) {
       let message = err instanceof Error ? err.message : '';
-      const isBlockedHost = /(?:youtube\.com|youtu\.be|instagram\.com|instagr\.am)/i.test(trimmed);
-      if (
-        isBlockedHost ||
+      const isExplicitBlock =
         (err as any)?.code === 'HOST_BLOCKED' ||
-        /blocks free cloud servers|bot detection|confirm you're not a bot|login_required/i.test(message)
-      ) {
+        (err as any)?.status === 'host_restricted' ||
+        /blocks free cloud servers|bot detection|confirm you're not a bot|login_required/i.test(message);
+      if (isExplicitBlock) {
         message = 'This host restricts free datacenter IPs. You can process 8K locally with MUXARO Direct, or save direct streams up to 2K.';
         console.info('[MUXARO Probe] Target host restricted in cloud mode. Suggesting Desktop Direct:', trimmed);
       } else if (!message || message === '[object Object]' || message.includes('[object Object]')) {

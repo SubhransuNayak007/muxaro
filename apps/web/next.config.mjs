@@ -1,14 +1,13 @@
 /** @type {import('next').NextConfig} */
 const isCloudflarePages = process.env.CLOUDFLARE_PAGES === '1';
 
-const externalApiUrl = process.env.API_INTERNAL_URL?.trim();
+const rawApiUrl = (process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '').trim();
+const cleanedApiUrl = rawApiUrl.replace(/\/api\/v1\/?$/i, '').replace(/\/+$/, '');
 const enableExplicitProxy = process.env.ENABLE_BACKEND_PROXY === '1' || process.env.ENABLE_BACKEND_PROXY === 'true';
 const hasExternalBackend = Boolean(
-  externalApiUrl &&
-  (enableExplicitProxy ||
-    (!externalApiUrl.includes('127.0.0.1') &&
-     !externalApiUrl.includes('localhost') &&
-     !/api\.muxaro\.app|muxaro-api\.internal/i.test(externalApiUrl)))
+  cleanedApiUrl &&
+  (cleanedApiUrl.startsWith('http://') || cleanedApiUrl.startsWith('https://')) &&
+  (enableExplicitProxy || (!cleanedApiUrl.includes('127.0.0.1') && !cleanedApiUrl.includes('localhost')))
 );
 
 const nextConfig = {
@@ -131,7 +130,7 @@ const nextConfig = {
                 return [
                   {
                     source: '/api/v1/:path*',
-                    destination: `${externalApiUrl}/api/v1/:path*`,
+                    destination: `${cleanedApiUrl}/api/v1/:path*`,
                   },
                 ];
               },

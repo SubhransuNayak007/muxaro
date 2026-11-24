@@ -498,10 +498,16 @@ export default function AdaptiveMediaCard({
         ? `${selectedVideoOption.height}p`
         : undefined;
 
-    const directStreamUrl =
-      selectedVideoOption?.stream?.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(selectedVideoOption.stream.url)
-        ? selectedVideoOption.stream.url
-        : manifest.videoStreams.find((s) => s.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(s.url))?.url;
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(manifest.sourceUrl);
+    // YouTube adaptive video streams (1080p, 1440p, 4K, 8K) have NO audio track and MUST be multiplexed by FFmpeg.
+    // Never treat adaptive video-only streams as zero-hop downloads; they must go through the pipeline to merge audio.
+    const isAdaptiveVideoOnly = isYouTube && !isAudioOnly && selectedVideoOption && selectedVideoOption.height > 720;
+
+    const directStreamUrl = isAdaptiveVideoOnly
+      ? undefined
+      : (isAudioOnly
+          ? (manifest.audioStreams?.[0]?.url || manifest.directStreamUrl)
+          : (!isYouTube ? (selectedVideoOption?.stream?.url || manifest.directStreamUrl) : undefined));
 
     try {
       const job = await api.createJob({
@@ -514,7 +520,10 @@ export default function AdaptiveMediaCard({
         videoFormatId: selectedVideoOption?.formatId,
         audioFormatId: manifest.audioStreams?.[0]?.formatId || 'ba/b',
         title: manifest.title,
-      });
+        directStreamUrl,
+        directMimeType: (manifest as any).directMimeType || 'video/mp4',
+        fileSizeBytes: selectedVideoOption?.estimatedSizeBytes || manifest.fileSizeBytes,
+      } as any);
 
       if (job && job.id) {
         setActiveJobId(job.id);

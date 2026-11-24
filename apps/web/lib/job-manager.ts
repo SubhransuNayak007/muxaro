@@ -35,6 +35,9 @@ export interface CreateJobParams {
   operation?: string;
   executionMode?: 'cloud' | 'local' | 'auto';
   allowCloudFallback?: boolean;
+  directStreamUrl?: string;
+  directMimeType?: string;
+  fileSizeBytes?: number;
 }
 
 export interface JobRecord {
@@ -133,6 +136,64 @@ function persistJob(job: JobRecord): void {
       fs.writeFileSync(jobMetaPath(job.id), JSON.stringify(job, null, 2), 'utf8');
     } catch {}
   }
+}
+
+async function resolveCobaltStream(
+  url: string,
+  options: { quality?: string; format?: string } = {}
+): Promise<{ streamUrl: string; filename?: string } | null> {
+  const cleanQuality = (options.quality || 'max').toString().toLowerCase().replace(/p$/i, '');
+  const quality = ['2160', '1440', '1080', '720', '480', '360', '240', '144'].includes(cleanQuality)
+    ? cleanQuality
+    : 'max';
+
+  const instances = [
+    'https://api.cobalt.tools/',
+    'https://api.cobalt.tools/api/json',
+    'https://cobalt-api.kwiatekm.tokyo/api/json',
+    'https://co.wuk.sh/api/json',
+  ];
+
+  for (const instance of instances) {
+    try {
+      const res = await fetch(instance, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify({
+          url,
+          videoQuality: quality,
+          youtubeVideoCodec: 'h264',
+          audioFormat: options.format === 'mp3' ? 'mp3' : 'best',
+          downloadMode: options.format === 'mp3' ? 'audio' : 'auto',
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        const json = (await res.json()) as any;
+        if (
+          json.url &&
+          (json.status === 'tunnel' ||
+            json.status === 'redirect' ||
+            json.status === 'stream' ||
+            json.status === 'success')
+        ) {
+          return {
+            streamUrl: json.url,
+            filename: json.filename,
+          };
+        }
+      }
+    } catch {
+      // try next instance
+    }
+  }
+  return null;
 }
 
 /** Standardized failure applicator ensuring accurate error codes (bot block / 403 / timeout) */
@@ -458,6 +519,32 @@ class JobManager {
     // Persist immediately so any other serverless instance can find this job
     persistJob(job);
 
+    // Direct Stream Delivery: if directStreamUrl is provided, immediately mark job ready (zero-hop)
+    const directUrl = params.directStreamUrl;
+    if (directUrl && (directUrl.startsWith('http://') || directUrl.startsWith('https://'))) {
+      job.status = 'ready';
+      job.progress = 100;
+      job.stage = 'READY';
+      job.stageMessage = 'Direct media stream ready for instant download';
+      job.deliveryMode = 'zero-hop';
+      job.directStreamUrl = directUrl;
+      job.directMimeType = params.directMimeType || 'video/mp4';
+      job.downloadUrl = directUrl;
+      if (params.fileSizeBytes) {
+        job.fileSizeBytes = params.fileSizeBytes;
+      }
+      job.completedAt = new Date().toISOString();
+      job.artifact = {
+        filename: job.filename,
+        downloadUrl: directUrl,
+        sizeBytes: job.fileSizeBytes || 0,
+        format: job.targetFormat,
+      };
+      persistJob(job);
+      this.notify(job);
+      return job;
+    }
+
     const abortController = new AbortController();
     this.abortControllers.set(jobId, abortController);
 
@@ -609,7 +696,6 @@ class JobManager {
         '--force-overwrites',
         '--no-part',
         '--socket-timeout', '30',
-        ...(isYouTube ? ['--extractor-args', 'youtube:player_client=ios,android,tv,mweb,web'] : []),
         ...getJsRuntimeArgs(),
       ];
 
@@ -1144,6 +1230,41 @@ class JobManager {
         }
       } catch (ytErr: any) {
         console.warn('[JobManager] @distube/ytdl-core fallback:', ytErr);
+
+        // Resilient cloud fallback: attempt Cobalt stream resolution
+        try {
+          const cobalt = await resolveCobaltStream(job.sourceUrl, {
+            quality: job.targetResolution,
+            format: job.targetFormat,
+          });
+          if (cobalt?.streamUrl) {
+            job.status = 'ready';
+            job.progress = 100;
+            job.stage = 'READY';
+            job.stageMessage = 'Cloud stream ready for instant download';
+            job.deliveryMode = 'zero-hop';
+            job.directStreamUrl = cobalt.streamUrl;
+            job.directMimeType = isAudioOnly ? 'audio/mpeg' : 'video/mp4';
+            job.downloadUrl = cobalt.streamUrl;
+            if (cobalt.filename) {
+              job.title = cobalt.filename;
+              job.filename = sanitizeFilename(cobalt.filename, job.targetFormat);
+            }
+            job.completedAt = new Date().toISOString();
+            job.artifact = {
+              filename: job.filename,
+              downloadUrl: cobalt.streamUrl,
+              sizeBytes: job.fileSizeBytes || 0,
+              format: job.targetFormat,
+            };
+            persistJob(job);
+            this.notify(job);
+            return;
+          }
+        } catch (cobaltErr) {
+          console.warn('[JobManager] Cobalt fallback failed:', cobaltErr);
+        }
+
         const errMessage = String(ytErr?.message || ytErr || '');
         const isBotOrDatacenterBlock =
           ytErr?.code === 'BOT_CHECK' ||
@@ -1155,15 +1276,18 @@ class JobManager {
           errMessage.includes('Status code');
 
         if (isBotOrDatacenterBlock) {
-          const botMsg = 'YouTube requires session verification on cloud servers (BotGuard check). Use MUXARO Direct companion or the browser stream helper below to stream and save this media directly to your device.';
+          const guidanceMessage = 'This host restricts free cloud servers. Full-fidelity 1080p/2K video requires multiplexing video and audio tracks. Use Desktop Direct or run MUXARO locally on localhost:3000.';
           job.status = 'failed';
-          job.stage = 'FAILED';
-          job.stageMessage = botMsg;
+          job.stage = 'HOST_BLOCKED';
+          job.stageMessage = guidanceMessage;
           job.error = {
             code: 'HOST_BLOCKED',
-            message: botMsg,
+            message: guidanceMessage,
             retryable: false,
           };
+          job.requiresLocalWorker = true;
+          job.requestedResolution = job.targetResolution || '1080p';
+          job.suggestedResolution = '720p';
           persistJob(job);
           this.notify(job);
           return;

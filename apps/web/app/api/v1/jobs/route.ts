@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import fs from 'node:fs';
+import path from 'node:path';
 import { jobManager } from '@/lib/job-manager';
 import { validateMediaUrl } from '@/lib/security-validator';
 import { createApiErrorResponse } from '@/lib/api-error';
+import { getUploadsDir } from '@/lib/upload-storage';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,24 +27,42 @@ export async function POST(req: NextRequest) {
       return createApiErrorResponse('Request body must be valid JSON.', 'INVALID_URL', requestId, CORS_HEADERS);
     }
 
-    const rawUrl = String(body?.sourceUrl || body?.mediaUrl || body?.url || '').trim();
-    if (!rawUrl) {
-      return createApiErrorResponse('Source media URL is required.', 'INVALID_URL', requestId, CORS_HEADERS);
+    let sourceMedia = String(body?.sourceUrl || body?.mediaUrl || body?.url || '').trim();
+    const candidateSessionId = String(body?.uploadSessionId || body?.mediaAssetId || body?.assetId || '').trim();
+
+    if (!sourceMedia && candidateSessionId) {
+      const uploadsRoot = getUploadsDir();
+      const candidateDir = path.join(uploadsRoot, candidateSessionId);
+      if (fs.existsSync(candidateDir)) {
+        const files = fs.readdirSync(candidateDir).filter((f) => !f.endsWith('.json'));
+        if (files.length > 0) {
+          sourceMedia = path.join(candidateDir, files[0]);
+        }
+      }
     }
 
-    // SSRF & URL validation
-    const validation = validateMediaUrl(rawUrl);
-    if (!validation.valid) {
-      return createApiErrorResponse(
-        validation.error || 'Access to internal or restricted host is prohibited.',
-        'INVALID_URL',
-        requestId,
-        CORS_HEADERS
-      );
+    if (!sourceMedia) {
+      return createApiErrorResponse('Source media URL or uploadSessionId is required.', 'INVALID_URL', requestId, CORS_HEADERS);
+    }
+
+    // SSRF & URL validation (only for external HTTP/HTTPS URLs)
+    let normalizedUrl = sourceMedia;
+    const isLocalFile = fs.existsSync(sourceMedia);
+    if (!isLocalFile) {
+      const validation = validateMediaUrl(sourceMedia);
+      if (!validation.valid) {
+        return createApiErrorResponse(
+          validation.error || 'Access to internal or restricted host is prohibited.',
+          'INVALID_URL',
+          requestId,
+          CORS_HEADERS
+        );
+      }
+      normalizedUrl = validation.normalizedUrl;
     }
 
     const job = await jobManager.createJob({
-      sourceUrl: validation.normalizedUrl,
+      sourceUrl: normalizedUrl,
       targetFormat: body?.targetFormat,
       targetResolution: body?.targetResolution,
       formatId: body?.formatId,
@@ -51,6 +72,9 @@ export async function POST(req: NextRequest) {
       operation: body?.operation,
       executionMode: body?.executionMode,
       allowCloudFallback: body?.allowCloudFallback ?? body?.fallbackToCloud,
+      directStreamUrl: body?.directStreamUrl || body?.streamUrl,
+      directMimeType: body?.directMimeType || body?.mimeType,
+      fileSizeBytes: body?.fileSizeBytes,
     });
 
     if (job.status === 'failed' && job.error?.code === 'RESOLUTION_REQUIRES_LOCAL_WORKER') {
@@ -89,11 +113,24 @@ export async function POST(req: NextRequest) {
         job.stageMessage?.toLowerCase().includes('bot') ||
         job.stageMessage?.toLowerCase().includes('403'))
     ) {
-      return createApiErrorResponse(
-        job.error?.message || job.stageMessage || 'Host blocked automated download.',
-        'HOST_BLOCKED',
-        requestId,
-        CORS_HEADERS
+      return NextResponse.json(
+        {
+          ok: false,
+          success: false,
+          status: 'failed',
+          data: job,
+          code: 'HOST_BLOCKED',
+          suggestedMode: 'desktop-direct',
+          error: {
+            code: 'HOST_BLOCKED',
+            message: job.error?.message || 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.',
+          },
+          requestId,
+        },
+        {
+          status: 200,
+          headers: CORS_HEADERS,
+        }
       );
     }
 
@@ -110,6 +147,32 @@ export async function POST(req: NextRequest) {
       }
     );
   } catch (err: any) {
+    const rawMsg = String(err?.message || err || '');
+    const isBotOrHostBlocked =
+      err?.code === 'HOST_BLOCKED' ||
+      err?.code === 'ERR_YOUTUBE_BOT_CHECK' ||
+      /bot|confirm you're not a bot|login_required|checkpoint_required|blocked free cloud|403|forbidden/i.test(rawMsg);
+
+    if (isBotOrHostBlocked) {
+      return NextResponse.json(
+        {
+          ok: false,
+          success: false,
+          status: 'failed',
+          code: 'HOST_BLOCKED',
+          suggestedMode: 'desktop-direct',
+          error: {
+            code: 'HOST_BLOCKED',
+            message: 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.',
+          },
+          requestId,
+        },
+        {
+          status: 200,
+          headers: CORS_HEADERS,
+        }
+      );
+    }
     return createApiErrorResponse(err, 'HOST_BLOCKED', requestId, CORS_HEADERS);
   }
 }
