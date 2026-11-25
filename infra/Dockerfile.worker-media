@@ -3,7 +3,7 @@
 # Multi-stage production container: Node 24, FFmpeg, yt-dlp nightly, Deno, bgutil, Tini
 # ==============================================================================
 
-FROM node:24-bookworm-slim AS builder
+FROM node:25-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -30,7 +30,7 @@ RUN for dir in packages/shared packages/db; do \
       fi; \
     done
 
-FROM node:24-bookworm-slim AS runner
+FROM node:25-bookworm-slim AS runner
 
 LABEL maintainer="Muxaro Engineering <ops@muxaro.com>"
 LABEL org.opencontainers.image.title="muxaro-worker-media"

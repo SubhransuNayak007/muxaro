@@ -6,7 +6,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Build & Dependencies
 # ------------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS builder
+FROM node:25-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -58,7 +58,7 @@ RUN for dir in packages/shared packages/db packages/entitlements packages/source
 # ------------------------------------------------------------------------------
 # Stage 2: Hardened Production Runtime
 # ------------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS runner
+FROM node:25-bookworm-slim AS runner
 
 LABEL maintainer="Muxaro Engineering <ops@muxaro.com>"
 LABEL org.opencontainers.image.title="muxaro-api"
