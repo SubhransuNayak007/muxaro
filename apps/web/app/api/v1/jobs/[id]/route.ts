@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jobManager } from '@/lib/job-manager';
 import { createApiErrorResponse } from '@/lib/api-error';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,6 +18,9 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
+  const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}`);
+  if (upstream) return upstream;
+
   const requestId = `job_${Date.now()}`;
 
   const job = jobManager.getJob(id);
@@ -48,6 +52,9 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
+  const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}`);
+  if (upstream) return upstream;
+
   const requestId = `cancel_${Date.now()}`;
   const cancelled = jobManager.cancelJob(id);
 

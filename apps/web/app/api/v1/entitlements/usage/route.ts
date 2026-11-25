@@ -1,9 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+export async function GET(req: NextRequest) {
+  const upstream = await proxyToBackend(req, 'entitlements/usage');
+  if (upstream) return upstream;
+
   const nextReset = new Date(Date.now() + 86400000).toISOString();
   return NextResponse.json({
     success: true,
+    backendConnected: false,
     data: {
       tier: 'guest',
       accountTier: 'GUEST',
@@ -27,7 +35,7 @@ export async function GET() {
       rollingWindowHours: 24,
       resetCountdownSeconds: 86400,
       nextResetIso: nextReset,
-      edgeRuntime: 'edge-unified',
+      edgeRuntime: 'unbacked-guest',
       features: {
         maxResolution: '8k',
         audioBitrateKbps: 320,

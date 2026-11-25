@@ -489,3 +489,70 @@ export function triggerMuxaroDirectDownload(streamUrl: string, filename?: string
   }
 }
 
+/**
+ * Requests client-side residential URL extraction through an active MUXARO Direct
+ * Chrome Extension or Userscript bridge when server egress is unconfigured or blocked.
+ */
+export function extractMediaViaDirectBridge(
+  targetUrl: string,
+  timeoutMs = 12000
+): Promise<any | null> {
+  if (typeof window === 'undefined' || !targetUrl || !isMuxaroDirectActive()) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const requestId = `ext_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const targetOrigin =
+      window.location.origin && window.location.origin !== 'null'
+        ? window.location.origin
+        : '*';
+
+    let settled = false;
+    const finish = (result: any | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    const onMessage = (event: MessageEvent) => {
+      try {
+        if (event.source !== window || !event.data || typeof event.data !== 'object') return;
+        if (event.origin && event.origin !== 'null' && event.origin !== window.location.origin) return;
+        if (
+          event.data.source === 'MUXARO_BRIDGE' &&
+          event.data.type === 'EXTRACT_RESPONSE' &&
+          event.data.requestId === requestId
+        ) {
+          if (event.data.success && event.data.data) {
+            finish(event.data.data);
+          } else {
+            finish(null);
+          }
+        }
+      } catch {
+        // Ignore foreign messages
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    try {
+      window.postMessage(
+        {
+          source: 'MUXARO_APP',
+          type: 'MUXARO_EXTRACT_MEDIA',
+          url: targetUrl,
+          requestId,
+        },
+        targetOrigin
+      );
+    } catch {
+      finish(null);
+    }
+  });
+}
+

@@ -11,8 +11,11 @@
  * - Deno-accelerated yt-dlp with gallery-dl fallback for carousels and images
  */
 
+import crypto from 'node:crypto';
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import { getMuxaroRedis } from '@muxaro/db';
 import { ProbeService, detectPlatform } from '../services/probe.service.js';
+import { requireTurnstileIfConfigured } from '../plugins/turnstile.js';
 
 function isSsrfTarget(targetUrl: string): boolean {
   try {
@@ -41,8 +44,11 @@ function isSsrfTarget(targetUrl: string): boolean {
   return false;
 }
 
+const PROBE_CACHE_TTL_SECONDS = 15 * 60; // 15 min hot manifest cache
+
 export const probeRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/probe', {
+    preHandler: requireTurnstileIfConfigured,
     schema: {
       description: 'Probe URL with yt-dlp & Deno (with gallery-dl fallback) for 8K multi-platform extraction',
       tags: ['Media Inspection'],
@@ -51,11 +57,12 @@ export const probeRoutes: FastifyPluginAsync = async (fastify) => {
         required: ['url'],
         properties: {
           url: { type: 'string' },
+          bypassCache: { type: 'boolean' },
         },
       },
     },
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = (request.body || {}) as { url?: string };
+    const body = (request.body || {}) as { url?: string; bypassCache?: boolean };
     const rawUrl = body.url?.trim();
 
     if (!rawUrl) {
@@ -80,8 +87,42 @@ export const probeRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
+    const cacheHash = crypto.createHash('sha256').update(rawUrl).digest('hex').slice(0, 32);
+    if (!body.bypassCache && process.env.NODE_ENV !== 'test') {
+      try {
+        const redis = getMuxaroRedis();
+        const cachedData = await Promise.race([
+          redis.getAnalyseCache('probe', cacheHash),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 500)),
+        ]);
+        if (cachedData && typeof cachedData === 'object') {
+          return reply.code(200).send({
+            success: true,
+            data: { ...cachedData, cached: true },
+            ...cachedData,
+            cached: true,
+            requestId: request.id,
+          });
+        }
+      } catch {
+        // Redis cache miss / offline - proceed to live probe cleanly
+      }
+    }
+
     try {
       const probeData = await ProbeService.probeUrl(rawUrl);
+
+      if (process.env.NODE_ENV !== 'test') {
+        try {
+          const redis = getMuxaroRedis();
+          await Promise.race([
+            redis.setAnalyseCache('probe', cacheHash, probeData as any, PROBE_CACHE_TTL_SECONDS),
+            new Promise<void>((resolve) => setTimeout(resolve, 400)),
+          ]);
+        } catch {
+          // Non-fatal cache write failure
+        }
+      }
 
       return reply.code(200).send({
         success: true,

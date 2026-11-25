@@ -1,55 +1,36 @@
 # ==============================================================================
 # MUXARO Media Worker Container (lane:fast-io, lane:transcode, lane:batch)
-# Multi-stage production container: Node 22, FFmpeg, Tini, non-root user muxaro
-# Complies with Part 8.1 Specification
+# Multi-stage production container: Node 24, FFmpeg, yt-dlp nightly, Deno, bgutil, Tini
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# Stage 1: Build & Dependencies
-# ------------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies for native modules if required
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
-# Copy monorepo workspace configuration files
-COPY package.json* package-lock.json* pnpm-lock.yaml* pnpm-workspace.yaml* ./
+COPY package.json* .npmrc* ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/db/package.json ./packages/db/
+COPY apps/worker-media/package.json ./apps/worker-media/
 
-# Copy shared packages manifests
-COPY packages/shared/package*.json ./packages/shared/
-COPY packages/db/package*.json ./packages/db/
+RUN for dir in packages/shared packages/db apps/worker-media; do \
+      if [ -f "/app/${dir}/package.json" ]; then \
+        (cd "/app/${dir}" && pnpm install --no-frozen-lockfile); \
+      fi; \
+    done
 
-# Copy worker-media package manifest (supporting apps/worker-media)
-COPY apps/worker-media/package*.json ./apps/worker-media/
-
-# Install dependencies across packages
-RUN if [ -f package-lock.json ]; then \
-      npm ci --no-audit --no-fund; \
-    elif [ -f apps/worker-media/package.json ]; then \
-      cd apps/worker-media && if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi; \
-    fi
-
-# Copy source code
 COPY packages/shared ./packages/shared
 COPY packages/db ./packages/db
 COPY apps/worker-media ./apps/worker-media
 
-# Build TypeScript packages and application
-RUN if [ -d packages/shared ] && [ -f packages/shared/tsconfig.json ]; then cd packages/shared && npx tsc -b 2>/dev/null || npx tsc 2>/dev/null || true; fi && \
-    if [ -d packages/db ] && [ -f packages/db/tsconfig.json ]; then cd packages/db && npx tsc -b 2>/dev/null || npx tsc 2>/dev/null || true; fi && \
-    if [ -d apps/worker-media ] && [ -f apps/worker-media/tsconfig.json ]; then cd apps/worker-media && npx tsc 2>/dev/null || true; fi
+RUN for dir in packages/shared packages/db; do \
+      if [ -f "/app/${dir}/tsconfig.json" ]; then \
+        (cd "/app/${dir}" && pnpm run build 2>/dev/null || true); \
+      fi; \
+    done
 
-# ------------------------------------------------------------------------------
-# Stage 2: Hardened Production Runtime (Part 8.1)
-# ------------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 
 LABEL maintainer="Muxaro Engineering <ops@muxaro.com>"
 LABEL org.opencontainers.image.title="muxaro-worker-media"
@@ -57,39 +38,43 @@ LABEL org.opencontainers.image.description="MUXARO Production FFmpeg Media Worke
 
 WORKDIR /app
 
-# Install runtime utilities: FFmpeg, ffprobe, Tini (PID 1 reaper), curl (healthcheck), ca-certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     tini \
     curl \
     ca-certificates \
+    unzip \
     python3 \
-    && ffmpeg -version && ffprobe -version \
+    python3-pip \
+    && curl -fsSL https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod 0755 /usr/local/bin/yt-dlp \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && chmod 0755 /usr/local/bin/deno \
+    && python3 -m pip install --no-cache-dir --break-system-packages -U bgutil-ytdlp-pot-provider \
+    && ffmpeg -version && ffprobe -version && yt-dlp --version && deno --version \
     && apt-get purge -y --auto-remove \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
-# Create dedicated unprivileged non-root system user (UID 10001)
 RUN groupadd --system --gid 10001 muxaro && \
     useradd --system --uid 10001 --gid muxaro --no-create-home --shell /usr/sbin/nologin muxaro
 
-# Create isolated ephemeral scratch directories for media operations with strict perms
 RUN mkdir -p /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads && \
     chown -R muxaro:muxaro /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads && \
     chmod 700 /tmp/muxaro-scratch /tmp/muxaro-artifacts /tmp/muxaro-uploads
 
-# Copy application artifacts from builder
 COPY --from=builder --chown=muxaro:muxaro /app /app
 
-# Ensure workspace files are readable by non-root user
-RUN chown -R muxaro:muxaro /app
-
-# Runtime configuration defaults
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5000
 ENV SCRATCH_DIR=/tmp/muxaro-scratch
 ENV MAX_CONCURRENT_JOBS=4
 ENV JOB_TIMEOUT_SECONDS=300
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/bin/ffprobe
+ENV YTDLP_PATH=/usr/local/bin/yt-dlp
+ENV DENO_PATH=/usr/local/bin/deno
+ENV YTDLP_JS_RUNTIMES=deno,node
 ENV LOG_LEVEL=info
 
 WORKDIR /app/apps/worker-media

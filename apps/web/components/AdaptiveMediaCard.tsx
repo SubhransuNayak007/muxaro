@@ -20,7 +20,16 @@ import {
 import Link from 'next/link';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
-import { api, extractDisplayError } from '@/lib/api-client';
+import {
+  api,
+  extractDisplayError,
+  getApiBaseUrl,
+  getRegisteredLocalFile,
+  isClientOnlyAssetId,
+} from '@/lib/api-client';
+import { startZeroWaitStream } from '@/lib/stream-engine';
+import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
+import { ResumableMultipartUploader } from '@/lib/multipart-uploader';
 import {
   normalizeVideoOptions,
   normalizeAudioOptions,
@@ -285,6 +294,12 @@ export default function AdaptiveMediaCard({
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedDownloadLink, setCopiedDownloadLink] = useState<boolean>(false);
   const [fallbackDownloadUrl, setFallbackDownloadUrl] = useState<string | null>(null);
+  const [clientStreamProgress, setClientStreamProgress] = useState<{
+    stage: string;
+    percent: number;
+    speed?: string;
+    message?: string;
+  } | null>(null);
 
   // Auto-trigger ref to prevent duplicate browser download prompts
   const autoTriggeredRef = useRef<boolean>(false);
@@ -498,16 +513,226 @@ export default function AdaptiveMediaCard({
         ? `${selectedVideoOption.height}p`
         : undefined;
 
-    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(manifest.sourceUrl);
-    // YouTube adaptive video streams (1080p, 1440p, 4K, 8K) have NO audio track and MUST be multiplexed by FFmpeg.
-    // Never treat adaptive video-only streams as zero-hop downloads; they must go through the pipeline to merge audio.
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(manifest.sourceUrl || '');
+    const videoStreamUrl = selectedVideoOption?.stream?.url;
+    const audioStreamUrl = manifest.audioStreams?.[0]?.url;
+
+    // Local Upload Processing Path (homepage `/` file drops):
+    // Route cleanly to in-browser FFmpegWorkerClient Web Worker first, or upload via
+    // ResumableMultipartUploader + real mediaAssetId/uploadSessionId if server job is needed.
+    if (manifest.isLocalUpload) {
+      const localFile = getRegisteredLocalFile(manifest.id);
+
+      if (localFile && !isCarousel && activeTab !== 'subtitles') {
+        setClientStreamProgress({
+          stage: 'pipelining',
+          percent: 5,
+          message: isAudioOnly
+            ? 'Extracting audio in browser worker…'
+            : 'Remuxing container in browser worker…',
+        });
+        try {
+          const worker = FFmpegWorkerClient.getInstance();
+          const workerRes = isAudioOnly
+            ? await worker.extractAudio({
+                file: localFile,
+                fileName: localFile.name,
+                targetFormat: selectedAudioPreset.ext as any,
+                streamCopy: selectedAudioPreset.ext === 'm4a' || selectedAudioPreset.ext === 'opus',
+                onProgress: (p) => {
+                  const pct = Math.max(5, Math.min(99, Math.round((p.ratio || 0) * 100)));
+                  setClientStreamProgress({
+                    stage: 'finalizing',
+                    percent: pct,
+                    message: p.timeSeconds
+                      ? `Extracting audio (${Math.round(p.timeSeconds)}s processed)…`
+                      : 'Extracting audio in browser worker…',
+                  });
+                },
+              })
+            : await worker.convert({
+                file: localFile,
+                fileName: localFile.name,
+                targetContainer: videoContainer,
+                streamCopy: true,
+                onProgress: (p) => {
+                  const pct = Math.max(5, Math.min(99, Math.round((p.ratio || 0) * 100)));
+                  setClientStreamProgress({
+                    stage: 'finalizing',
+                    percent: pct,
+                    message: p.timeSeconds
+                      ? `Remuxing ${videoContainer.toUpperCase()} (${Math.round(p.timeSeconds)}s processed)…`
+                      : `Remuxing ${videoContainer.toUpperCase()} in browser worker…`,
+                  });
+                },
+              });
+
+          setClientStreamProgress(null);
+          setFallbackDownloadUrl(workerRes.url);
+          autoTriggeredRef.current = true;
+          triggerBrowserDownload(workerRes.url, workerRes.fileName);
+          saveToDownloadsHistory(
+            `dl_${Date.now()}`,
+            workerRes.url,
+            manifest.title,
+            targetFormat,
+            workerRes.sizeBytes || localFile.size
+          );
+          return;
+        } catch (workerErr: any) {
+          console.warn(
+            '[FFmpegWorker] Local worker processing failed, trying server upload fallback:',
+            workerErr
+          );
+          setClientStreamProgress(null);
+        }
+      }
+
+      try {
+        let serverAssetId =
+          manifest.id && !isClientOnlyAssetId(manifest.id) ? manifest.id : '';
+
+        if (!serverAssetId) {
+          if (!localFile) {
+            throw new Error('Local file reference is no longer available. Please choose the file again.');
+          }
+          setClientStreamProgress({
+            stage: 'connecting',
+            percent: 2,
+            message: 'Uploading local file for server processing…',
+          });
+          const uploader = new ResumableMultipartUploader(localFile, {
+            apiBase: getApiBaseUrl(),
+            tool: isAudioOnly ? 'extract_audio' : 'convert_video',
+            targetFormat,
+            onProgress: (stats) => {
+              setClientStreamProgress({
+                stage: 'pipelining',
+                percent: stats.percent,
+                speed: `${stats.mbps} MB/s`,
+                message: `Uploading to media worker (${stats.percent}%)…`,
+              });
+            },
+          });
+          const uploaded = await uploader.start();
+          setClientStreamProgress(null);
+          serverAssetId = String(
+            uploaded?.assetId || uploaded?.id || uploaded?.uploadSessionId || uploaded?.uploadId || ''
+          );
+        }
+
+        if (!serverAssetId) {
+          throw new Error('Upload completed without a server mediaAssetId.');
+        }
+
+        const job = await api.createJob({
+          mediaAssetId: serverAssetId,
+          uploadSessionId: serverAssetId,
+          operation,
+          targetFormat,
+          targetResolution,
+          targetAudioCodec: isAudioOnly ? selectedAudioPreset.ext : undefined,
+          streamCopy: !isAudioOnly,
+          title: manifest.title,
+          fileSizeBytes: manifest.fileSizeBytes,
+        });
+
+        if (job && job.id) {
+          setActiveJobId(job.id);
+          onJobStarted?.(job);
+          const readyUrl =
+            job.downloadUrl ||
+            (job as any).url ||
+            (job.status === 'READY'
+              ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download`
+              : null);
+          if (readyUrl && job.status === 'READY') {
+            setFallbackDownloadUrl(readyUrl);
+            autoTriggeredRef.current = true;
+            triggerBrowserDownload(readyUrl, job.outputFilename);
+            saveToDownloadsHistory(
+              job.id,
+              readyUrl,
+              manifest.title,
+              targetFormat,
+              job.outputSizeBytes || job.artifact?.size || manifest.fileSizeBytes
+            );
+          }
+        }
+        return;
+      } catch (localErr: unknown) {
+        setClientStreamProgress(null);
+        const displayErr = extractDisplayError(
+          localErr,
+          'Could not process this local file in-browser or upload it to a configured media server.'
+        );
+        console.error('[MUXARO Local Processing Error]', displayErr, localErr);
+        setErrorMessage(displayErr);
+        return;
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    // Check if separate adaptive tracks require client-side muxing
     const isAdaptiveVideoOnly = isYouTube && !isAudioOnly && selectedVideoOption && selectedVideoOption.height > 720;
 
-    const directStreamUrl = isAdaptiveVideoOnly
-      ? undefined
-      : (isAudioOnly
-          ? (manifest.audioStreams?.[0]?.url || manifest.directStreamUrl)
-          : (!isYouTube ? (selectedVideoOption?.stream?.url || manifest.directStreamUrl) : undefined));
+    // Client-Side StreamEngine Fast-Path:
+    // When video and audio streams are available directly, mux them client-side in the browser
+    if (isAdaptiveVideoOnly && videoStreamUrl && audioStreamUrl) {
+      setClientStreamProgress({
+        stage: 'connecting',
+        percent: 5,
+        message: 'Connecting to direct stream pipelines…',
+      });
+      try {
+        const controller = await startZeroWaitStream({
+          sourceUrl: manifest.sourceUrl,
+          videoUrl: videoStreamUrl,
+          audioUrl: audioStreamUrl,
+          format: videoContainer === 'webm' ? 'webm' : 'mp4',
+          filename: `${manifest.title || 'media'}.${videoContainer}`,
+          videoSizeBytes: selectedVideoOption.estimatedSizeBytes,
+          audioSizeBytes: manifest.audioStreams?.[0]?.estimatedSizeBytes,
+          onProgress: (p) => {
+            setClientStreamProgress({
+              stage: p.stage,
+              percent: p.percent,
+              speed: p.speedBytesPerSec > 0 ? `${(p.speedBytesPerSec / (1024 * 1024)).toFixed(1)} MB/s` : undefined,
+              message: p.message,
+            });
+          },
+          onError: (streamErr) => {
+            console.warn('[StreamEngine] Client stream error, falling back to server job:', streamErr);
+          },
+        });
+        const res = await controller.completion;
+        setClientStreamProgress(null);
+        const dlUrl = res.downloadUrl;
+        if (dlUrl) {
+          setFallbackDownloadUrl(dlUrl);
+          autoTriggeredRef.current = true;
+          if (res.sinkType === 'service-worker') {
+            triggerBrowserDownload(dlUrl, res.filename);
+          }
+          saveToDownloadsHistory(`dl_${Date.now()}`, dlUrl, manifest.title, videoContainer, res.totalBytes);
+        } else if (res.savedToDiskDirectly) {
+          autoTriggeredRef.current = true;
+          saveToDownloadsHistory(`dl_${Date.now()}`, '', manifest.title, videoContainer, res.totalBytes);
+        }
+        setSubmitting(false);
+        return;
+      } catch (streamInitErr) {
+        console.warn('[StreamEngine] Client stream failed, falling back to server job:', streamInitErr);
+        setClientStreamProgress(null);
+      }
+    }
+
+    const rawDirectStreamUrl = isAudioOnly
+      ? (manifest.audioStreams?.[0]?.url || manifest.directStreamUrl)
+      : (selectedVideoOption?.stream?.url || manifest.directStreamUrl);
+    const directStreamUrl =
+      rawDirectStreamUrl && !/^blob:/i.test(rawDirectStreamUrl) ? rawDirectStreamUrl : undefined;
 
     try {
       const job = await api.createJob({
@@ -531,7 +756,7 @@ export default function AdaptiveMediaCard({
 
         // Zero-Hop Client Handover: direct origin CDN stream
         if (job.deliveryMode === 'zero-hop') {
-          const streamUrl = job.directStreamUrl || job.downloadUrl;
+          const streamUrl = job.directStreamUrl || job.downloadUrl || directStreamUrl;
           if (streamUrl && typeof document !== 'undefined') {
             const filename = job.outputFilename || `${manifest.title}.${targetFormat}`;
             const a = document.createElement('a');
@@ -614,15 +839,16 @@ export default function AdaptiveMediaCard({
   const isReady = stream.status === 'READY' || Boolean(fallbackDownloadUrl);
   const isMuxing =
     !isReady &&
-    Boolean(activeJobId) &&
-    (stream.status === 'PROCESSING' ||
-      stream.status === 'VALIDATING' ||
-      stream.status === 'QUEUED' ||
-      stream.status === 'DOWNLOADING_VIDEO' ||
-      stream.status === 'DOWNLOADING_AUDIO' ||
-      stream.status === 'MERGING' ||
-      stream.status === 'CONVERTING' ||
-      stream.status === 'VERIFYING');
+    (Boolean(clientStreamProgress) ||
+      (Boolean(activeJobId) &&
+        (stream.status === 'PROCESSING' ||
+          stream.status === 'VALIDATING' ||
+          stream.status === 'QUEUED' ||
+          stream.status === 'DOWNLOADING_VIDEO' ||
+          stream.status === 'DOWNLOADING_AUDIO' ||
+          stream.status === 'MERGING' ||
+          stream.status === 'CONVERTING' ||
+          stream.status === 'VERIFYING')));
   const isFailed = stream.status === 'FAILED' || Boolean(stream.error) || Boolean(errorMessage);
 
   // Available tabs: ONLY show Carousel if multi-item carousel manifest exists
@@ -1294,23 +1520,30 @@ export default function AdaptiveMediaCard({
           <div className="flex items-center justify-between text-xs font-medium text-content">
             <div className="flex items-center gap-2">
               <Loader2 className="w-3.5 h-3.5 animate-spin text-content" />
-              <span>{stream.stageMessage || 'Processing stream…'}</span>
+              <span>{clientStreamProgress?.message || stream.stageMessage || 'Processing stream…'}</span>
             </div>
-            <span className="font-mono tabular-nums font-semibold">{stream.progress}%</span>
+            <span className="font-mono tabular-nums font-semibold">
+              {clientStreamProgress ? clientStreamProgress.percent : stream.progress}%
+            </span>
           </div>
 
           {/* Razor-thin 3px precision rail */}
           <div className="w-full h-[3px] rounded-full bg-neutral-200 dark:bg-neutral-800 overflow-hidden">
             <div
               className="h-full w-full bg-neutral-900 dark:bg-white origin-left motion-safe:transition-transform motion-safe:duration-150"
-              style={{ transform: `scaleX(${Math.max(0.02, Math.min(1, stream.progress / 100))})` }}
+              style={{
+                transform: `scaleX(${Math.max(
+                  0.02,
+                  Math.min(1, (clientStreamProgress ? clientStreamProgress.percent : stream.progress) / 100)
+                )})`,
+              }}
             />
           </div>
 
           <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-content-secondary">
             <span>{videoContainer.toUpperCase()}{selectedVideoOption ? ` · ${selectedVideoOption.height}p` : ''}</span>
-            {stream.progress > 0 && stream.speed && stream.speed !== '1.0x' && !stream.speed.toLowerCase().includes('copy') && (
-              <span>{stream.speed}</span>
+            {(clientStreamProgress?.speed || (stream.progress > 0 && stream.speed && stream.speed !== '1.0x' && !stream.speed.toLowerCase().includes('copy'))) && (
+              <span>{clientStreamProgress?.speed || stream.speed}</span>
             )}
             {stream.etaSeconds > 0 && (
               <span>ETA {stream.etaSeconds}s</span>
@@ -1319,57 +1552,81 @@ export default function AdaptiveMediaCard({
         </div>
       )}
 
-      {/* Error Notice with Direct Fallback */}
-      {isFailed && (
-        <div
-          role="alert"
-          className="p-3.5 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated text-content text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
-        >
-          <div className="space-y-0.5">
-            <span className="font-semibold text-content">
-              {errorMessage?.includes('blocks free cloud servers') ? 'Host Restriction' : 'Direct stream available'}
-            </span>
-            <p className="text-content-secondary">
-              {errorMessage || stream.error?.message || 'Server processing busy. You can save the direct stream immediately.'}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
-            {errorMessage?.includes('blocks free cloud servers') ? (
-              <>
-                <Link
-                  href="/settings?tab=instances"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-violet text-white text-xs font-medium shadow-xs hover:bg-brand-violet-hover transition-colors"
+      {/* Error Notice with Honest Fallback */}
+      {isFailed && (() => {
+        const displayErr = errorMessage || stream.error?.message || '';
+        const errLower = displayErr.toLowerCase();
+        const isHostRestricted =
+          errLower.includes('blocks free cloud servers') ||
+          errLower.includes('host_blocked') ||
+          errLower.includes('host restriction');
+        const isBackendUnconfigured =
+          errLower.includes('not configured') ||
+          errLower.includes('degraded') ||
+          errLower.includes('err_backend_not_configured');
+        const hasValidDirectStream = Boolean(
+          (selectedVideoOption?.stream?.url || manifest.directStreamUrl) &&
+            !/^blob:/i.test(selectedVideoOption?.stream?.url || manifest.directStreamUrl || '')
+        );
+        const showDirectSave = hasValidDirectStream && !isHostRestricted && !isBackendUnconfigured;
+
+        const headingText = isHostRestricted
+          ? 'Host Restriction'
+          : isBackendUnconfigured
+          ? 'Backend Unavailable'
+          : showDirectSave
+          ? 'Direct stream available'
+          : 'Processing Error';
+
+        return (
+          <div
+            role="alert"
+            className="p-3.5 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated text-content text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+          >
+            <div className="space-y-0.5">
+              <span className="font-semibold text-content">{headingText}</span>
+              <p className="text-content-secondary">
+                {displayErr || 'Could not process this media request right now.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+              {isHostRestricted || isBackendUnconfigured ? (
+                <>
+                  <Link
+                    href="/settings?tab=instances"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-violet text-white text-xs font-medium shadow-xs hover:bg-brand-violet-hover transition-colors"
+                  >
+                    <span>Connect Custom Worker</span>
+                  </Link>
+                  <Link
+                    href="/tools/direct-helper"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-xs font-medium text-content hover:bg-surface transition-colors"
+                  >
+                    <span>Desktop Direct</span>
+                  </Link>
+                </>
+              ) : showDirectSave ? (
+                <button
+                  type="button"
+                  onClick={handleStartDownload}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-medium shadow-xs"
                 >
-                  <span>Connect Custom Worker</span>
-                </Link>
-                <Link
-                  href="/tools/direct-helper"
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-line text-xs font-medium text-content hover:bg-surface transition-colors"
-                >
-                  <span>Desktop Direct</span>
-                </Link>
-              </>
-            ) : (
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save file now</span>
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={handleStartDownload}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-medium shadow-xs"
+                onClick={handleResetCard}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/[0.08] dark:border-white/[0.08] text-xs font-medium text-content-secondary hover:text-content"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>Save file now</span>
+                <RotateCcw className="w-3 h-3" />
+                <span>Retry</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={handleResetCard}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-black/[0.08] dark:border-white/[0.08] text-xs font-medium text-content-secondary hover:text-content"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Retry</span>
-            </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Verified Download Card */}
       {isReady && fallbackDownloadUrl && (
@@ -1487,7 +1744,7 @@ export default function AdaptiveMediaCard({
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 <span className="tabular-nums font-mono font-medium">
-                  {stream.stageMessage || 'Remuxing…'} ({stream.progress}%)
+                  {clientStreamProgress?.message || stream.stageMessage || 'Remuxing…'} ({clientStreamProgress ? clientStreamProgress.percent : stream.progress}%)
                 </span>
               </>
             ) : isReady ? (

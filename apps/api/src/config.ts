@@ -57,11 +57,11 @@ const r2PublicEndpoint = (process.env.R2_PUBLIC_ENDPOINT || '').trim() || undefi
 
 const apiBaseUrl =
   (process.env.API_BASE_URL || process.env.BASE_URL || '').trim().replace(/\/+$/, '') ||
-  (isProd ? 'https://api.muxaro.app' : `http://localhost:${port}`);
+  (isProd ? '' : `http://localhost:${port}`);
 
 const siteUrl =
   (process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || '').trim().replace(/\/+$/, '') ||
-  (isProd ? 'https://muxaro.app' : 'http://localhost:3000');
+  (isProd ? 'https://muxaro.vercel.app' : 'http://localhost:3000');
 
 export const config: ApiConfig = {
   env: rawEnv,

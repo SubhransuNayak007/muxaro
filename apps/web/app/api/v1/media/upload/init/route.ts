@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getUploadsDir, saveSessionMeta, sanitizeUploadFilename } from '@/lib/upload-storage';
+import { isServerlessRuntime, proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,6 +20,25 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   const requestId = `upl_init_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+  const upstream = await proxyToBackend(req, 'media/upload/init');
+  if (upstream) return upstream;
+
+  if (isServerlessRuntime()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        success: false,
+        error: {
+          code: 'ERR_BACKEND_NOT_CONFIGURED',
+          message:
+            'Backend media processing server is not configured for chunked server uploads. Use in-browser processing or configure API_INTERNAL_URL.',
+        },
+        requestId,
+      },
+      { status: 503, headers: CORS_HEADERS }
+    );
+  }
 
   try {
     const body = await req.json().catch(() => ({}));

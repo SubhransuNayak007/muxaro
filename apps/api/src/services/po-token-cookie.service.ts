@@ -45,6 +45,8 @@ export interface YtDlpResilientOptions {
   isPlaylist?: boolean;
   userAgent?: string;
   proxy?: string;
+  forceIpVersion?: '4' | '6' | 'auto';
+  egressProfileId?: string;
 }
 
 export const DEFAULT_PLAYER_CLIENTS = 'ios,android,tv,mweb,web';
@@ -112,7 +114,7 @@ export function materializeCookieContent(rawContent: string): string {
   }
 
   const targetDir = getManagedCookieDir();
-  const filePath = path.join(targetDir, 'managed-cookies.env.txt');
+  const filePath = path.join(targetDir, `managed-cookies-${contentHash.slice(0, 12)}.env.txt`);
 
   try {
     fs.writeFileSync(filePath, trimmed + '\n', {
@@ -378,7 +380,9 @@ export function buildResilientYtDlpArgs(options: YtDlpResilientOptions = {}): st
     '--no-cache-dir',
     '--no-warnings',
     '--js-runtimes',
-    'deno,node',
+    'deno',
+    '--js-runtimes',
+    'node',
     '--socket-timeout',
     '30'
   );
@@ -421,6 +425,12 @@ export function buildResilientYtDlpArgs(options: YtDlpResilientOptions = {}): st
       '--user-agent',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
     );
+  }
+
+  if (options.forceIpVersion === '4') {
+    args.push('--force-ipv4');
+  } else if (options.forceIpVersion === '6') {
+    args.push('--force-ipv6');
   }
 
   // 5. Proxy configuration

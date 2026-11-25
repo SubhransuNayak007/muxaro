@@ -9,7 +9,7 @@
  * - Direct download streaming trigger
  * - Instant "Delete Now" cloud purge
  * - Filter by All, Video, Audio, Archives + instant search
- * - Hallmark compliant tokenized layout, no transition:all
+ * - Hallmark compliant tokenized layout, no blanket all-property transitions
  *
  * Bug fixes (Wave 2):
  * - BUG 1: Expired rows now show disabled buttons + 'Expired' badge + 'Re-analyze' action

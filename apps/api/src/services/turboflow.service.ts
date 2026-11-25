@@ -76,6 +76,8 @@ export interface YtDlpBaseArgsOptions {
   isPlaylist?: boolean;
   userAgent?: string;
   proxy?: string;
+  forceIpVersion?: '4' | '6' | 'auto';
+  egressProfileId?: string;
 }
 
 /**

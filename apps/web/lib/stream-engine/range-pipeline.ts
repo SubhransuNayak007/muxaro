@@ -140,41 +140,52 @@ export class ParallelRangePipeline {
         mode: 'cors',
         credentials: 'omit',
       });
+      if (resp.status === 403 || resp.status === 404 || resp.status === 410) {
+        throw new Error(`HTTP_${resp.status}`);
+      }
       const cl = resp.headers.get('content-length');
       if (cl) {
         this.totalBytes = parseInt(cl, 10);
       }
-    } catch {
+    } catch (headErr: any) {
+      if (typeof headErr?.message === 'string' && headErr.message.startsWith('HTTP_')) {
+        throw headErr;
+      }
       // Fallback: Range 0-0 probe
-      try {
-        const resp = await fetch(this.url, {
-          method: 'GET',
-          headers: { ...(this.headers || {}), Range: 'bytes=0-0' },
-          signal: this.signal,
-          mode: 'cors',
-          credentials: 'omit',
-        });
-        const cr = resp.headers.get('content-range');
-        if (cr) {
-          const match = cr.match(/\/(\d+)$/);
-          if (match && match[1]) {
-            this.totalBytes = parseInt(match[1], 10);
-          }
+      const resp = await fetch(this.url, {
+        method: 'GET',
+        headers: { ...(this.headers || {}), Range: 'bytes=0-0' },
+        signal: this.signal,
+        mode: 'cors',
+        credentials: 'omit',
+      });
+      if (!resp.ok && resp.status !== 206) {
+        throw new Error(`HTTP_${resp.status}`);
+      }
+      const cr = resp.headers.get('content-range');
+      if (cr) {
+        const match = cr.match(/\/(\d+)$/);
+        if (match && match[1]) {
+          this.totalBytes = parseInt(match[1], 10);
         }
-      } catch {
-        // If length cannot be probed, single sequential mode is used
+      }
+      if (this.totalBytes <= 0) {
+        const cl = resp.headers.get('content-length');
+        if (cl) this.totalBytes = parseInt(cl, 10);
       }
     }
   }
 
   private async runWorkerPool(): Promise<void> {
+    if (this.totalBytes <= 0) {
+      throw new Error('Unable to determine remote stream Content-Length for byte-range pipelining.');
+    }
+
     const workerPromises = new Set<Promise<void>>();
+    let fatalError: Error | null = null;
 
     // Loop until all bytes are queued or aborted
-    while (
-      (this.totalBytes === 0 || this.nextByteOffset < this.totalBytes) &&
-      !this.signal?.aborted
-    ) {
+    while (this.nextByteOffset < this.totalBytes && !this.signal?.aborted && !fatalError) {
       await this.checkPause();
 
       // Check backpressure: if ring buffer is at high watermark, wait for consumer to drain
@@ -187,18 +198,15 @@ export class ParallelRangePipeline {
       if (workerPromises.size < targetConcurrency) {
         const chunkSize = this.chunkSizer.getChunkSize();
         const startOffset = this.nextByteOffset;
-        const endOffset =
-          this.totalBytes > 0
-            ? Math.min(this.totalBytes - 1, startOffset + chunkSize - 1)
-            : startOffset + chunkSize - 1;
+        const endOffset = Math.min(this.totalBytes - 1, startOffset + chunkSize - 1);
 
         const chunkIndex = this.nextChunkIndex++;
         this.nextByteOffset = endOffset + 1;
 
         const workerPromise = this.fetchChunk(chunkIndex, startOffset, endOffset)
-          .catch((err) => {
+          .catch((err: any) => {
             if (this.signal?.aborted) return;
-            console.warn(`[RangePipeline] Chunk ${chunkIndex} failed:`, err);
+            fatalError = err instanceof Error ? err : new Error(String(err));
           })
           .finally(() => {
             workerPromises.delete(workerPromise);
@@ -213,6 +221,9 @@ export class ParallelRangePipeline {
 
     // Await any remaining in-flight chunk workers
     await Promise.all(workerPromises);
+    if (fatalError) {
+      throw fatalError;
+    }
   }
 
   private async fetchChunk(

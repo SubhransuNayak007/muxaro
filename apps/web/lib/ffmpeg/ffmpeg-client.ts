@@ -46,10 +46,11 @@ export class FFmpegWorkerClient {
   }
 
   /**
-   * Initializes the shared worker or in-memory fallback.
+   * Initializes the shared background Web Worker first, falling back to in-thread FFmpegEngine
+   * only when Web Workers are unavailable or fail to initialize.
    */
   public async init(config?: { coreURL?: string; wasmURL?: string }): Promise<void> {
-    if (this.isReady) return;
+    if (this.isReady && (this.worker || this.fallbackEngine)) return;
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
@@ -57,13 +58,12 @@ export class FFmpegWorkerClient {
       try {
         if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
           try {
-            // Instantiate shared worker from public/workers/ffmpeg-worker.js
-            this.worker = new Worker('/workers/ffmpeg-worker.js');
+            const worker = new Worker('/workers/ffmpeg-worker.js');
+            this.worker = worker;
             this.setupWorkerListeners();
 
-            // Send init ping
             await new Promise<void>((resolve, reject) => {
-              const id = `init_${Date.now()}`;
+              const id = `init_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
               const timer = setTimeout(() => {
                 this.callbacks.delete(id);
                 reject(new Error('FFmpeg worker init timeout (60s).'));
@@ -85,23 +85,35 @@ export class FFmpegWorkerClient {
                 type: 'init',
                 config,
               };
-              this.worker?.postMessage(msg);
+              worker.postMessage(msg);
             });
 
             this.isReady = true;
             return;
           } catch (workerErr) {
             console.warn(
-              '[FFmpegWorkerClient] Failed to instantiate dedicated worker. Using in-thread engine fallback.',
+              '[FFmpegWorkerClient] Failed to initialize dedicated Web Worker, falling back to in-thread FFmpegEngine.',
               workerErr
             );
+            if (this.worker) {
+              try {
+                this.worker.terminate();
+              } catch {}
+              this.worker = null;
+            }
           }
         }
 
-        // Fallback: direct FFmpegEngine
-        this.fallbackEngine = new FFmpegEngine();
+        if (!this.fallbackEngine) {
+          this.fallbackEngine = new FFmpegEngine();
+        }
         await this.fallbackEngine.load(config);
         this.isReady = true;
+      } catch (err) {
+        console.error('[FFmpegWorkerClient] Failed to initialize in-browser FFmpegEngine:', err);
+        this.isReady = false;
+        this.initPromise = null;
+        throw err;
       } finally {
         this.isInitializing = false;
       }

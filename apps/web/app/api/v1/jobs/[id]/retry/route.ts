@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { jobManager } from '@/lib/job-manager';
 import { createApiErrorResponse } from '@/lib/api-error';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,7 +20,13 @@ export async function POST(
   const { id } = params;
   const requestId = `retry_${Date.now()}`;
 
-  const job = jobManager.getJob(id);
+  const localJob = jobManager.getJob(id);
+  if (!localJob) {
+    const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}/retry`);
+    if (upstream) return upstream;
+  }
+
+  const job = localJob;
   if (!job) {
     return createApiErrorResponse(
       `Job ${id} not found or has expired.`,

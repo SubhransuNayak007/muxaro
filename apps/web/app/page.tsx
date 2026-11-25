@@ -202,13 +202,30 @@ export default function HomePage() {
       });
     } catch (err: unknown) {
       let message = err instanceof Error ? err.message : '';
+      const errCode = String((err as any)?.code || '').toUpperCase();
+      const errStatus = (err as any)?.status;
+      const isBackendUnconfigured =
+        errCode === 'ERR_BACKEND_NOT_CONFIGURED' ||
+        errStatus === 503 ||
+        /api_internal_url|backend not configured|no media backend worker/i.test(message);
       const isExplicitBlock =
-        (err as any)?.code === 'HOST_BLOCKED' ||
-        (err as any)?.status === 'host_restricted' ||
-        /blocks free cloud servers|bot detection|confirm you're not a bot|login_required/i.test(message);
-      if (isExplicitBlock) {
-        message = 'This host restricts free datacenter IPs. You can process 8K locally with MUXARO Direct, or save direct streams up to 2K.';
-        console.info('[MUXARO Probe] Target host restricted in cloud mode. Suggesting Desktop Direct:', trimmed);
+        !isBackendUnconfigured &&
+        (errCode === 'HOST_BLOCKED' ||
+          errStatus === 'host_restricted' ||
+          /blocks free cloud servers|bot detection|confirm you're not a bot|confirm you’re not a bot|login_required|host challenged/i.test(
+            message
+          ));
+
+      if (isBackendUnconfigured) {
+        message = isMobile
+          ? 'No backend media worker is connected to this Vercel frontend yet. Connect a custom worker in Settings, or use our in-browser Local Studio tools for files already on your phone.'
+          : 'No backend media worker is connected (API_INTERNAL_URL unset). Install the MUXARO Direct desktop extension to extract directly on your connection, or connect a custom worker.';
+        console.info('[MUXARO Probe] Backend worker not configured on serverless runtime.');
+      } else if (isExplicitBlock) {
+        message = isMobile
+          ? 'This host challenged the server IP (BotGuard / rate limit). Connect a custom worker with a clean ISP IP or residential exit node to process this link on mobile.'
+          : 'This host challenged cloud worker egress. Enable MUXARO Direct in desktop Chrome to extract directly on your connection, or connect a custom worker.';
+        console.info('[MUXARO Probe] Target host challenged cloud worker:', trimmed);
       } else if (!message || message === '[object Object]' || message.includes('[object Object]')) {
         message = 'We could not analyse that link. Please check the URL and try again.';
         console.error('[MUXARO Probe Error] Unresolvable media link error:', err);
@@ -673,8 +690,10 @@ export default function HomePage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                      {errorMessage.includes('blocks free cloud servers')
-                        ? 'Host Restriction Detected'
+                      {errorMessage.includes('No backend media worker is connected')
+                        ? 'Cloud Worker Not Connected'
+                        : errorMessage.includes('challenged') || errorMessage.includes('blocks free cloud servers')
+                        ? 'Host Challenge Detected'
                         : 'Unable to analyse link'}
                     </h3>
                     <p className="text-xs text-content-secondary mt-1 leading-relaxed">
@@ -684,7 +703,9 @@ export default function HomePage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line/40 w-full">
-                  {errorMessage.includes('blocks free cloud servers') && (
+                  {(errorMessage.includes('No backend media worker is connected') ||
+                    errorMessage.includes('challenged') ||
+                    errorMessage.includes('blocks free cloud servers')) && (
                     <>
                       <button
                         type="button"
@@ -694,13 +715,23 @@ export default function HomePage() {
                         <Server className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>Connect Custom Worker</span>
                       </button>
-                      <Link
-                        href="/tools/direct-helper"
-                        className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
-                      >
-                        <Zap className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                        <span>Desktop Direct</span>
-                      </Link>
+                      {!isMobile ? (
+                        <Link
+                          href="/tools/direct-helper"
+                          className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
+                        >
+                          <Zap className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                          <span>MUXARO Direct Extension</span>
+                        </Link>
+                      ) : (
+                        <Link
+                          href="/tools/media-converter"
+                          className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
+                        >
+                          <Film className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                          <span>Local File Studio</span>
+                        </Link>
+                      )}
                     </>
                   )}
                   <button

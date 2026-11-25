@@ -745,37 +745,71 @@ export default function JobProgress({
     if (job.directStreamUrl && !job.directStreamUrl.startsWith('/api')) {
       return job.directStreamUrl;
     }
+    const isWatchPage = (u?: string) =>
+      Boolean(u && /^(https?:\/\/)?(www\.)?(youtube\.com\/watch|youtu\.be\/[a-zA-Z0-9_-]+|instagram\.com\/(?:p|reel)\/|tiktok\.com\/@[^\/]+\/video\/|twitter\.com\/[^\/]+\/status\/|x\.com\/[^\/]+\/status\/)/i.test(u));
+
     const fromManifest =
-      manifest?.videoStreams?.find((s: any) => s.url && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(s.url))?.url ||
-      (manifest?.directStreamUrl && !/(?:youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com)\//i.test(manifest.directStreamUrl) ? manifest.directStreamUrl : undefined);
+      manifest?.videoStreams?.find((s: any) => s.url && !isWatchPage(s.url))?.url ||
+      (manifest?.directStreamUrl && !isWatchPage(manifest.directStreamUrl) ? manifest.directStreamUrl : undefined) ||
+      manifest?.audioStreams?.find((a: any) => a.url && !isWatchPage(a.url))?.url;
     return fromManifest;
   }, [job.directStreamUrl, manifest]);
 
-  const isRateLimitedOrChallenged = useMemo(() => {
+  const normalizedFailureRaw = useMemo(() => {
     const errorStr =
       typeof job.error === 'string'
         ? job.error
         : typeof job.error === 'object' && job.error !== null
         ? JSON.stringify(job.error)
         : '';
-    const raw = `${errorStr} ${job.errorMessage || ''} ${job.userMessage || ''} ${job.errorCode || ''}`.toLowerCase();
-    return (
-      raw.includes('bot') ||
-      raw.includes('sign in') ||
-      raw.includes('signin') ||
-      raw.includes('login_required') ||
-      raw.includes('restricted') ||
-      raw.includes('verification') ||
-      raw.includes('captcha') ||
-      raw.includes('private') ||
-      raw.includes('403') ||
-      raw.includes('429') ||
-      raw.includes('empty') ||
-      raw.includes('incomplete') ||
-      raw.includes('0 bytes') ||
-      raw.includes('unable to fetch')
-    );
+    return `${errorStr} ${job.errorMessage || ''} ${job.userMessage || ''} ${job.errorCode || ''}`.toLowerCase();
   }, [job]);
+
+  const isBackendUnavailable = useMemo(() => {
+    const code = String(job.errorCode || '').toUpperCase();
+    return (
+      serverlessRoutingDetected ||
+      code === 'ERR_BACKEND_NOT_CONFIGURED' ||
+      code === 'DEGRADED' ||
+      normalizedFailureRaw.includes('err_backend_not_configured') ||
+      normalizedFailureRaw.includes('backend is not configured') ||
+      normalizedFailureRaw.includes('backend media processing server is not configured') ||
+      normalizedFailureRaw.includes('service degraded') ||
+      normalizedFailureRaw.includes('503')
+    );
+  }, [job.errorCode, normalizedFailureRaw, serverlessRoutingDetected]);
+
+  const isHostBlocked = useMemo(() => {
+    const code = String(job.errorCode || '').toUpperCase();
+    return (
+      code === 'HOST_BLOCKED' ||
+      normalizedFailureRaw.includes('host_blocked') ||
+      normalizedFailureRaw.includes('blocks free cloud') ||
+      normalizedFailureRaw.includes('host restricted') ||
+      normalizedFailureRaw.includes('host_restricted') ||
+      normalizedFailureRaw.includes('datacenter ip')
+    );
+  }, [job.errorCode, normalizedFailureRaw]);
+
+  const isRateLimitedOrChallenged = useMemo(() => {
+    return (
+      isHostBlocked ||
+      normalizedFailureRaw.includes('bot') ||
+      normalizedFailureRaw.includes('sign in') ||
+      normalizedFailureRaw.includes('signin') ||
+      normalizedFailureRaw.includes('login_required') ||
+      normalizedFailureRaw.includes('restricted') ||
+      normalizedFailureRaw.includes('verification') ||
+      normalizedFailureRaw.includes('captcha') ||
+      normalizedFailureRaw.includes('private') ||
+      normalizedFailureRaw.includes('403') ||
+      normalizedFailureRaw.includes('429') ||
+      normalizedFailureRaw.includes('empty') ||
+      normalizedFailureRaw.includes('incomplete') ||
+      normalizedFailureRaw.includes('0 bytes') ||
+      normalizedFailureRaw.includes('unable to fetch')
+    );
+  }, [isHostBlocked, normalizedFailureRaw]);
 
   return (
     <section
@@ -1147,7 +1181,49 @@ export default function JobProgress({
       {/* 4. Failed / Rejected View */}
       {(job.status === 'FAILED' || job.status === 'REJECTED') && (
         <div className="space-y-4">
-          {isRateLimitedOrChallenged ? (
+          {isBackendUnavailable ? (
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-error-bg border border-error text-error flex items-center justify-center shrink-0 mt-0.5">
+                  <AlertCircle className="w-4 h-4" aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm sm:text-base font-semibold text-content leading-tight">
+                    Backend media server unavailable
+                  </h3>
+                  <p className="text-xs text-content-secondary mt-1 leading-relaxed">
+                    {friendlyErrorMessage ||
+                      'This deployment does not have an active cloud media worker configured (DEGRADED / ERR_BACKEND_NOT_CONFIGURED). Process files locally in your browser or connect a custom worker.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                <Link
+                  href="/tools/convert"
+                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
+                >
+                  <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>Open In-Browser Tools</span>
+                </Link>
+                <Link
+                  href="/settings?tab=instances"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
+                >
+                  <span>Connect Custom Worker</span>
+                </Link>
+                {onDismiss && (
+                  <button
+                    type="button"
+                    onClick={onDismiss}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-line text-xs font-medium text-content-secondary hover:text-content transition-colors"
+                  >
+                    <span>Dismiss</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : isRateLimitedOrChallenged ? (
             <div className="space-y-3">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-lg bg-surface-elevated border border-line flex items-center justify-center shrink-0 mt-0.5 text-zinc-900 dark:text-zinc-100">
@@ -1155,12 +1231,17 @@ export default function JobProgress({
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
-                    {fallbackDirectStream || !isMobileDevice ? 'Direct browser stream ready' : 'Host restriction detected'}
+                    {fallbackDirectStream ? 'Direct browser stream ready' : 'Host restriction detected'}
                   </h3>
                   <p className="text-xs text-zinc-700 dark:text-zinc-300 mt-1 leading-relaxed">
-                    {isMobileDevice
-                      ? 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.'
-                      : 'Cloud servers encountered host restrictions for this media link. You can stream and save it directly via your browser.'}
+                    {isHostBlocked
+                      ? friendlyErrorMessage ||
+                        (isMobileDevice
+                          ? 'This host challenged cloud worker egress. Connect a custom worker with a clean ISP IP to process this link on mobile.'
+                          : 'This host challenged cloud server requests (HOST_BLOCKED). Use MUXARO Direct on desktop or connect a custom worker.')
+                      : isMobileDevice
+                      ? 'This host challenged cloud worker egress. Connect a custom worker with a clean ISP IP to process this link on mobile.'
+                      : 'Cloud servers encountered host restrictions for this media link. Use MUXARO Direct or save the direct stream when available.'}
                   </p>
                 </div>
               </div>
@@ -1231,8 +1312,13 @@ export default function JobProgress({
                     Processing could not be completed
                   </h3>
                   <p className="text-xs text-content-secondary mt-1 leading-relaxed">
-                    {friendlyErrorMessage || 'The media server returned an error. You can retry or download directly.'}
+                    {friendlyErrorMessage || 'The media server returned an error and could not complete this job.'}
                   </p>
+                  {retryError && (
+                    <p className="text-xs text-error mt-1 leading-relaxed">
+                      {retryError}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1249,13 +1335,20 @@ export default function JobProgress({
                     <Download className="w-3.5 h-3.5" />
                     <span>Save directly</span>
                   </a>
-                ) : (
+                ) : !isMobileDevice ? (
                   <Link
                     href={directHelperHref}
                     className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
                   >
                     <Zap className="w-3.5 h-3.5" />
                     <span>Stream with MUXARO Direct</span>
+                  </Link>
+                ) : (
+                  <Link
+                    href="/settings?tab=instances"
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-brand-violet text-white text-xs font-semibold hover:bg-brand-violet-hover transition-colors"
+                  >
+                    <span>Connect Custom Worker</span>
                   </Link>
                 )}
 
@@ -1284,16 +1377,16 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
-              <span>Direct browser streams process inside your active tab. File saved directly to your device.</span>
-            ) : (
+            {isBackendUnavailable ? (
+              <span>In-browser FFmpeg tools process files locally on your device without server storage.</span>
+            ) : (isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop') ? (
               <span>
-                Safe to leave this page — server-processed files remain in{' '}
-                <Link href="/downloads" className="text-content hover:underline font-medium">
-                  My Downloads
-                </Link>{' '}
-                for 60 minutes.
+                {fallbackDirectStream
+                  ? 'Direct browser streams process inside your active tab. File saved directly to your device.'
+                  : 'Restricted media hosts block datacenter workers. Use MUXARO Direct or connect a custom worker.'}
               </span>
+            ) : (
+              <span>No output artifact was generated for this failed job.</span>
             )}
           </div>
         </div>

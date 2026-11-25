@@ -22,7 +22,8 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { getYtDlpBaseArgs } from './turboflow.service.js';
+import { getYtDlpBaseArgs, isBotVerificationError } from './turboflow.service.js';
+import { egressPoolManager } from './egress-pool.service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -132,6 +133,8 @@ export interface NormalizedProbeResponse {
   videoStreams: MediaStreamDto[];
   audioStreams: MediaStreamDto[];
   streams: MediaStreamDto[];
+  egressProfileId?: string;
+  cached?: boolean;
 }
 
 export function detectPlatform(url: string): SupportedPlatform {
@@ -164,16 +167,54 @@ function resolveResolutionLabel(height: number, width?: number): string {
 
 function getExecutionEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  const customPaths = [
-    'C:\\Users\\sbhrn\\.deno\\bin',
-    'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312\\Scripts',
-    'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312',
+  const candidateDirs = [
     path.join(os.homedir(), '.deno', 'bin'),
+    path.join(os.homedir(), '.local', 'bin'),
+    ...(process.platform !== 'win32' ? ['/usr/local/bin', '/usr/bin'] : []),
   ];
+  for (const envVar of ['FFMPEG_PATH', 'FFPROBE_PATH', 'YTDLP_PATH', 'DENO_PATH', 'GALLERY_DL_PATH']) {
+    const val = env[envVar]?.trim();
+    if (val && path.isAbsolute(val)) {
+      candidateDirs.unshift(path.dirname(val));
+    }
+  }
   const existingPath = env.PATH || env.Path || '';
-  env.PATH = `${customPaths.join(';')};${existingPath}`;
-  env.Path = env.PATH;
+  const merged = [...candidateDirs, ...existingPath.split(path.delimiter)]
+    .map((entry) => entry.trim())
+    .filter((entry, idx, arr) => entry.length > 0 && arr.indexOf(entry) === idx)
+    .join(path.delimiter);
+  env.PATH = merged;
+  if (process.platform === 'win32') {
+    env.Path = merged;
+  }
   return env;
+}
+
+function resolveExecutable(envVar: string, defaultCommand: string): string {
+  const configured = process.env[envVar]?.trim();
+  if (configured) {
+    if (path.isAbsolute(configured) && fs.existsSync(configured)) {
+      return configured;
+    }
+    return configured;
+  }
+  const searchDirs = (getExecutionEnv().PATH || '').split(path.delimiter).filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? ['', '.exe', '.cmd', '.bat']
+    : [''];
+  for (const dir of searchDirs) {
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${defaultCommand}${ext}`);
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // continue scanning $PATH
+      }
+    }
+  }
+  return defaultCommand;
 }
 
 export class ProbeService {
@@ -225,33 +266,69 @@ export class ProbeService {
   }
 
   /**
-   * Probes URL using yt-dlp with Deno runtime for signature deciphering
+   * Probes URL using yt-dlp with Deno runtime and sticky EgressPoolManager failover
    */
   private static async probeWithYtDlp(url: string, platform: SupportedPlatform): Promise<NormalizedProbeResponse> {
     const env = getExecutionEnv();
-    const baseArgs = getYtDlpBaseArgs({ includeProgress: false });
+    const ytdlpBin = resolveExecutable('YTDLP_PATH', 'yt-dlp');
+    const excludedProfileIds: string[] = [];
+    let selectedProfileId: string | undefined;
+    let parsed: any = null;
+    let lastErr: any = null;
 
-    const args = [
-      '--dump-single-json',
-      '--no-warnings',
-      '--no-playlist',
-      '--socket-timeout', '30',
-      '--js-runtimes', 'deno,node',
-      ...baseArgs,
-      '--',
-      url,
-    ];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const profile = egressPoolManager.selectProfile({ excludeIds: excludedProfileIds });
+      selectedProfileId = profile.id;
+      const baseArgs = getYtDlpBaseArgs({
+        includeProgress: false,
+        playerClient: profile.playerClients,
+        proxy: profile.proxyUrl,
+        poTokenBaseUrl: profile.bgutilUrl,
+        poToken: profile.poToken,
+        visitorData: profile.visitorData,
+        cookiesPath: profile.cookiesPath,
+        cookiesContent: profile.cookiesContent,
+        forceIpVersion: profile.forceIpVersion,
+      });
 
-    const { stdout } = await execFileAsync('yt-dlp', args, {
-      timeout: 35000,
-      maxBuffer: 64 * 1024 * 1024,
-      windowsHide: true,
-      env,
-    });
+      const args = [
+        '--dump-single-json',
+        '--no-warnings',
+        '--no-playlist',
+        '--socket-timeout', '30',
+        '--js-runtimes', 'deno',
+        '--js-runtimes', 'node',
+        ...baseArgs,
+        '--',
+        url,
+      ];
 
-    const parsed = JSON.parse(stdout.trim());
+      try {
+        const { stdout } = await execFileAsync(ytdlpBin, args, {
+          timeout: 35000,
+          maxBuffer: 64 * 1024 * 1024,
+          windowsHide: true,
+          env,
+        });
+        parsed = JSON.parse(stdout.trim());
+        egressPoolManager.markSuccess(profile.id);
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const rawErr = `${err?.message || ''} ${err?.stderr || ''}`;
+        if (isBotVerificationError(rawErr)) {
+          egressPoolManager.markRateLimitedOrBlocked(profile.id, rawErr);
+          excludedProfileIds.push(profile.id);
+          if (attempt === 0) continue;
+        } else {
+          egressPoolManager.releaseProfile(profile.id);
+        }
+        throw err;
+      }
+    }
+
     if (!parsed || typeof parsed !== 'object') {
-      throw new Error('yt-dlp returned invalid JSON output');
+      throw lastErr || new Error('yt-dlp returned invalid JSON output');
     }
 
     const id = String(parsed.id || 'media');
@@ -466,6 +543,7 @@ export class ProbeService {
       videoStreams,
       audioStreams,
       streams,
+      egressProfileId: selectedProfileId,
     };
   }
 
@@ -476,7 +554,7 @@ export class ProbeService {
     const env = getExecutionEnv();
     const args = ['--dump-json', '--', url];
 
-    const { stdout } = await execFileAsync('gallery-dl', args, {
+    const { stdout } = await execFileAsync(resolveExecutable('GALLERY_DL_PATH', 'gallery-dl'), args, {
       timeout: 30000,
       maxBuffer: 32 * 1024 * 1024,
       windowsHide: true,

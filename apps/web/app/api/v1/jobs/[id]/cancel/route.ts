@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jobManager } from '@/lib/job-manager';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,6 +17,9 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
+  const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}/cancel`);
+  if (upstream) return upstream;
+
   const requestId = `cancel_${Date.now()}`;
   const cancelled = jobManager.cancelJob(id);
 

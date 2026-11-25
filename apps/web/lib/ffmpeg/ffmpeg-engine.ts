@@ -5,6 +5,7 @@
  */
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { toBlobURL } from '@ffmpeg/util';
 import type {
   ContainerFormat,
   AudioFormat,
@@ -75,22 +76,20 @@ export class FFmpegEngine {
         ? self.location.origin
         : '';
 
-    const localCore = config?.coreURL || `${origin}/ffmpeg/ffmpeg-core.js`;
+    const classWorkerURL = `${origin}/ffmpeg/esm/worker.js`;
+    const localCore = config?.coreURL || `${origin}/ffmpeg/esm/ffmpeg-core.js`;
     const localWasm = config?.wasmURL || `${origin}/ffmpeg/ffmpeg-core.wasm`;
 
     try {
-      // Convert to Blob URLs for seamless internal Web Worker loading without cross-origin or path issues
-      let coreBlob = localCore;
-      let wasmBlob = localWasm;
-      try {
-        const [cRes, wRes] = await Promise.all([fetch(localCore), fetch(localWasm)]);
-        if (cRes.ok && wRes.ok) {
-          coreBlob = URL.createObjectURL(await cRes.blob());
-          wasmBlob = URL.createObjectURL(await wRes.blob());
-        }
-      } catch {}
+      // Use direct ESM worker.js URL so ./const.js and ./errors.js resolve relative to /ffmpeg/esm/,
+      // while coreURL and wasmURL use typed blob URLs for COEP compatibility.
+      const [coreBlob, wasmBlob] = await Promise.all([
+        toBlobURL(localCore, 'text/javascript'),
+        toBlobURL(localWasm, 'application/wasm'),
+      ]);
 
       await this.ffmpeg.load({
+        classWorkerURL,
         coreURL: coreBlob,
         wasmURL: wasmBlob,
       });
@@ -98,13 +97,16 @@ export class FFmpegEngine {
       this.loadedFrom = 'local';
       return 'local';
     } catch (localErr) {
-      console.warn('[FFmpegEngine] Local core load failed, attempting CDN fallback...', localErr);
+      console.warn('[FFmpegEngine] Local ESM core load failed, attempting CDN fallback...', localErr);
 
-      // Fallback: unpkg CDN
+      // Fallback: keep local ESM classWorkerURL while pulling ESM core/wasm from unpkg CDN
       try {
-        const cdnCore = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js';
-        const cdnWasm = 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm';
+        const [cdnCore, cdnWasm] = await Promise.all([
+          toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js', 'text/javascript'),
+          toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm', 'application/wasm'),
+        ]);
         await this.ffmpeg.load({
+          classWorkerURL,
           coreURL: cdnCore,
           wasmURL: cdnWasm,
         });
@@ -163,6 +165,62 @@ export class FFmpegEngine {
   }
 
   /**
+   * Mounts a File/Blob zero-copy via Emscripten WORKERFS when supported,
+   * falling back to virtual FS writeFile for buffers or unsupported runtimes.
+   */
+  private async prepareInputFile(
+    name: string,
+    data: Uint8Array | ArrayBuffer | Blob
+  ): Promise<{ inputPath: string; cleanup: () => Promise<void> }> {
+    if (!this.ffmpeg) throw new Error('FFmpeg not loaded.');
+
+    if (typeof Blob !== 'undefined' && data instanceof Blob) {
+      const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_') || 'input.bin';
+      const mountDir = `/mnt_wfs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      try {
+        await this.ffmpeg.createDir(mountDir);
+        const mounted = await this.ffmpeg.mount(
+          'WORKERFS' as Parameters<FFmpeg['mount']>[0],
+          { blobs: [{ name: safeName, data }] },
+          mountDir
+        );
+        if (mounted === false) {
+          throw new Error('WORKERFS filesystem unavailable');
+        }
+        return {
+          inputPath: `${mountDir}/${safeName}`,
+          cleanup: async () => {
+            if (!this.ffmpeg) return;
+            try {
+              await this.ffmpeg.unmount(mountDir);
+            } catch {
+              // Ignored if already unmounted or terminated
+            }
+            try {
+              await this.ffmpeg.deleteDir(mountDir);
+            } catch {
+              // Ignored if directory cleanup fails
+            }
+          },
+        };
+      } catch (err) {
+        try {
+          await this.ffmpeg.deleteDir(mountDir);
+        } catch {
+          // Ignored
+        }
+        console.warn('[FFmpegEngine] WORKERFS mount unavailable, falling back to writeFile:', err);
+      }
+    }
+
+    await this.writeFile(name, data);
+    return {
+      inputPath: name,
+      cleanup: () => this.deleteFile(name),
+    };
+  }
+
+  /**
    * Deletes a file from virtual filesystem.
    */
   async deleteFile(name: string): Promise<void> {
@@ -202,34 +260,31 @@ export class FFmpegEngine {
     const outputExt = options.targetContainer.toLowerCase();
     const outputName = `output_${Date.now()}.${outputExt}`;
 
+    const preparedInput = await this.prepareInputFile(inputName, options.file);
     try {
-      await this.writeFile(inputName, options.file);
-
       // Primary strategy: Stream copy
       let args: string[] = [];
       if (isStreamCopy) {
         if (outputExt === 'mp4') {
-          args = ['-i', inputName, '-c', 'copy', '-movflags', '+faststart', outputName];
+          args = ['-i', preparedInput.inputPath, '-c', 'copy', '-movflags', '+faststart', outputName];
         } else {
-          args = ['-i', inputName, '-c', 'copy', outputName];
+          args = ['-i', preparedInput.inputPath, '-c', 'copy', outputName];
         }
       } else {
         // Transcode requested
         const vCodec = options.videoCodec || 'copy';
         const aCodec = options.audioCodec || 'copy';
-        args = ['-i', inputName, '-c:v', vCodec, '-c:a', aCodec];
+        args = ['-i', preparedInput.inputPath, '-c:v', vCodec, '-c:a', aCodec];
         if (outputExt === 'mp4') {
           args.push('-movflags', '+faststart');
         }
         args.push(outputName);
       }
 
-      let runSuccess = false;
       let lastErr: Error | null = null;
 
       try {
         await this.runCommand(args, options.onProgress, options.onLog, options.signal);
-        runSuccess = true;
       } catch (err) {
         lastErr = err instanceof Error ? err : new Error(String(err));
         // If stream-copy to MP4 failed due to incompatible audio (e.g. Opus in MP4),
@@ -238,7 +293,7 @@ export class FFmpegEngine {
           console.warn('[FFmpegEngine] Stream copy failed. Retrying with video copy + AAC audio fallback...');
           args = [
             '-i',
-            inputName,
+            preparedInput.inputPath,
             '-c:v',
             'copy',
             '-c:a',
@@ -251,7 +306,6 @@ export class FFmpegEngine {
           ];
           try {
             await this.runCommand(args, options.onProgress, options.onLog, options.signal);
-            runSuccess = true;
           } catch (retryErr) {
             throw retryErr;
           }
@@ -276,7 +330,7 @@ export class FFmpegEngine {
         isStreamCopy,
       };
     } finally {
-      await this.deleteFile(inputName);
+      await preparedInput.cleanup();
       await this.deleteFile(outputName);
     }
   }
@@ -308,48 +362,52 @@ export class FFmpegEngine {
     }
 
     const outputName = `output_${Date.now()}.${outputExt}`;
+    let actualOutputName = outputName;
+    let fallbackOutput: string | null = null;
+    let usedStreamCopy = isStreamCopy;
 
+    const preparedInput = await this.prepareInputFile(inputName, options.file);
     try {
-      await this.writeFile(inputName, options.file);
-
       let args: string[] = [];
       if (isStreamCopy) {
         // Stream copy audio without re-encoding
-        args = ['-i', inputName, '-vn', '-c:a', 'copy', outputName];
+        args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'copy', outputName];
       } else {
         // Audio transcode
         const bitrate = `${options.bitrateKbps || 192}k`;
         if (outputExt === 'mp3') {
-          args = ['-i', inputName, '-vn', '-c:a', 'libmp3lame', '-b:a', bitrate, outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', bitrate, outputName];
         } else if (outputExt === 'wav') {
-          args = ['-i', inputName, '-vn', '-c:a', 'pcm_s16le', outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'pcm_s16le', outputName];
         } else if (outputExt === 'flac') {
-          args = ['-i', inputName, '-vn', '-c:a', 'flac', outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'flac', outputName];
         } else if (outputExt === 'aac' || outputExt === 'm4a') {
-          args = ['-i', inputName, '-vn', '-c:a', 'aac', '-b:a', bitrate, outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'aac', '-b:a', bitrate, outputName];
         } else if (outputExt === 'opus') {
-          args = ['-i', inputName, '-vn', '-c:a', 'libopus', '-b:a', bitrate, outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'libopus', '-b:a', bitrate, outputName];
         } else {
-          args = ['-i', inputName, '-vn', outputName];
+          args = ['-i', preparedInput.inputPath, '-vn', outputName];
         }
       }
 
       try {
         await this.runCommand(args, options.onProgress, options.onLog, options.signal);
       } catch (err) {
-        // Fallback for copy when container mismatch occurs: try aac or mp3
+        // Fallback for copy when container mismatch occurs: try aac transcode to m4a
         if (isStreamCopy) {
           console.warn('[FFmpegEngine] Direct audio stream copy failed, falling back to AAC transcode...');
           outputExt = 'm4a';
-          const fallbackOutput = `output_${Date.now()}.${outputExt}`;
-          args = ['-i', inputName, '-vn', '-c:a', 'aac', '-b:a', '192k', fallbackOutput];
+          fallbackOutput = `output_${Date.now()}_fallback.${outputExt}`;
+          actualOutputName = fallbackOutput;
+          usedStreamCopy = false;
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'aac', '-b:a', '192k', fallbackOutput];
           await this.runCommand(args, options.onProgress, options.onLog, options.signal);
         } else {
           throw err;
         }
       }
 
-      const outputBytes = await this.readFile(outputName);
+      const outputBytes = await this.readFile(actualOutputName);
       const mime = getMimeType(outputExt);
       const blob = new Blob([outputBytes as any], { type: mime });
       const url = URL.createObjectURL(blob);
@@ -362,11 +420,14 @@ export class FFmpegEngine {
         mimeType: mime,
         sizeBytes: blob.size,
         elapsedMs,
-        isStreamCopy,
+        isStreamCopy: usedStreamCopy,
       };
     } finally {
-      await this.deleteFile(inputName);
+      await preparedInput.cleanup();
       await this.deleteFile(outputName);
+      if (fallbackOutput) {
+        await this.deleteFile(fallbackOutput);
+      }
     }
   }
 
@@ -390,19 +451,19 @@ export class FFmpegEngine {
     const outputContainer = (options.targetContainer || 'mp4').toLowerCase();
     const outputName = `output_${Date.now()}.${outputContainer}`;
 
-    try {
-      await this.writeFile(videoName, options.videoFile);
-      await this.writeFile(audioName, options.audioFile);
+    const preparedVideo = await this.prepareInputFile(videoName, options.videoFile);
+    const preparedAudio = await this.prepareInputFile(audioName, options.audioFile);
 
+    try {
       // Base stream-copy command
-      let args: string[] = ['-i', videoName];
+      let args: string[] = ['-i', preparedVideo.inputPath];
 
       if (options.audioDelayMs && options.audioDelayMs !== 0) {
         const delaySec = (options.audioDelayMs / 1000).toFixed(3);
         args.push('-itsoffset', delaySec);
       }
 
-      args.push('-i', audioName, '-map', '0:v:0', '-map', '1:a:0');
+      args.push('-i', preparedAudio.inputPath, '-map', '0:v:0', '-map', '1:a:0');
 
       if (isStreamCopy) {
         args.push('-c:v', 'copy', '-c:a', 'copy', '-shortest');
@@ -423,14 +484,14 @@ export class FFmpegEngine {
         // transcode only audio to AAC while keeping video 100% lossless copy.
         if (isStreamCopy && outputContainer === 'mp4') {
           console.warn('[FFmpegEngine] Direct merge stream-copy failed. Retrying with video copy + AAC audio fallback...');
-          args = ['-i', videoName];
+          args = ['-i', preparedVideo.inputPath];
           if (options.audioDelayMs && options.audioDelayMs !== 0) {
             const delaySec = (options.audioDelayMs / 1000).toFixed(3);
             args.push('-itsoffset', delaySec);
           }
           args.push(
             '-i',
-            audioName,
+            preparedAudio.inputPath,
             '-map',
             '0:v:0',
             '-map',
@@ -468,8 +529,8 @@ export class FFmpegEngine {
         isStreamCopy,
       };
     } finally {
-      await this.deleteFile(videoName);
-      await this.deleteFile(audioName);
+      await preparedVideo.cleanup();
+      await preparedAudio.cleanup();
       await this.deleteFile(outputName);
     }
   }

@@ -6,6 +6,7 @@ import { formatContentDisposition, sanitizeFilename } from '@/lib/security-valid
 import { parseResolutionHeight } from '@/lib/format-normalizer';
 import { streamTier0ToResponse, inferMime } from '@/lib/pipeline/tier0-passthrough';
 import { createApiErrorResponse } from '@/lib/api-error';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -48,14 +49,23 @@ function resolveJobFile(id: string, requestedFilename?: string | null): { filePa
 function isForbiddenStreamUrl(rawUrl: string): boolean {
   try {
     const parsed = new URL(rawUrl);
-    const host = parsed.hostname.toLowerCase();
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
     if (
       host === 'localhost' ||
       host === '127.0.0.1' ||
       host === '0.0.0.0' ||
       host === '::1' ||
+      host === '::' ||
+      host.startsWith('fe80:') ||
+      host.startsWith('fc00:') ||
+      host.startsWith('fd') ||
+      host.startsWith('::ffff:127.') ||
+      host.startsWith('::ffff:10.') ||
+      host.startsWith('::ffff:192.168.') ||
       host.endsWith('.local') ||
       host.endsWith('.internal') ||
+      /^0\./.test(host) ||
+      /^127\./.test(host) ||
       /^10\./.test(host) ||
       /^192\.168\./.test(host) ||
       /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
@@ -78,7 +88,24 @@ export async function GET(
   const requestedFilename = searchParams.get('filename') || searchParams.get('title');
   const streamParam = searchParams.get('stream') || searchParams.get('url');
 
+  if (streamParam && isForbiddenStreamUrl(streamParam)) {
+    return createApiErrorResponse(
+      'Access to internal or restricted stream host is prohibited.',
+      'INVALID_URL',
+      `dl_${Date.now()}`,
+      DOWNLOAD_CORS_HEADERS,
+      403
+    );
+  }
+
   const job = jobManager.getJob(id);
+  if (!job) {
+    const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}/download`, {
+      streaming: true,
+      timeoutMs: 0,
+    });
+    if (upstream) return upstream;
+  }
 
   // Early exit: if the job failed due to 8K local worker requirement or host bot detection / 403
   if (job?.status === 'failed') {
@@ -139,7 +166,8 @@ export async function GET(
           info.formats.find((f: any) => f.hasAudio && !f.hasVideo) ||
           info.formats.find((f: any) => f.hasAudio);
       } else {
-        const vFormats = info.formats.filter((f: any) => f.hasVideo);
+        const muxedFormats = info.formats.filter((f: any) => f.hasVideo && f.hasAudio);
+        const vFormats = muxedFormats.length > 0 ? muxedFormats : info.formats.filter((f: any) => f.hasVideo);
         selectedFormat =
           vFormats.find((f: any) => f.height === reqHeight) ||
           vFormats.find((f: any) => f.height && f.height <= reqHeight) ||
@@ -324,7 +352,24 @@ export async function HEAD(
   const requestedFilename = searchParams.get('filename') || searchParams.get('title');
   const streamParam = searchParams.get('stream') || searchParams.get('url');
 
+  if (streamParam && isForbiddenStreamUrl(streamParam)) {
+    return createApiErrorResponse(
+      'Access to internal or restricted stream host is prohibited.',
+      'INVALID_URL',
+      `dl_${Date.now()}`,
+      DOWNLOAD_CORS_HEADERS,
+      403
+    );
+  }
+
   const job = jobManager.getJob(id);
+  if (!job) {
+    const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}/download`, {
+      streaming: true,
+      timeoutMs: 0,
+    });
+    if (upstream) return upstream;
+  }
   const candidateStreamUrl = streamParam || job?.directStreamUrl;
   const fileInfo = resolveJobFile(id, requestedFilename);
 

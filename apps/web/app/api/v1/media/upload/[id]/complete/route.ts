@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { getUploadsDir, getSessionMeta } from '@/lib/upload-storage';
+import { isServerlessRuntime, proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,6 +25,29 @@ export async function POST(
 ) {
   const requestId = `upl_comp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const uploadId = params.id;
+
+  const upstream = await proxyToBackend(
+    req,
+    `media/upload/${encodeURIComponent(uploadId)}/complete`,
+    { timeoutMs: 120_000 }
+  );
+  if (upstream) return upstream;
+
+  if (isServerlessRuntime()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        success: false,
+        error: {
+          code: 'ERR_BACKEND_NOT_CONFIGURED',
+          message:
+            'Backend media processing server is not configured for chunked server uploads. Use in-browser processing or configure API_INTERNAL_URL.',
+        },
+        requestId,
+      },
+      { status: 503, headers: CORS_HEADERS }
+    );
+  }
 
   const session = await getSessionMeta(uploadId);
   if (!session) {

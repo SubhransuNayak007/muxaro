@@ -179,6 +179,7 @@ export interface JobRecord {
   targetAudioCodec?: string;
   streamCopy?: boolean;
   formatId?: string;
+  egressProfileId?: string;
   processingLane?: ProcessingLane;
   queueClass?: QueueClass;
   strategyLabel?: string;

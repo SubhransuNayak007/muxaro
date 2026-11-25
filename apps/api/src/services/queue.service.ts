@@ -45,6 +45,7 @@ import {
   getYtDlpBaseArgs as getTurboYtDlpBaseArgs,
   isBotVerificationError,
 } from './turboflow.service.js';
+import { egressPoolManager, type EgressProfileConfig } from './egress-pool.service.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1516,14 +1517,23 @@ export class QueueService extends EventEmitter {
     return candidates[0].filePath;
   }
 
-  private getYtDlpBaseArgs(playerClient?: string): string[] {
-    return getTurboYtDlpBaseArgs({ playerClient });
+  private getYtDlpBaseArgs(playerClient?: string, profile?: EgressProfileConfig): string[] {
+    return getTurboYtDlpBaseArgs({
+      playerClient: playerClient || profile?.playerClients,
+      proxy: profile?.proxyUrl,
+      poTokenBaseUrl: profile?.bgutilUrl,
+      poToken: profile?.poToken,
+      visitorData: profile?.visitorData,
+      cookiesPath: profile?.cookiesPath,
+      cookiesContent: profile?.cookiesContent,
+      forceIpVersion: profile?.forceIpVersion,
+    });
   }
 
   /**
-   * Executes yt-dlp with an automatic player client retry cascade.
-   * If primary client triggers YouTube bot verification / datacenter challenge,
-   * automatically retries with 'tv,mweb' and 'android' before failing.
+   * Executes yt-dlp with sticky EgressPoolManager affinity & player client retry cascade.
+   * Respects pinned job.egressProfileId first (googlevideo `ip=` lock), failing over to the next
+   * healthy profile only when upstream rate-limits or challenges the pinned profile.
    */
   private async runTrackedYtDlpWithFallback(
     job: JobRecord,
@@ -1531,25 +1541,51 @@ export class QueueService extends EventEmitter {
     onLine?: (line: string) => void
   ): Promise<void> {
     const clientChains = ['ios,android,tv,mweb,web', 'tv,mweb', 'android'];
+    const excludedProfiles: string[] = [];
     let lastError: any = null;
 
-    for (let i = 0; i < clientChains.length; i++) {
-      const client = clientChains[i];
-      const base = this.getYtDlpBaseArgs(client);
-      const args = buildArgs(base);
+    for (let egressAttempt = 0; egressAttempt < 2; egressAttempt++) {
+      const profile = egressPoolManager.selectProfile({
+        preferredId: egressAttempt === 0 ? job.egressProfileId : undefined,
+        excludeIds: excludedProfiles,
+      });
 
-      try {
-        await this.runTrackedProcess(job, 'yt-dlp', args, onLine);
-        return;
-      } catch (err: any) {
-        lastError = err;
-        if (this.isCancelled(job)) return;
-        if (i < clientChains.length - 1 && isBotVerificationError(err)) {
-          // Log and retry with next client in fallback chain
-          continue;
+      let hitBotOnProfile = false;
+
+      for (let i = 0; i < clientChains.length; i++) {
+        const client = clientChains[i];
+        const base = this.getYtDlpBaseArgs(client, profile);
+        const args = buildArgs(base);
+
+        try {
+          await this.runTrackedProcess(job, 'yt-dlp', args, onLine);
+          egressPoolManager.markSuccess(profile.id);
+          return;
+        } catch (err: any) {
+          lastError = err;
+          if (this.isCancelled(job)) {
+            egressPoolManager.releaseProfile(profile.id);
+            return;
+          }
+          if (isBotVerificationError(err)) {
+            hitBotOnProfile = true;
+            if (i < clientChains.length - 1) {
+              continue;
+            }
+          } else {
+            egressPoolManager.releaseProfile(profile.id);
+            throw err;
+          }
         }
-        throw err;
       }
+
+      if (hitBotOnProfile) {
+        egressPoolManager.markRateLimitedOrBlocked(profile.id, lastError?.message || 'Bot verification block');
+        excludedProfiles.push(profile.id);
+        continue;
+      }
+      egressPoolManager.releaseProfile(profile.id);
+      break;
     }
 
     if (lastError) throw lastError;

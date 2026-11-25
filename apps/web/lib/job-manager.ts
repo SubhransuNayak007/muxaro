@@ -142,56 +142,60 @@ async function resolveCobaltStream(
   url: string,
   options: { quality?: string; format?: string } = {}
 ): Promise<{ streamUrl: string; filename?: string } | null> {
+  const customInstance = process.env.COBALT_API_URL?.trim();
+  if (!customInstance) {
+    return null;
+  }
+
   const cleanQuality = (options.quality || 'max').toString().toLowerCase().replace(/p$/i, '');
   const quality = ['2160', '1440', '1080', '720', '480', '360', '240', '144'].includes(cleanQuality)
     ? cleanQuality
     : 'max';
 
-  const instances = [
-    'https://api.cobalt.tools/',
-    'https://api.cobalt.tools/api/json',
-    'https://cobalt-api.kwiatekm.tokyo/api/json',
-    'https://co.wuk.sh/api/json',
-  ];
-
-  for (const instance of instances) {
-    try {
-      const res = await fetch(instance, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-        body: JSON.stringify({
-          url,
-          videoQuality: quality,
-          youtubeVideoCodec: 'h264',
-          audioFormat: options.format === 'mp3' ? 'mp3' : 'best',
-          downloadMode: options.format === 'mp3' ? 'audio' : 'auto',
-        }),
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (res.ok) {
-        const json = (await res.json()) as any;
-        if (
-          json.url &&
-          (json.status === 'tunnel' ||
-            json.status === 'redirect' ||
-            json.status === 'stream' ||
-            json.status === 'success')
-        ) {
-          return {
-            streamUrl: json.url,
-            filename: json.filename,
-          };
-        }
-      }
-    } catch {
-      // try next instance
+  try {
+    const endpoint = customInstance.endsWith('/api/json')
+      ? customInstance
+      : `${customInstance.replace(/\/+$/, '')}/api/json`;
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    };
+    if (process.env.COBALT_API_KEY) {
+      headers['Authorization'] = `Bearer ${process.env.COBALT_API_KEY.trim()}`;
     }
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        url,
+        videoQuality: quality,
+        youtubeVideoCodec: 'h264',
+        audioFormat: options.format === 'mp3' ? 'mp3' : 'best',
+        downloadMode: options.format === 'mp3' ? 'audio' : 'auto',
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+
+    if (res.ok) {
+      const json = (await res.json()) as any;
+      if (
+        json.url &&
+        (json.status === 'tunnel' ||
+          json.status === 'redirect' ||
+          json.status === 'stream' ||
+          json.status === 'success')
+      ) {
+        return {
+          streamUrl: json.url,
+          filename: json.filename,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[JobManager] Configured Cobalt instance error:', err);
   }
   return null;
 }
@@ -547,6 +551,31 @@ class JobManager {
 
     const abortController = new AbortController();
     this.abortControllers.set(jobId, abortController);
+
+    // Direct stream fast-path: If client or caller already provided an authorized media stream URL
+    if (params.directStreamUrl && (params.directStreamUrl.startsWith('http://') || params.directStreamUrl.startsWith('https://'))) {
+      job.status = 'ready';
+      job.progress = 100;
+      job.stage = 'READY';
+      job.stageMessage = 'Direct media stream ready for instant download';
+      job.deliveryMode = 'zero-hop';
+      job.directStreamUrl = params.directStreamUrl;
+      job.directMimeType = params.directMimeType || 'video/mp4';
+      job.downloadUrl = params.directStreamUrl;
+      if (params.fileSizeBytes) {
+        job.fileSizeBytes = params.fileSizeBytes;
+      }
+      job.completedAt = new Date().toISOString();
+      job.artifact = {
+        filename: job.filename,
+        downloadUrl: params.directStreamUrl,
+        sizeBytes: job.fileSizeBytes || 0,
+        format: job.targetFormat,
+      };
+      persistJob(job);
+      this.notify(job);
+      return job;
+    }
 
     // PHASE 1.1: ZERO-HOP CLIENT HANDOVER & CLOUD TUNNEL MODE
     // For Pinterest, TikTok, Twitter/X, Instagram, Vimeo progressive streams, and direct media,

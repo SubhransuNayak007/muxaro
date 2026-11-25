@@ -32,6 +32,11 @@ import { authRoutes } from './routes/auth.js';
 import { accountRoutes } from './routes/account.js';
 import { healthRoutes } from './routes/health.js';
 import { probeRoutes } from './routes/probe.js';
+import { mediaRoutes } from './routes/media.js';
+import { toolsRoutes } from './routes/tools.js';
+import { playlistRoutes } from './routes/playlists.js';
+import { batchRoutes } from './routes/batches.js';
+import { tunnelRoutes } from './routes/tunnel.js';
 import { closeQueues } from './lib/queues.js';
 
 export interface ServerOptions {
@@ -66,7 +71,7 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
   // 1. CORS Configuration
   const corsOrigins = process.env.CORS_ORIGIN
     ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://muxaro.pages.dev', 'https://muxaro.vercel.app'];
+    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://muxaro.vercel.app', 'https://muxaro.app'];
 
   await fastify.register(cors, {
     origin: (origin, cb) => {
@@ -78,7 +83,6 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
       if (
         corsOrigins.includes('*') ||
         corsOrigins.includes(origin) ||
-        origin.endsWith('.muxaro.pages.dev') ||
         origin.endsWith('.muxaro.app') ||
         origin.endsWith('.vercel.app')
       ) {
@@ -246,6 +250,10 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     analyseRoutes,
     uploadsRoutes,
     jobsRoutes,
+    toolsRoutes,
+    playlistRoutes,
+    batchRoutes,
+    tunnelRoutes,
     downloadsRoutes,
     statusRoutes,
     usageRoutes,
@@ -257,6 +265,8 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     await fastify.register(mod, { prefix: '/v1' });
     await fastify.register(mod, { prefix: '/api/v1' });
   }
+  await fastify.register(mediaRoutes, { prefix: '/v1', skipInspect: true });
+  await fastify.register(mediaRoutes, { prefix: '/api/v1', skipInspect: true });
 
   return fastify;
 }

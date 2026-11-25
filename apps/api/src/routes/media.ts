@@ -163,7 +163,11 @@ async function assemblePartsStream(
   }
 }
 
-export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
+export interface MediaRoutesOptions {
+  skipInspect?: boolean;
+}
+
+export const mediaRoutes: FastifyPluginAsync<MediaRoutesOptions> = async (fastify, opts = {}) => {
   const passThroughStreamParser = (
     _request: unknown,
     payload: Readable,
@@ -176,6 +180,7 @@ export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addContentTypeParser(/^video\//, { bodyLimit: MAX_UPLOAD_BYTES }, passThroughStreamParser);
   fastify.addContentTypeParser(/^audio\//, { bodyLimit: MAX_UPLOAD_BYTES }, passThroughStreamParser);
 
+  if (!opts.skipInspect) {
   // POST /api/v1/media/inspect
   fastify.post('/media/inspect', {
     preHandler: rateLimiter.createFastifyHook('inspect'),
@@ -264,6 +269,7 @@ export const mediaRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
   });
+  }
 
   // POST /api/v1/media/upload (single-request streaming upload up to 2 GB)
   fastify.post('/media/upload', {

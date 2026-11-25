@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { jobManager, JobRecord } from '@/lib/job-manager';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,6 +17,9 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const { id } = params;
+  const upstream = await proxyToBackend(req, `jobs/${encodeURIComponent(id)}/events`, { streaming: true, timeoutMs: 0 });
+  if (upstream) return upstream;
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

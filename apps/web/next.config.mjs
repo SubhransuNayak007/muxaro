@@ -1,11 +1,21 @@
 /** @type {import('next').NextConfig} */
 const isCloudflarePages = process.env.CLOUDFLARE_PAGES === '1';
 
-const rawApiUrl = (process.env.API_INTERNAL_URL || process.env.NEXT_PUBLIC_API_BASE_URL || '').trim();
+const DEAD_BACKEND_HOSTS = ['api.muxaro.app', 'muxaro-api.internal'];
+
+const rawApiUrl = (
+  process.env.API_INTERNAL_URL ||
+  process.env.BACKEND_API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  ''
+).trim();
 const cleanedApiUrl = rawApiUrl.replace(/\/api\/v1\/?$/i, '').replace(/\/+$/, '');
+const isDeadHost = DEAD_BACKEND_HOSTS.some((h) => cleanedApiUrl.toLowerCase().includes(h));
 const enableExplicitProxy = process.env.ENABLE_BACKEND_PROXY === '1' || process.env.ENABLE_BACKEND_PROXY === 'true';
 const hasExternalBackend = Boolean(
   cleanedApiUrl &&
+  !isDeadHost &&
   (cleanedApiUrl.startsWith('http://') || cleanedApiUrl.startsWith('https://')) &&
   (enableExplicitProxy || (!cleanedApiUrl.includes('127.0.0.1') && !cleanedApiUrl.includes('localhost')))
 );
@@ -83,12 +93,29 @@ const nextConfig = {
         source: '/(ffmpeg|workers)/:path*',
         headers: [
           {
+            key: 'Cross-Origin-Opener-Policy',
+            value: 'same-origin',
+          },
+          {
+            key: 'Cross-Origin-Embedder-Policy',
+            value: 'require-corp',
+          },
+          {
             key: 'Cross-Origin-Resource-Policy',
             value: 'cross-origin',
           },
           {
             key: 'Access-Control-Allow-Origin',
             value: '*',
+          },
+        ],
+      },
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          {
+            key: 'Cross-Origin-Resource-Policy',
+            value: 'cross-origin',
           },
         ],
       },

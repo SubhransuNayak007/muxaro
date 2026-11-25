@@ -26,7 +26,8 @@ describe('TurboFlow yt-dlp Anti-Bot & Extractor Suite', () => {
     const args = getYtDlpBaseArgs();
 
     assert.ok(args.includes('--js-runtimes'));
-    assert.ok(args.includes('deno,node'));
+    assert.ok(args.includes('deno'));
+    assert.ok(args.includes('node'));
     assert.ok(args.includes('--extractor-args'));
 
     const extractorArgIndex = args.indexOf('--extractor-args');

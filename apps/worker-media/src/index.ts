@@ -15,6 +15,7 @@
  */
 
 import { Worker, type Job } from 'bullmq';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { eq } from 'drizzle-orm';
 import {
@@ -40,10 +41,44 @@ import type {
 // 1. CONFIGURATION & STATE
 // =============================================================================
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6380';
+const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const FAST_IO_CONCURRENCY = Math.min(16, Math.max(8, Number.parseInt(process.env.FAST_IO_CONCURRENCY || '12', 10)));
 const TRANSCODE_CONCURRENCY = Math.min(2, Math.max(1, Number.parseInt(process.env.TRANSCODE_CONCURRENCY || '2', 10)));
 const BATCH_CONCURRENCY = Math.min(4, Math.max(2, Number.parseInt(process.env.BATCH_CONCURRENCY || '2', 10)));
+
+function parseRedisConnectionOptions(redisUrl: string) {
+  try {
+    const parsed = new URL(redisUrl);
+    const dbPath = parsed.pathname.replace(/^\//, '');
+    const db = dbPath ? Number.parseInt(dbPath, 10) : 0;
+    return {
+      host: parsed.hostname || '127.0.0.1',
+      port: parsed.port ? Number.parseInt(parsed.port, 10) : 6379,
+      ...(parsed.username ? { username: decodeURIComponent(parsed.username) } : {}),
+      ...(parsed.password ? { password: decodeURIComponent(parsed.password) } : {}),
+      ...(Number.isInteger(db) && db > 0 ? { db } : {}),
+      ...(parsed.protocol === 'rediss:' ? { tls: {} } : {}),
+      maxRetriesPerRequest: null as null,
+    };
+  } catch {
+    return {
+      host: '127.0.0.1',
+      port: 6379,
+      maxRetriesPerRequest: null as null,
+    };
+  }
+}
+
+function buildArtifactDownloadUrl(storageKey: string, filename: string): string {
+  const encodedKey = storageKey
+    .replace(/^\/+/, '')
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+  const publicApiBase = (process.env.API_PUBLIC_URL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
+  const relativePath = `/v1/downloads/file/${encodedKey}?fn=${encodeURIComponent(filename)}`;
+  return publicApiBase ? `${publicApiBase}${relativePath}` : relativePath;
+}
 
 const heartbeat = getWorkerHeartbeat();
 const cleanupManager = getCleanupManager();
@@ -53,6 +88,7 @@ let fastIoWorker: Worker<MediaJobPayload> | null = null;
 let transcodeWorker: Worker<MediaJobPayload> | null = null;
 let batchWorker: Worker<BatchJobPayload> | null = null;
 let cleanupWorker: Worker<any> | null = null;
+let healthServer: http.Server | null = null;
 let isShuttingDown = false;
 
 // =============================================================================
@@ -247,7 +283,7 @@ async function updateJobStarted(jobId: string, workerId: string, lane: string, s
 async function updateJobCompleted(jobId: string, result: PipelineProcessingResult, subjectKey?: string): Promise<void> {
   const redis = getMuxaroRedis();
   const filename = result.filename || `${jobId}.mp4`;
-  const downloadUrl = `http://127.0.0.1:4000/v1/downloads/file/${encodeURIComponent(result.storageKey)}?fn=${encodeURIComponent(filename)}`;
+  const downloadUrl = buildArtifactDownloadUrl(result.storageKey, filename);
 
   try {
     await redis.updateJobState(jobId, {
@@ -311,7 +347,7 @@ async function updateJobCompleted(jobId: string, result: PipelineProcessingResul
 async function updateBatchJobCompleted(jobId: string, result: BatchPackagingResult, subjectKey?: string): Promise<void> {
   const redis = getMuxaroRedis();
   const filename = result.filename || `${jobId}.zip`;
-  const downloadUrl = `http://127.0.0.1:4000/v1/downloads/file/${encodeURIComponent(result.storageKey)}?fn=${encodeURIComponent(filename)}`;
+  const downloadUrl = buildArtifactDownloadUrl(result.storageKey, filename);
 
   try {
     await redis.updateJobState(jobId, {
@@ -429,6 +465,8 @@ export async function startMediaWorkerFleet(): Promise<void> {
   console.log(`[WorkerMedia] Booting fleet | Worker ID: ${heartbeat.id}`);
   console.log(`[WorkerMedia] Concurrency: fast-io=${FAST_IO_CONCURRENCY}, transcode=${TRANSCODE_CONCURRENCY}, batch=${BATCH_CONCURRENCY}`);
 
+  const redisConnection = parseRedisConnectionOptions(REDIS_URL);
+
   // 1. Start heartbeat reporting (EX 30)
   heartbeat.start();
 
@@ -438,7 +476,7 @@ export async function startMediaWorkerFleet(): Promise<void> {
     processFastIoJob,
     {
       prefix: 'lane',
-      connection: { url: REDIS_URL },
+      connection: redisConnection,
       concurrency: FAST_IO_CONCURRENCY,
     }
   );
@@ -449,7 +487,7 @@ export async function startMediaWorkerFleet(): Promise<void> {
     processTranscodeJob,
     {
       prefix: 'lane',
-      connection: { url: REDIS_URL },
+      connection: redisConnection,
       concurrency: TRANSCODE_CONCURRENCY,
     }
   );
@@ -460,7 +498,7 @@ export async function startMediaWorkerFleet(): Promise<void> {
     processBatchJob,
     {
       prefix: 'lane',
-      connection: { url: REDIS_URL },
+      connection: redisConnection,
       concurrency: BATCH_CONCURRENCY,
     }
   );
@@ -497,6 +535,33 @@ export async function startMediaWorkerFleet(): Promise<void> {
   }
 
   console.log('[WorkerMedia] All processing lanes and cleanup queue are active.');
+
+  if (process.env.WORKER_HTTP_HEALTH !== 'false' && process.env.NODE_ENV !== 'test') {
+    const healthPort = Number.parseInt(process.env.PORT || '5000', 10);
+    healthServer = http.createServer((req, res) => {
+      if (req.url === '/health' || req.url === '/ready') {
+        res.writeHead(isShuttingDown ? 503 : 200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: isShuttingDown ? 'shutting_down' : 'healthy',
+            service: 'muxaro-worker-media',
+            workerId: heartbeat.id,
+            uptimeSeconds: Math.round(process.uptime()),
+          })
+        );
+        return;
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not Found' }));
+    });
+    healthServer.on('error', (err: NodeJS.ErrnoException) => {
+      console.warn(`[WorkerMedia] Health HTTP server warning on port ${healthPort}: ${err.message}`);
+    });
+    healthServer.listen(healthPort, '0.0.0.0', () => {
+      console.log(`[WorkerMedia] Health endpoint listening on 0.0.0.0:${healthPort}/health`);
+    });
+    healthServer.unref?.();
+  }
 }
 
 // =============================================================================
@@ -533,7 +598,13 @@ export async function stopMediaWorkerFleet(): Promise<void> {
   await Promise.all(closePromises).catch(() => {});
   clearTimeout(drainTimeout);
 
-  // 4. Stop heartbeat telemetry
+  // 4. Stop HTTP health probe and heartbeat telemetry
+  if (healthServer) {
+    await new Promise<void>((resolve) => {
+      healthServer!.close(() => resolve());
+    }).catch(() => {});
+    healthServer = null;
+  }
   await heartbeat.stop();
 
   // 5. Close DB and Redis

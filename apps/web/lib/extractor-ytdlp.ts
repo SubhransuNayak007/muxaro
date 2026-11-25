@@ -141,16 +141,39 @@ export function isBotBlockMessage(msg: string): boolean {
  */
 async function runYtDlpDump(targetUrl: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    const isYt = /(?:youtube\.com|youtu\.be)/i.test(targetUrl);
+    const playerClients = (process.env.YTDLP_PLAYER_CLIENTS || 'ios,android,tv,mweb,web').trim();
+    const poToken = process.env.YTDLP_PO_TOKEN?.trim();
+    const visitorData = process.env.YTDLP_VISITOR_DATA?.trim();
+    const bgutilUrl = (
+      process.env.BGUTIL_BASE_URL ||
+      process.env.YTDLP_BGUTIL_URL ||
+      process.env.POT_PROVIDER_URL ||
+      ''
+    ).trim();
+    const proxyUrl = (
+      process.env.YTDLP_PROXY ||
+      process.env.HTTPS_PROXY ||
+      process.env.HTTP_PROXY ||
+      ''
+    ).trim();
+
+    let ytArg = `youtube:player_client=${playerClients}`;
+    if (poToken) {
+      const formattedPo = /^[a-zA-Z0-9_]+[+]/.test(poToken) ? poToken : `web+${poToken}`;
+      ytArg += `;po_token=${formattedPo}${visitorData ? `+${visitorData}` : ''}`;
+    }
+
     const args = [
       '--dump-single-json',
-      '--force-ipv4',
       '--no-warnings',
       '--no-playlist',
       '--skip-download',
       '--retries', '0',
       '--fragment-retries', '0',
-      '--socket-timeout', '12',
+      '--socket-timeout', '15',
+      '--extractor-args', ytArg,
+      ...(bgutilUrl ? ['--extractor-args', `youtubepot-bgutilhttp:base_url=${bgutilUrl}`] : []),
+      ...(proxyUrl ? ['--proxy', proxyUrl] : []),
       ...getJsRuntimeArgs(),
       targetUrl,
     ];
@@ -355,15 +378,20 @@ export async function extractMediaMetadata(rawUrl: string): Promise<ExtractorRes
     console.warn('[Extractor] Dedicated platform extractor fallback:', extractErr);
   }
 
-  // Resilient fallback for other major social platforms
-  if (platform !== 'other') {
-    return createGenericSocialFallback(trimmedUrl, platform);
+  if ((ytdlpError as any)?.code === 'HOST_BLOCKED' || isBotBlockMessage(ytdlpError?.message || '')) {
+    const blockedErr = new Error(
+      ytdlpError?.message ||
+        'This host blocks cloud extraction without a residential proxy/cookie or local worker. Use Desktop Direct or configure the backend worker.'
+    );
+    (blockedErr as any).code = 'HOST_BLOCKED';
+    (blockedErr as any).status = 403;
+    throw blockedErr;
   }
 
   throw new Error(
     ytdlpError?.message
       ? `Media extraction failed: ${ytdlpError.message}`
-      : 'Unable to extract media information from URL'
+      : 'Unable to extract playable media streams from URL'
   );
 }
 
@@ -418,6 +446,7 @@ function transformYtDlpOutput(
     abr: number;
     acodec: string;
     filesize?: number;
+    url?: string;
   }
 
   const rawAudioList: AudioCand[] = [];
@@ -431,6 +460,7 @@ function transformYtDlpOutput(
         abr,
         acodec,
         filesize: f.filesize || f.filesize_approx,
+        url: f.url,
       });
     }
   }
@@ -638,6 +668,7 @@ function transformYtDlpOutput(
     isStreamCopyCandidate: true,
     transcodeRequired: false,
     notes: 'Direct audio stream',
+    url: af.url,
   }));
 
   const maxRes = sortedVideoFormats[0]?.label || 'Original Quality';
@@ -1313,352 +1344,10 @@ async function createYouTubeFallback(sourceUrl: string): Promise<ExtractorResult
     };
   }
 
-  // 3. Resilient baseline resolution matrix for YouTube when datacenter IPs face challenges
-  const fallbackVideoFormats: VideoFormatOption[] = [
-    {
-      id: 'v_1440p',
-      videoFormatId: '1440p',
-      label: '1440p Quad HD',
-      resolutionHeight: 1440,
-      width: 2560,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: Math.round((6000000 * resolvedDuration) / 8),
-      bitrateKbps: 6000,
-      badge: '2K Quad HD (Cloud Ready)',
-    },
-    {
-      id: 'v_1080p',
-      videoFormatId: '1080p',
-      label: '1080p Full HD',
-      resolutionHeight: 1080,
-      width: 1920,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: Math.round((3500000 * resolvedDuration) / 8),
-      bitrateKbps: 3500,
-      badge: '1080p Full HD (Cloud Ready)',
-    },
-    {
-      id: 'v_720p',
-      videoFormatId: '720p',
-      label: '720p HD',
-      resolutionHeight: 720,
-      width: 1280,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: Math.round((1800000 * resolvedDuration) / 8),
-      bitrateKbps: 1800,
-      badge: '720p HD (Cloud Ready)',
-    },
-    {
-      id: 'v_480p',
-      videoFormatId: '480p',
-      label: '480p Standard',
-      resolutionHeight: 480,
-      width: 854,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: Math.round((1000000 * resolvedDuration) / 8),
-      bitrateKbps: 1000,
-    },
-    {
-      id: 'v_360p',
-      videoFormatId: '360p',
-      label: '360p Mobile',
-      resolutionHeight: 360,
-      width: 640,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: Math.round((600000 * resolvedDuration) / 8),
-      bitrateKbps: 600,
-    },
-  ];
-
-  const fallbackAudioFormats: AudioFormatOption[] = [
-    {
-      id: 'a_mp3_320',
-      sourceAudioFormatId: 'ba',
-      label: 'MP3 High Quality',
-      format: 'mp3',
-      bitrateLabel: '320 kbps',
-      estimatedBytes: Math.round((320000 * resolvedDuration) / 8),
-    },
-    {
-      id: 'a_m4a',
-      sourceAudioFormatId: 'ba',
-      label: 'Original M4A (AAC)',
-      format: 'm4a',
-      bitrateLabel: '128 kbps',
-      estimatedBytes: Math.round((128000 * resolvedDuration) / 8),
-    },
-    {
-      id: 'a_flac',
-      sourceAudioFormatId: 'ba',
-      label: 'Lossless FLAC',
-      format: 'flac',
-      bitrateLabel: 'Studio Quality',
-      estimatedBytes: Math.round((900000 * resolvedDuration) / 8),
-    },
-  ];
-
-  const fallbackVideoStreams: MediaStream[] = fallbackVideoFormats.map((f, idx) => ({
-    streamIndex: idx,
-    streamType: 'video',
-    codec: f.vcodec,
-    bitrateKbps: f.bitrateKbps || 0,
-    formatId: f.videoFormatId,
-    width: f.width,
-    height: f.resolutionHeight,
-    resolutionLabel: f.label,
-    frameRate: f.fps,
-    fps: f.fps,
-    hdr: f.isHdr,
-    estimatedSizeBytes: f.estimatedBytes,
-    sizeIsEstimate: true,
-    recommended: f.resolutionHeight === 1080,
-    isNativeLossless: true,
-    isStreamCopyCandidate: true,
-    transcodeRequired: false,
-    notes: 'Cloud stream copy',
-  }));
-
-  return {
-    id,
-    assetId: id,
-    analyzedAt: new Date().toISOString(),
-    platform: 'youtube',
-    mediaType: 'video',
-    title,
-    uploader,
-    author: uploader,
-    uploaderUrl,
-    durationSeconds: resolvedDuration,
-    thumbnailUrl,
-    sourceUrl,
-    originalUrl: sourceUrl,
-    container: 'mp4',
-    fileSizeBytes: fallbackVideoFormats[0].estimatedBytes || 45000000,
-    maxResolutionLabel: '1080p Full HD',
-    videoFormats: fallbackVideoFormats,
-    audioFormats: fallbackAudioFormats,
-    videoStreams: fallbackVideoStreams,
-    audioStreams: [],
-    streams: fallbackVideoStreams,
-    availableFormats: {
-      videoResolutions: fallbackVideoFormats.map((v) => v.label),
-      audioCodecs: ['mp3', 'm4a', 'flac'],
-    },
-    rightsCheck: {
-      isPermitted: true,
-      rightsBasis: 'Public media stream inspection',
-    },
-    permitted: true,
-    rightsNote: 'Publicly accessible media stream',
-    deliveryMode: 'tunnel',
-  };
-}
-
-/**
- * Resilient social media baseline fallback (Instagram, TikTok, Twitter/X, Vimeo, etc.)
- */
-function createGenericSocialFallback(sourceUrl: string, platform: SupportedPlatform): ExtractorResult {
-  const id = `${platform}_${Date.now()}`;
-  const displayPlatform = platform.charAt(0).toUpperCase() + platform.slice(1);
-  const title = `${displayPlatform} Media Video`;
-
-  const videoFormats: VideoFormatOption[] = [
-    {
-      id: 'v_1440p',
-      videoFormatId: '1440p',
-      label: '1440p Quad HD',
-      resolutionHeight: 1440,
-      width: 1440,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: 45000000,
-      bitrateKbps: 6000,
-      badge: '2K Quad HD (Cloud Ready)',
-    },
-    {
-      id: 'v_1080p',
-      videoFormatId: '1080p',
-      label: '1080p Full HD',
-      resolutionHeight: 1080,
-      width: 1080,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: 25000000,
-      bitrateKbps: 3500,
-      badge: '1080p Full HD (Cloud Ready)',
-    },
-    {
-      id: 'v_720p',
-      videoFormatId: '720p',
-      label: '720p HD',
-      resolutionHeight: 720,
-      width: 720,
-      fps: 30,
-      vcodec: 'h264',
-      acodec: 'aac',
-      container: 'mp4',
-      targetContainer: 'mp4',
-      isHdr: false,
-      requiresMerge: false,
-      estimatedBytes: 15000000,
-      bitrateKbps: 2000,
-      badge: '720p HD (Cloud Ready)',
-    },
-  ];
-
-  const audioFormats: AudioFormatOption[] = [
-    {
-      id: 'a_mp3',
-      sourceAudioFormatId: 'orig',
-      label: 'MP3 Audio',
-      format: 'mp3',
-      bitrateLabel: '320 kbps',
-      estimatedBytes: 5000000,
-    },
-  ];
-
-  const videoStreams: MediaStream[] = [
-    {
-      streamIndex: 0,
-      streamType: 'video',
-      codec: 'h264',
-      bitrateKbps: 6000,
-      formatId: '1440p',
-      width: 1440,
-      height: 1440,
-      resolutionLabel: '1440p Quad HD',
-      frameRate: 30,
-      fps: 30,
-      hdr: false,
-      estimatedSizeBytes: 45000000,
-      sizeIsEstimate: true,
-      recommended: true,
-      isNativeLossless: true,
-      isStreamCopyCandidate: true,
-      transcodeRequired: false,
-      notes: 'Direct 1440p Quad HD stream (zero-hop)',
-      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
-    },
-    {
-      streamIndex: 1,
-      streamType: 'video',
-      codec: 'h264',
-      bitrateKbps: 3500,
-      formatId: '1080p',
-      width: 1080,
-      height: 1080,
-      resolutionLabel: '1080p Full HD',
-      frameRate: 30,
-      fps: 30,
-      hdr: false,
-      estimatedSizeBytes: 25000000,
-      sizeIsEstimate: true,
-      recommended: false,
-      isNativeLossless: true,
-      isStreamCopyCandidate: true,
-      transcodeRequired: false,
-      notes: 'Direct 1080p progressive stream (zero-hop)',
-      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
-    },
-  ];
-
-  const audioStreams: MediaStream[] = [
-    {
-      streamIndex: 2,
-      streamType: 'audio',
-      codec: 'aac',
-      bitrateKbps: 192,
-      formatId: 'audio_orig',
-      sampleRateHz: 44100,
-      channels: 2,
-      channelLayout: 'stereo',
-      estimatedSizeBytes: 5000000,
-      sizeIsEstimate: true,
-      recommended: true,
-      isNativeLossless: true,
-      isStreamCopyCandidate: true,
-      transcodeRequired: false,
-      notes: 'Original audio stream',
-      url: /\.(mp4|m4v|webm|mkv|mov|avi|flv|mp3|wav|flac|m4a|opus)($|\?)/i.test(sourceUrl) ? sourceUrl : undefined,
-    },
-  ];
-
-  return {
-    id,
-    assetId: id,
-    platform,
-    mediaType: 'video',
-    title,
-    uploader: `${displayPlatform} Creator`,
-    author: `${displayPlatform} Creator`,
-    durationSeconds: 60,
-    thumbnailUrl: '',
-    sourceUrl,
-    originalUrl: sourceUrl,
-    container: 'mp4',
-    fileSizeBytes: 45000000,
-    maxResolutionLabel: '1440p Quad HD',
-    videoFormats,
-    audioFormats,
-    videoStreams,
-    audioStreams,
-    streams: [...videoStreams, ...audioStreams],
-    availableFormats: {
-      videoResolutions: ['1440p Quad HD', '1080p Full HD', '720p HD'],
-      audioCodecs: ['mp3'],
-    },
-    rightsCheck: {
-      isPermitted: true,
-      rightsBasis: 'user_attested',
-    },
-    permitted: true,
-    rightsNote: 'Public media stream inspection',
-    isCarousel: false,
-    items: [],
-    entries: [],
-    analyzedAt: new Date().toISOString(),
-    directStreamUrl: sourceUrl,
-    directMimeType: 'video/mp4',
-    deliveryMode: 'zero-hop',
-  };
+  const blockedErr = new Error(
+    'This host blocks free cloud servers (no playable YouTube stream formats returned by extraction). Connect the backend worker with PO tokens/cookies or use MUXARO Direct.'
+  );
+  (blockedErr as any).code = 'HOST_BLOCKED';
+  (blockedErr as any).status = 403;
+  throw blockedErr;
 }

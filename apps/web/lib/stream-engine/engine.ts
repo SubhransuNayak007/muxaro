@@ -15,6 +15,8 @@ import { ParallelRangePipeline } from './range-pipeline.ts';
 import { StreamingRemuxer } from './muxer.ts';
 import { createOptimalSink } from './sink.ts';
 import { HardwareGpuTranscoder, isWebCodecsSupported } from './webcodecs-transcoder.ts';
+import { FFmpegWorkerClient } from '../ffmpeg/ffmpeg-client.ts';
+import type { FFmpegTaskResult } from '../ffmpeg/types.ts';
 import type {
   StreamEngineOptions,
   StreamPipelineController,
@@ -24,6 +26,110 @@ import type {
   StreamStage,
   StreamSink,
 } from './types.ts';
+
+export type ZeroWaitStreamController = StreamPipelineController & {
+  completion: Promise<StreamResult>;
+};
+
+type DetectedStreamKind = 'fmp4' | 'webm' | 'elementary' | 'unknown';
+
+const MP4_BOX_TAGS = new Set(['ftyp', 'moov', 'sidx', 'styp', 'moof', 'emsg', 'mdat', 'free', 'skip']);
+
+function detectKindFromBytes(bytes?: Uint8Array | null): DetectedStreamKind {
+  if (!bytes || bytes.byteLength < 4) return 'unknown';
+
+  // EBML header (WebM / Matroska): 0x1A 0x45 0xDF 0xA3 or Cluster 0x1F 0x43 0xB6 0x75
+  if (
+    (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) ||
+    (bytes[0] === 0x1f && bytes[1] === 0x43 && bytes[2] === 0xb6 && bytes[3] === 0x75)
+  ) {
+    return 'webm';
+  }
+
+  // ISO BMFF / fMP4 box tag at bytes 4..7
+  if (bytes.byteLength >= 8) {
+    const boxTag = String.fromCharCode(bytes[4], bytes[5], bytes[6], bytes[7]);
+    if (MP4_BOX_TAGS.has(boxTag)) {
+      return 'fmp4';
+    }
+  }
+
+  // H.264 Annex-B start code
+  if (
+    (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x01) ||
+    (bytes[0] === 0x00 && bytes[1] === 0x00 && bytes[2] === 0x00 && bytes[3] === 0x01)
+  ) {
+    return 'elementary';
+  }
+
+  // AAC ADTS syncword 0xFFF
+  if (bytes[0] === 0xff && (bytes[1] & 0xf0) === 0xf0) {
+    return 'elementary';
+  }
+
+  return 'unknown';
+}
+
+function detectKindFromMetadata(contentType?: string, url?: string): DetectedStreamKind {
+  const ct = (contentType || '').toLowerCase();
+  if (ct.includes('webm') || ct.includes('matroska')) return 'webm';
+  if (ct.includes('mp4') || ct.includes('m4s') || ct.includes('m4a')) return 'fmp4';
+
+  const rawUrl = (url || '').toLowerCase();
+  if (
+    rawUrl.includes('mime=video%2fwebm') ||
+    rawUrl.includes('mime=audio%2fwebm') ||
+    rawUrl.includes('mime=video/webm') ||
+    rawUrl.includes('mime=audio/webm') ||
+    /\.(webm|mkv)(\?|$)/i.test(rawUrl)
+  ) {
+    return 'webm';
+  }
+  if (
+    rawUrl.includes('mime=video%2fmp4') ||
+    rawUrl.includes('mime=audio%2fmp4') ||
+    rawUrl.includes('mime=video/mp4') ||
+    rawUrl.includes('mime=audio/mp4') ||
+    /\.(mp4|m4s|m4a|m4v)(\?|$)/i.test(rawUrl)
+  ) {
+    return 'fmp4';
+  }
+  if (/\.(h264|264|aac|adts)(\?|$)/i.test(rawUrl)) {
+    return 'elementary';
+  }
+  return 'unknown';
+}
+
+async function probeStreamBytes(
+  url: string,
+  signal: AbortSignal
+): Promise<{ bytes: Uint8Array | null; contentType?: string }> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-63' },
+      signal,
+    });
+    if (!res.ok) return { bytes: null };
+    const contentType = res.headers.get('content-type') || undefined;
+    if (res.status === 206) {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      return { bytes: buf.subarray(0, 64), contentType };
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return { bytes: null, contentType };
+    try {
+      const { value } = await reader.read();
+      await reader.cancel().catch(() => {});
+      return { bytes: value ? value.subarray(0, 64) : null, contentType };
+    } catch {
+      await reader.cancel().catch(() => {});
+      return { bytes: null, contentType };
+    }
+  } catch {
+    return { bytes: null };
+  }
+}
 
 export class StreamMuxerEngine implements StreamPipelineController {
   private options: StreamEngineOptions;
@@ -208,38 +314,6 @@ export class StreamMuxerEngine implements StreamPipelineController {
         this.options.preferredSink
       );
 
-      // ----------------------------------------------------
-      // Stage 3: Real-Time Interleaved Remuxer
-      // ----------------------------------------------------
-      this.remuxer = new StreamingRemuxer({
-        format: this.options.format || 'mp4',
-        sink: this.sink,
-        onFragmentMuxed: () => this.notifyProgress(),
-      });
-
-      // ----------------------------------------------------
-      // Stage 5: Hardware GPU Transcoding via WebCodecs
-      // ----------------------------------------------------
-      const needsTranscode =
-        this.options.forceTranscode === true ||
-        (this.options.videoCodec && this.options.videoCodec !== 'copy') ||
-        (this.options.audioCodec && this.options.audioCodec !== 'copy');
-
-      if (needsTranscode && isWebCodecsSupported()) {
-        this.setStage('transcoding');
-        this.transcoder = new HardwareGpuTranscoder({
-          targetVideoCodec: this.options.videoCodec,
-          targetAudioCodec: this.options.audioCodec,
-          onSampleReady: (sample) => this.remuxer?.pushSample(sample),
-          onError: (err) => this.options.onError?.(err),
-        });
-      }
-
-      // ----------------------------------------------------
-      // Stage 2: Parallel Range Pipeline Execution
-      // ----------------------------------------------------
-      this.setStage('pipelining');
-
       const isWebpage = (u?: string) =>
         Boolean(u && /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|instagram\.com|tiktok\.com|twitter\.com|x\.com|pin\.it|pinterest\.com)\//i.test(u));
 
@@ -253,58 +327,226 @@ export class StreamMuxerEngine implements StreamPipelineController {
       }
       const audioTargetUrl = this.options.audioUrl;
 
-      // Video pipeline
-      this.videoPipeline = new ParallelRangePipeline({
-        url: videoTargetUrl,
-        totalBytes: this.options.videoSizeBytes || this.totalExpectedBytes,
-        initialChunkSize: this.options.initialChunkSize,
-        initialConcurrency: this.options.initialConcurrency,
-        maxBufferBytes: this.options.maxBufferBytes,
-        streamType: audioTargetUrl ? 'video' : 'unified',
-        signal: this.abortController.signal,
-        onProgress: (p) => {
-          this.downloadedBytes = (this.videoPipeline?.getDownloadedBytes() || 0) +
-            (this.audioPipeline?.getDownloadedBytes() || 0);
-          this.notifyProgress();
-        },
-      });
+      const needsTranscode =
+        this.options.forceTranscode === true ||
+        (this.options.videoCodec && this.options.videoCodec !== 'copy') ||
+        (this.options.audioCodec && this.options.audioCodec !== 'copy');
 
-      // Audio pipeline (if separate adaptive stream)
+      // Inspect warmup magic bytes / contentType first; probe initial bytes if still unknown
+      let videoKind = detectKindFromBytes(warmupSession.videoInitSegment || warmupSession.initSegment);
+      let probedContentType = warmupSession.contentType;
+      if (videoKind === 'unknown') {
+        videoKind = detectKindFromMetadata(probedContentType, videoTargetUrl);
+      }
+      if (videoKind === 'unknown' && typeof fetch === 'function') {
+        const probe = await probeStreamBytes(videoTargetUrl, this.abortController.signal);
+        probedContentType = probe.contentType || probedContentType;
+        videoKind = detectKindFromBytes(probe.bytes);
+        if (videoKind === 'unknown') {
+          videoKind = detectKindFromMetadata(probedContentType, videoTargetUrl);
+        }
+      }
+
+      let audioKind: DetectedStreamKind = 'unknown';
       if (audioTargetUrl) {
-        this.audioPipeline = new ParallelRangePipeline({
-          url: audioTargetUrl,
-          totalBytes: this.options.audioSizeBytes,
-          initialChunkSize: 512 * 1024,
-          initialConcurrency: 2,
-          maxBufferBytes: 8 * 1024 * 1024,
-          streamType: 'audio',
+        audioKind = detectKindFromBytes(warmupSession.audioInitSegment);
+        if (audioKind === 'unknown') {
+          audioKind = detectKindFromMetadata(undefined, audioTargetUrl);
+        }
+        if (audioKind === 'unknown' && videoKind !== 'elementary' && typeof fetch === 'function') {
+          const audioProbe = await probeStreamBytes(audioTargetUrl, this.abortController.signal);
+          audioKind = detectKindFromBytes(audioProbe.bytes);
+          if (audioKind === 'unknown') {
+            audioKind = detectKindFromMetadata(audioProbe.contentType, audioTargetUrl);
+          }
+        }
+      }
+
+      const isContainerizedDash =
+        videoKind === 'fmp4' ||
+        videoKind === 'webm' ||
+        audioKind === 'fmp4' ||
+        audioKind === 'webm' ||
+        (Boolean(audioTargetUrl) && videoKind !== 'elementary' && audioKind !== 'elementary');
+
+      let finalDownloadUrl: string | undefined;
+
+      if (isContainerizedDash) {
+        // ----------------------------------------------------
+        // DASH Containerized Path: parallel track download + FFmpegWorkerClient stream-copy mux
+        // ----------------------------------------------------
+        this.setStage('pipelining');
+
+        const videoExt = videoKind === 'webm' ? 'webm' : 'mp4';
+        const audioExt = audioKind === 'webm' ? 'webm' : 'm4a';
+        const videoMime = videoExt === 'webm' ? 'video/webm' : 'video/mp4';
+        const audioMime = audioExt === 'webm' ? 'audio/webm' : 'audio/mp4';
+
+        let videoBytesCount = 0;
+        let audioBytesCount = 0;
+        const updateTrackBytes = (role: 'video' | 'audio', bytes: number) => {
+          if (role === 'video') videoBytesCount = bytes;
+          else audioBytesCount = bytes;
+          this.downloadedBytes = videoBytesCount + audioBytesCount;
+          this.notifyProgress();
+        };
+
+        const downloadVideoPromise = this.downloadTrackBlob(
+          videoTargetUrl,
+          this.options.videoSizeBytes || (!audioTargetUrl ? this.totalExpectedBytes : undefined),
+          'video',
+          videoMime,
+          (b) => updateTrackBytes('video', b)
+        );
+
+        const downloadAudioPromise = audioTargetUrl
+          ? this.downloadTrackBlob(
+              audioTargetUrl,
+              this.options.audioSizeBytes,
+              'audio',
+              audioMime,
+              (b) => updateTrackBytes('audio', b)
+            )
+          : Promise.resolve<Blob | null>(null);
+
+        const [videoBlob, audioBlob] = await Promise.all([downloadVideoPromise, downloadAudioPromise]);
+
+        if (this.abortController.signal.aborted) {
+          throw new Error('Stream aborted');
+        }
+
+        this.setStage('finalizing');
+
+        const ffmpegClient = FFmpegWorkerClient.getInstance();
+        const targetFormat = (this.options.format || 'mp4').toLowerCase();
+        const muxContainer = targetFormat === 'webm' ? 'webm' : 'mp4';
+
+        let workerResult: FFmpegTaskResult;
+        if (audioBlob) {
+          workerResult = await ffmpegClient.merge({
+            videoFile: videoBlob,
+            videoFileName: `track_video.${videoExt}`,
+            audioFile: audioBlob,
+            audioFileName: `track_audio.${audioExt}`,
+            targetContainer: muxContainer,
+            streamCopy: !needsTranscode,
+            signal: this.abortController.signal,
+            onProgress: () => this.notifyProgress(),
+          });
+        } else if (targetFormat === 'mp3') {
+          workerResult = await ffmpegClient.extractAudio({
+            file: videoBlob,
+            fileName: `track_input.${videoExt}`,
+            targetFormat: 'mp3',
+            streamCopy: false,
+            signal: this.abortController.signal,
+            onProgress: () => this.notifyProgress(),
+          });
+        } else {
+          workerResult = await ffmpegClient.convert({
+            file: videoBlob,
+            fileName: `track_input.${videoExt}`,
+            targetContainer: muxContainer,
+            streamCopy: !needsTranscode,
+            videoCodec: this.options.videoCodec,
+            audioCodec: this.options.audioCodec,
+            signal: this.abortController.signal,
+            onProgress: () => this.notifyProgress(),
+          });
+        }
+
+        const outBlob = workerResult.blob;
+        this.totalExpectedBytes = outBlob.size || this.totalExpectedBytes;
+        const WRITE_CHUNK_BYTES = 2 * 1024 * 1024;
+        for (let offset = 0; offset < outBlob.size; offset += WRITE_CHUNK_BYTES) {
+          if (this.abortController.signal.aborted) {
+            throw new Error('Stream aborted');
+          }
+          const slice = outBlob.slice(offset, Math.min(offset + WRITE_CHUNK_BYTES, outBlob.size));
+          const chunkBuf = new Uint8Array(await slice.arrayBuffer());
+          await this.sink.write(chunkBuf);
+        }
+
+        await this.sink.close();
+        const sinkUrl = this.sink.getDownloadUrl?.();
+        if (sinkUrl && workerResult.url) {
+          try {
+            URL.revokeObjectURL(workerResult.url);
+          } catch {
+            // Ignored
+          }
+        }
+        finalDownloadUrl = sinkUrl || workerResult.url;
+      } else {
+        // ----------------------------------------------------
+        // Elementary Stream Path: Stage 3 StreamingRemuxer + Stage 5 WebCodecs
+        // ----------------------------------------------------
+        this.remuxer = new StreamingRemuxer({
+          format: this.options.format || 'mp4',
+          sink: this.sink,
+          onFragmentMuxed: () => this.notifyProgress(),
+        });
+
+        if (needsTranscode && isWebCodecsSupported()) {
+          this.setStage('transcoding');
+          this.transcoder = new HardwareGpuTranscoder({
+            targetVideoCodec: this.options.videoCodec,
+            targetAudioCodec: this.options.audioCodec,
+            onSampleReady: (sample) => this.remuxer?.pushSample(sample),
+            onError: (err) => this.options.onError?.(err),
+          });
+        }
+
+        this.setStage('pipelining');
+
+        this.videoPipeline = new ParallelRangePipeline({
+          url: videoTargetUrl,
+          totalBytes: this.options.videoSizeBytes || this.totalExpectedBytes,
+          initialChunkSize: this.options.initialChunkSize,
+          initialConcurrency: this.options.initialConcurrency,
+          maxBufferBytes: this.options.maxBufferBytes,
+          streamType: audioTargetUrl ? 'video' : 'unified',
           signal: this.abortController.signal,
           onProgress: () => {
-            this.downloadedBytes = (this.videoPipeline?.getDownloadedBytes() || 0) +
+            this.downloadedBytes =
+              (this.videoPipeline?.getDownloadedBytes() || 0) +
               (this.audioPipeline?.getDownloadedBytes() || 0);
             this.notifyProgress();
           },
         });
+
+        if (audioTargetUrl) {
+          this.audioPipeline = new ParallelRangePipeline({
+            url: audioTargetUrl,
+            totalBytes: this.options.audioSizeBytes,
+            initialChunkSize: 512 * 1024,
+            initialConcurrency: 2,
+            maxBufferBytes: 8 * 1024 * 1024,
+            streamType: 'audio',
+            signal: this.abortController.signal,
+            onProgress: () => {
+              this.downloadedBytes =
+                (this.videoPipeline?.getDownloadedBytes() || 0) +
+                (this.audioPipeline?.getDownloadedBytes() || 0);
+              this.notifyProgress();
+            },
+          });
+        }
+
+        const videoFetchPromise = this.videoPipeline.start();
+        const audioFetchPromise = this.audioPipeline ? this.audioPipeline.start() : Promise.resolve();
+        const consumerLoopPromise = this.consumeOrderedRingBuffer(audioTargetUrl !== undefined);
+
+        await Promise.all([videoFetchPromise, audioFetchPromise, consumerLoopPromise]);
+
+        this.setStage('finalizing');
+        if (this.transcoder) {
+          await this.transcoder.flush();
+        }
+        await this.remuxer.finalize();
+        await this.sink.close();
+        finalDownloadUrl = this.sink.getDownloadUrl?.();
       }
-
-      // Start pipelines concurrently
-      const videoFetchPromise = this.videoPipeline.start();
-      const audioFetchPromise = this.audioPipeline ? this.audioPipeline.start() : Promise.resolve();
-
-      // Consumer loop: drains ordered chunks from RingBuffer to Remuxer in real time
-      const consumerLoopPromise = this.consumeOrderedRingBuffer(audioTargetUrl !== undefined);
-
-      await Promise.all([videoFetchPromise, audioFetchPromise, consumerLoopPromise]);
-
-      // ----------------------------------------------------
-      // Stage 3 & 4 Finalization: 0s Merge Wait!
-      // ----------------------------------------------------
-      this.setStage('finalizing');
-      if (this.transcoder) {
-        await this.transcoder.flush();
-      }
-      await this.remuxer.finalize();
-      await this.sink.close();
 
       this.setStage('completed');
 
@@ -316,60 +558,164 @@ export class StreamMuxerEngine implements StreamPipelineController {
         sinkType: this.sink.type,
         averageSpeedBytesPerSec: this.getStats().averageSpeedBytesPerSec,
         savedToDiskDirectly: this.sink.type !== 'blob',
-        downloadUrl: this.sink.getDownloadUrl?.(),
+        downloadUrl: finalDownloadUrl,
       };
 
       this.options.onComplete?.(result);
       return result;
     } catch (err: any) {
-      this.setStage('failed');
-      if (this.sink) {
-        await this.sink.abort(err);
+      const normalizedErr = err instanceof Error ? err : new Error(String(err || 'Stream pipeline failed'));
+      if (!this.isAborted) {
+        try {
+          this.setStage('failed');
+        } catch {
+          this.stage = 'failed';
+        }
       }
-      this.options.onError?.(err);
-      throw err;
+      if (this.sink) {
+        try {
+          await this.sink.abort(normalizedErr);
+        } catch {
+          // Ignore sink abort errors
+        }
+      }
+      try {
+        this.options.onError?.(normalizedErr);
+      } catch {
+        // Ignore error callback failures
+      }
+      throw normalizedErr;
     }
+  }
+
+  private async downloadTrackBlob(
+    url: string,
+    totalBytes: number | undefined,
+    role: 'video' | 'audio',
+    mimeType: string,
+    onBytesUpdated: (bytes: number) => void
+  ): Promise<Blob> {
+    const pipeline = new ParallelRangePipeline({
+      url,
+      totalBytes,
+      initialChunkSize: role === 'audio' ? 512 * 1024 : this.options.initialChunkSize,
+      initialConcurrency: role === 'audio' ? 2 : this.options.initialConcurrency,
+      maxBufferBytes: role === 'audio' ? 8 * 1024 * 1024 : this.options.maxBufferBytes,
+      streamType: role,
+      signal: this.abortController.signal,
+      onProgress: (p) => onBytesUpdated(p.downloadedBytes || 0),
+    });
+
+    if (role === 'video') {
+      this.videoPipeline = pipeline;
+    } else {
+      this.audioPipeline = pipeline;
+    }
+
+    try {
+      const chunks: Uint8Array[] = [];
+      const drainRing = async () => {
+        const ring = pipeline.getRingBuffer();
+        while (!this.abortController.signal.aborted) {
+          const chunk = await ring.popNextOrderedChunk(this.abortController.signal);
+          if (!chunk) break;
+          chunks.push(chunk.data);
+        }
+      };
+
+      await Promise.all([pipeline.start(), drainRing()]);
+      if (chunks.length > 0) {
+        return new Blob(chunks as BlobPart[], { type: mimeType });
+      }
+    } catch (err) {
+      if (this.abortController.signal.aborted) {
+        throw err;
+      }
+      console.warn(`[StreamEngine] Parallel range track download failed for ${role}, falling back to streaming fetch:`, err);
+    }
+
+    // Fallback: direct streaming fetch when server rejects Range or omits Content-Length
+    const res = await fetch(url, { signal: this.abortController.signal });
+    if (!res.ok) {
+      throw new Error(`Track download failed (${res.status} ${res.statusText})`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      onBytesUpdated(buf.byteLength);
+      return new Blob([buf as BlobPart], { type: mimeType });
+    }
+
+    const fallbackChunks: Uint8Array[] = [];
+    let received = 0;
+    while (true) {
+      if (this.abortController.signal.aborted) {
+        await reader.cancel().catch(() => {});
+        throw new Error('Stream aborted');
+      }
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        fallbackChunks.push(value);
+        received += value.byteLength;
+        onBytesUpdated(received);
+      }
+    }
+    return new Blob(fallbackChunks as BlobPart[], { type: mimeType });
   }
 
   private async consumeOrderedRingBuffer(hasSeparateAudio: boolean): Promise<void> {
     const videoBuffer = this.videoPipeline!.getRingBuffer();
     const audioBuffer = this.audioPipeline?.getRingBuffer();
 
-    let videoDone = false;
-    let audioDone = !hasSeparateAudio;
-
-    while ((!videoDone || !audioDone) && !this.abortController.signal.aborted) {
-      if (!videoDone) {
+    const drainVideo = async () => {
+      while (!this.abortController.signal.aborted) {
         const chunk = await videoBuffer.popNextOrderedChunk(this.abortController.signal);
-        if (chunk) {
-          await this.remuxer!.ingestStreamChunk(chunk.data, 'video');
-        } else {
-          videoDone = true;
-        }
+        if (!chunk) break;
+        await this.remuxer!.ingestStreamChunk(chunk.data, 'video');
       }
+    };
 
-      if (audioBuffer && !audioDone) {
+    const drainAudio = async () => {
+      if (!hasSeparateAudio || !audioBuffer) return;
+      while (!this.abortController.signal.aborted) {
         const chunk = await audioBuffer.popNextOrderedChunk(this.abortController.signal);
-        if (chunk) {
-          await this.remuxer!.ingestStreamChunk(chunk.data, 'audio');
-        } else {
-          audioDone = true;
-        }
+        if (!chunk) break;
+        await this.remuxer!.ingestStreamChunk(chunk.data, 'audio');
       }
-    }
+    };
+
+    await Promise.all([drainVideo(), drainAudio()]);
   }
 }
 
 /**
  * Top-level convenience runner
  */
-export async function startZeroWaitStream(options: StreamEngineOptions): Promise<StreamPipelineController> {
-  const engine = new StreamMuxerEngine(options);
-  // Start execution in background so controller is returned immediately
-  setTimeout(() => {
-    engine.run().catch((err) => {
-      console.error('[StreamEngine] Pipeline error:', err);
-    });
-  }, 0);
-  return engine;
+export async function startZeroWaitStream(options: StreamEngineOptions): Promise<ZeroWaitStreamController> {
+  let errorNotified = false;
+  const notifyErrorOnce = (err: unknown) => {
+    if (errorNotified) return;
+    errorNotified = true;
+    const normalized = err instanceof Error ? err : new Error(String(err || 'Stream pipeline failed'));
+    try {
+      options.onError?.(normalized);
+    } catch {
+      // Ignore error callback failure
+    }
+  };
+
+  const engine = new StreamMuxerEngine({
+    ...options,
+    onError: notifyErrorOnce,
+  });
+
+  const completion = engine.run().catch((err) => {
+    notifyErrorOnce(err);
+    throw err;
+  });
+  // Prevent UnhandledPromiseRejection for callers that rely on options.onError only
+  completion.catch(() => {});
+
+  return Object.assign(engine, { completion });
 }

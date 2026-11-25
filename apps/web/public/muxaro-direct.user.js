@@ -189,7 +189,206 @@
         handleDirectDownload(event.data);
         return;
       }
+
+      if (event.data.type === 'MUXARO_EXTRACT_MEDIA') {
+        handleClientExtractMedia(event.data);
+        return;
+      }
     });
+
+    function gmFetchJsonOrText(url, opts) {
+      return new Promise(function (resolve, reject) {
+        if (typeof GM_xmlhttpRequest === 'function') {
+          GM_xmlhttpRequest({
+            method: (opts && opts.method) || 'GET',
+            url: url,
+            headers: (opts && opts.headers) || {},
+            data: opts && opts.body ? opts.body : undefined,
+            onload: function (res) {
+              if (res.status >= 200 && res.status < 300) {
+                resolve(res.responseText || '');
+              } else {
+                reject(new Error('HTTP ' + res.status));
+              }
+            },
+            onerror: function () {
+              reject(new Error('GM_xmlhttpRequest network failure'));
+            },
+          });
+        } else {
+          fetch(url, opts)
+            .then(function (r) {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              return r.text();
+            })
+            .then(resolve)
+            .catch(reject);
+        }
+      });
+    }
+
+    function extractBalancedJson(source, marker) {
+      const idx = source.indexOf(marker);
+      if (idx === -1) return null;
+      const start = source.indexOf('{', idx + marker.length);
+      if (start === -1) return null;
+      let depth = 0;
+      let inStr = false;
+      let esc = false;
+      for (let i = start; i < source.length; i++) {
+        const ch = source[i];
+        if (inStr) {
+          if (esc) esc = false;
+          else if (ch === '\\') esc = true;
+          else if (ch === '"') inStr = false;
+          continue;
+        }
+        if (ch === '"') inStr = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            try { return JSON.parse(source.slice(start, i + 1)); } catch (_) { return null; }
+          }
+        }
+      }
+      return null;
+    }
+
+    function parseYouTubeVideoId(rawUrl) {
+      try {
+        const u = new URL(rawUrl);
+        const host = u.hostname.toLowerCase();
+        if (!host.includes('youtube.com') && !host.includes('youtu.be')) return null;
+        if (host.includes('youtu.be')) return u.pathname.slice(1).split('/')[0] || null;
+        return u.searchParams.get('v') || (u.pathname.includes('/shorts/') ? u.pathname.split('/shorts/')[1].split('/')[0] : null);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function handleClientExtractMedia(data) {
+      const requestId = (data && data.requestId) || String(Date.now());
+      const targetOrigin = getSafeTargetOrigin();
+      const targetUrl = String((data && data.url) || '').trim();
+      const videoId = parseYouTubeVideoId(targetUrl);
+
+      if (!videoId) {
+        window.postMessage({ source: 'MUXARO_BRIDGE', type: 'EXTRACT_RESPONSE', requestId: requestId, success: false, error: 'Unsupported URL for userscript extraction' }, targetOrigin);
+        return;
+      }
+
+      try {
+        let playerJson = null;
+        const clientConfigs = [
+          { clientName: 'ANDROID_VR', clientVersion: '1.60.19', androidSdkVersion: 32, userAgent: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L) gzip' },
+          { clientName: 'IOS', clientVersion: '20.10.4', deviceMake: 'Apple', deviceModel: 'iPhone16,2', osName: 'iPhone', osVersion: '18.3.2.22D82', userAgent: 'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)' },
+        ];
+        for (const cfg of clientConfigs) {
+          try {
+            const rawText = await gmFetchJsonOrText('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'User-Agent': cfg.userAgent },
+              body: JSON.stringify({ videoId: videoId, context: { client: Object.assign({}, cfg, { hl: 'en', gl: 'US' }) }, contentCheckOk: true, racyCheckOk: true }),
+            });
+            const parsed = JSON.parse(rawText);
+            if (parsed && parsed.streamingData && (parsed.streamingData.adaptiveFormats || parsed.streamingData.formats)) {
+              playerJson = parsed;
+              break;
+            }
+          } catch (_) {}
+        }
+
+        if (!playerJson) {
+          const watchHtml = await gmFetchJsonOrText('https://www.youtube.com/watch?v=' + encodeURIComponent(videoId) + '&bpctr=9999999999&has_verified=1');
+          playerJson = extractBalancedJson(watchHtml, 'ytInitialPlayerResponse =');
+        }
+
+        const streaming = (playerJson && playerJson.streamingData) || {};
+        const details = (playerJson && playerJson.videoDetails) || {};
+        const combined = []
+          .concat(Array.isArray(streaming.adaptiveFormats) ? streaming.adaptiveFormats : [])
+          .concat(Array.isArray(streaming.formats) ? streaming.formats : [])
+          .filter(function (f) { return f && typeof f.url === 'string' && /^https?:\/\//i.test(f.url); });
+
+        if (!combined.length) {
+          throw new Error('No unciphered client streams found');
+        }
+
+        const audioRaw = combined.filter(function (f) { return String(f.mimeType || '').startsWith('audio/'); });
+        const bestAudio = audioRaw.find(function (f) { return String(f.mimeType || '').includes('mp4a'); }) || audioRaw[0];
+        const audioStreams = audioRaw.map(function (f, idx) {
+          const mime = String(f.mimeType || 'audio/mp4');
+          return {
+            streamIndex: 100 + idx,
+            streamType: 'audio',
+            codec: mime.includes('opus') ? 'opus' : 'aac',
+            bitrateKbps: Math.round((Number(f.bitrate || 128000)) / 1000),
+            formatId: String(f.itag || ('a_' + idx)),
+            estimatedSizeBytes: f.contentLength ? Number(f.contentLength) : undefined,
+            recommended: idx === 0,
+            isNativeLossless: true,
+            isStreamCopyCandidate: true,
+            transcodeRequired: false,
+            url: f.url,
+          };
+        });
+        const videoStreams = combined
+          .filter(function (f) { return String(f.mimeType || '').startsWith('video/') && Number(f.height || 0) > 0; })
+          .map(function (f, idx) {
+            const mime = String(f.mimeType || 'video/mp4');
+            const h = Number(f.height || 0);
+            return {
+              streamIndex: idx,
+              streamType: 'video',
+              codec: mime.includes('av01') ? 'av1' : mime.includes('vp9') ? 'vp9' : 'h264',
+              bitrateKbps: Math.round((Number(f.bitrate || 0)) / 1000),
+              formatId: String(f.itag),
+              width: Number(f.width || Math.round((h * 16) / 9)),
+              height: h,
+              resolutionLabel: h >= 4320 ? '8K' : h >= 2160 ? '4K' : h + 'p',
+              fps: Math.round(Number(f.fps || 30)),
+              estimatedSizeBytes: f.contentLength ? Number(f.contentLength) : undefined,
+              recommended: h === 1080 || h === 2160,
+              isNativeLossless: true,
+              isStreamCopyCandidate: true,
+              transcodeRequired: false,
+              url: f.url,
+            };
+          })
+          .sort(function (a, b) { return (b.height || 0) - (a.height || 0); });
+
+        const manifest = {
+          id: 'yt_usr_' + videoId + '_' + Date.now(),
+          assetId: 'yt_usr_' + videoId,
+          platform: 'youtube',
+          mediaType: 'video',
+          title: String(details.title || 'YouTube Video'),
+          uploader: String(details.author || 'YouTube Creator'),
+          durationSeconds: Number(details.lengthSeconds || 0) || 0,
+          thumbnailUrl: 'https://i.ytimg.com/vi/' + videoId + '/hqdefault.jpg',
+          sourceUrl: targetUrl,
+          originalUrl: targetUrl,
+          container: 'mp4',
+          audioFormats: [
+            { id: 'a_mp3', sourceAudioFormatId: bestAudio ? String(bestAudio.itag) : '140', label: 'MP3 High Quality', format: 'mp3', bitrateLabel: '320 kbps' },
+            { id: 'a_m4a', sourceAudioFormatId: bestAudio ? String(bestAudio.itag) : '140', label: 'AAC Audio (M4A)', format: 'm4a', bitrateLabel: '256 kbps' },
+          ],
+          videoStreams: videoStreams,
+          audioStreams: audioStreams,
+          streams: videoStreams.concat(audioStreams),
+          permitted: true,
+          rightsNote: 'Extracted locally via MUXARO Direct Userscript',
+          directStreamUrl: (videoStreams[0] && videoStreams[0].url) || (audioStreams[0] && audioStreams[0].url),
+          deliveryMode: 'zero-hop',
+          extractedOnClient: true,
+        };
+
+        window.postMessage({ source: 'MUXARO_BRIDGE', type: 'EXTRACT_RESPONSE', requestId: requestId, success: true, data: manifest }, targetOrigin);
+      } catch (err) {
+        window.postMessage({ source: 'MUXARO_BRIDGE', type: 'EXTRACT_RESPONSE', requestId: requestId, success: false, error: String((err && err.message) || err) }, targetOrigin);
+      }
+    }
 
     // Also listen for direct download CustomEvent from MUXARO UI
     window.addEventListener('muxaro:direct-download', function (event) {

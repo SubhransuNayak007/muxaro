@@ -48,6 +48,16 @@ describe('Phase 0 API Error Normalization & Proxy Cleanup', () => {
       assert.strictEqual(err2.code, 'TIMEOUT');
       assert.strictEqual(err2.status, 504);
     });
+
+    it('classifies missing backend/binaries honestly as 503 ERR_BACKEND_NOT_CONFIGURED instead of fake HOST_BLOCKED', () => {
+      const err1 = classifyApiError('spawn yt-dlp ENOENT');
+      assert.strictEqual(err1.code, 'ERR_BACKEND_NOT_CONFIGURED');
+      assert.strictEqual(err1.status, 503);
+
+      const err2 = classifyApiError('Unknown extraction failure');
+      assert.strictEqual(err2.code, 'ERR_EXTRACTION_FAILED');
+      assert.strictEqual(err2.status, 502);
+    });
   });
 
   describe('createApiErrorResponse', () => {

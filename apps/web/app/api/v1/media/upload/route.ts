@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { getUploadsDir, sanitizeUploadFilename } from '@/lib/upload-storage';
+import { isServerlessRuntime, proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -20,6 +21,28 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   const requestId = `upl_dir_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+  const upstream = await proxyToBackend(req, 'media/upload', {
+    streaming: true,
+    timeoutMs: 120_000,
+  });
+  if (upstream) return upstream;
+
+  if (isServerlessRuntime()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        success: false,
+        error: {
+          code: 'ERR_BACKEND_NOT_CONFIGURED',
+          message:
+            'Backend media processing server is not configured. Use in-browser processing or configure API_INTERNAL_URL.',
+        },
+        requestId,
+      },
+      { status: 503, headers: CORS_HEADERS }
+    );
+  }
 
   try {
     const rawHeaderName = req.headers.get('x-file-name') || '';
@@ -50,6 +73,21 @@ export async function POST(req: NextRequest) {
           requestId,
         },
         { status: 400, headers: CORS_HEADERS }
+      );
+    }
+
+    if (buffer.length > 4.5 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          ok: false,
+          success: false,
+          error: {
+            code: 'ERR_PAYLOAD_TOO_LARGE',
+            message: 'Direct server upload is limited to 4.5 MB on cloud functions. Use in-browser local processing for larger files.',
+          },
+          requestId,
+        },
+        { status: 413, headers: CORS_HEADERS }
       );
     }
 

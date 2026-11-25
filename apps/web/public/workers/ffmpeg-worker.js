@@ -48,73 +48,168 @@ function parseTimeToSec(timeStr) {
 // FFmpeg Lifecycle & Script Loading
 // ---------------------------------------------------------------------------
 
+const workerOrigin = self.location?.origin || '';
 if (typeof self.document === 'undefined') {
-  self.document = { baseURI: self.location.href };
+  self.document = {
+    baseURI: workerOrigin ? `${workerOrigin}/ffmpeg/` : self.location.href,
+    currentScript: workerOrigin ? { src: `${workerOrigin}/ffmpeg/ffmpeg.js` } : undefined,
+  };
 }
 
 let ffmpeg = null;
+let coreInstance = null;
 let isLoaded = false;
 let loadedFrom = null;
+let cachedCoreBlobUrl = null;
+let cachedWasmBlobUrl = null;
+let cachedCoreSource = null;
 
-function loadScripts() {
-  if (self.FFmpegWASM) return;
-  const origin = self.location.origin;
-  try {
-    importScripts(origin + '/ffmpeg/ffmpeg.js');
-  } catch (err1) {
-    try {
-      importScripts('/ffmpeg/ffmpeg.js');
-    } catch (err2) {
-      console.error('[FFmpegWorker] Failed to load local /ffmpeg/ffmpeg.js:', err1, err2);
-      throw new Error('Failed to load local /ffmpeg/ffmpeg.js: ' + (err1 && err1.message));
-    }
+async function toTypedBlobUrl(url, mimeType) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} fetching ${url}`);
   }
+  const buf = await res.arrayBuffer();
+  return URL.createObjectURL(new Blob([buf], { type: mimeType }));
+}
+
+function createCoreWrapper(core) {
+  const progressListeners = new Set();
+  const logListeners = new Set();
+
+  core.setLogger((data) => {
+    for (const fn of logListeners) {
+      try {
+        fn(data);
+      } catch {
+        // Ignore listener errors
+      }
+    }
+  });
+
+  core.setProgress((data) => {
+    for (const fn of progressListeners) {
+      try {
+        fn(data);
+      } catch {
+        // Ignore listener errors
+      }
+    }
+  });
+
+  return {
+    exec(args, timeout = -1) {
+      core.setTimeout(timeout);
+      core.exec(...args);
+      const ret = core.ret;
+      core.reset();
+      return ret;
+    },
+    writeFile(path, data) {
+      core.FS.writeFile(path, data);
+      return true;
+    },
+    readFile(path, encoding) {
+      return core.FS.readFile(path, encoding ? { encoding } : undefined);
+    },
+    deleteFile(path) {
+      core.FS.unlink(path);
+      return true;
+    },
+    createDir(path) {
+      core.FS.mkdir(path);
+      return true;
+    },
+    deleteDir(path) {
+      core.FS.rmdir(path);
+      return true;
+    },
+    mount(fsType, options, mountPoint) {
+      const fs = core.FS.filesystems && core.FS.filesystems[fsType];
+      if (!fs) return false;
+      core.FS.mount(fs, options, mountPoint);
+      return true;
+    },
+    unmount(mountPoint) {
+      core.FS.unmount(mountPoint);
+      return true;
+    },
+    on(event, fn) {
+      if (event === 'progress') progressListeners.add(fn);
+      else if (event === 'log') logListeners.add(fn);
+    },
+    off(event, fn) {
+      if (event === 'progress') progressListeners.delete(fn);
+      else if (event === 'log') logListeners.delete(fn);
+    },
+    terminate() {
+      progressListeners.clear();
+      logListeners.clear();
+      coreInstance = null;
+    },
+  };
+}
+
+async function instantiateCoreFromUrls(coreSourceUrl, wasmSourceUrl, sourceLabel) {
+  let coreBlobUrl = cachedCoreBlobUrl;
+  let wasmBlobUrl = cachedWasmBlobUrl;
+
+  if (!coreBlobUrl || !wasmBlobUrl || cachedCoreSource !== sourceLabel) {
+    const [nextCoreBlob, nextWasmBlob] = await Promise.all([
+      toTypedBlobUrl(coreSourceUrl, 'text/javascript'),
+      toTypedBlobUrl(wasmSourceUrl, 'application/wasm'),
+    ]);
+    coreBlobUrl = nextCoreBlob;
+    wasmBlobUrl = nextWasmBlob;
+    cachedCoreBlobUrl = coreBlobUrl;
+    cachedWasmBlobUrl = wasmBlobUrl;
+    cachedCoreSource = sourceLabel;
+  }
+
+  if (typeof self.createFFmpegCore !== 'function') {
+    importScripts(coreBlobUrl);
+  }
+  if (typeof self.createFFmpegCore !== 'function') {
+    throw new Error('createFFmpegCore did not initialize from UMD core script.');
+  }
+
+  const mainScriptUrlOrBlob = `${coreBlobUrl}#${btoa(
+    JSON.stringify({ wasmURL: wasmBlobUrl, workerURL: coreBlobUrl })
+  )}`;
+  const core = await self.createFFmpegCore({ mainScriptUrlOrBlob });
+  coreInstance = core;
+  ffmpeg = createCoreWrapper(core);
+  isLoaded = true;
+  loadedFrom = sourceLabel;
+  return { loadedFrom: sourceLabel };
 }
 
 async function initFFmpeg(config) {
-  if (isLoaded && ffmpeg) {
+  if (isLoaded && ffmpeg && coreInstance) {
     return { loadedFrom };
   }
 
-  loadScripts();
-  const { FFmpeg } = self.FFmpegWASM || {};
-  if (!FFmpeg) {
-    throw new Error('FFmpegWASM library failed to load in worker scope.');
-  }
-
-  ffmpeg = new FFmpeg();
-
-  const origin = self.location.origin;
+  const origin = self.location?.origin || '';
   const coreURL = config?.coreURL || `${origin}/ffmpeg/ffmpeg-core.js`;
   const wasmURL = config?.wasmURL || `${origin}/ffmpeg/ffmpeg-core.wasm`;
 
   try {
-    let finalCore = coreURL;
-    let finalWasm = wasmURL;
-    try {
-      const [cRes, wRes] = await Promise.all([fetch(coreURL), fetch(wasmURL)]);
-      if (cRes.ok && wRes.ok) {
-        finalCore = URL.createObjectURL(await cRes.blob());
-        finalWasm = URL.createObjectURL(await wRes.blob());
-      }
-    } catch {}
-
-    await ffmpeg.load({ coreURL: finalCore, wasmURL: finalWasm });
-    isLoaded = true;
-    loadedFrom = 'local';
-    return { loadedFrom: 'local' };
+    return await instantiateCoreFromUrls(coreURL, wasmURL, 'local');
   } catch (localErr) {
-    console.warn('[ffmpeg-worker] Local core failed, falling back to CDN...', localErr);
+    console.warn('[ffmpeg-worker] Local UMD core failed, falling back to CDN...', localErr);
+    cachedCoreBlobUrl = null;
+    cachedWasmBlobUrl = null;
+    cachedCoreSource = null;
     try {
-      await ffmpeg.load({
-        coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
-        wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',
-      });
-      isLoaded = true;
-      loadedFrom = 'cdn';
-      return { loadedFrom: 'cdn' };
+      return await instantiateCoreFromUrls(
+        'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.js',
+        'https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd/ffmpeg-core.wasm',
+        'cdn'
+      );
     } catch (cdnErr) {
       isLoaded = false;
+      ffmpeg = null;
+      coreInstance = null;
       throw new Error(`Failed to initialize ffmpeg core: ${cdnErr.message || cdnErr}`);
     }
   }
@@ -171,6 +266,70 @@ async function deleteVirtualFile(name) {
   } catch {
     // Ignore cleanup errors
   }
+}
+
+/**
+ * Mounts a File/Blob zero-copy via Emscripten WORKERFS when available,
+ * falling back to writeVirtualFile for ArrayBuffer/Uint8Array or if mount fails.
+ */
+async function prepareInputFile(name, source) {
+  if (!ffmpeg) throw new Error('FFmpeg is not initialized.');
+
+  if (
+    typeof Blob !== 'undefined' &&
+    source instanceof Blob &&
+    typeof ffmpeg.createDir === 'function' &&
+    typeof ffmpeg.mount === 'function'
+  ) {
+    const safeName = String(name || 'input.bin').replace(/[^a-zA-Z0-9._-]/g, '_') || 'input.bin';
+    const mountDir = `/mnt_wfs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await ffmpeg.createDir(mountDir);
+      const mounted = await ffmpeg.mount(
+        'WORKERFS',
+        { blobs: [{ name: safeName, data: source }] },
+        mountDir
+      );
+      if (mounted === false) {
+        throw new Error('WORKERFS filesystem unavailable in worker');
+      }
+      return {
+        inputPath: `${mountDir}/${safeName}`,
+        cleanup: async () => {
+          if (!ffmpeg) return;
+          if (typeof ffmpeg.unmount === 'function') {
+            try {
+              await ffmpeg.unmount(mountDir);
+            } catch {
+              // Ignore cleanup errors (e.g., worker terminated on cancel)
+            }
+          }
+          if (typeof ffmpeg.deleteDir === 'function') {
+            try {
+              await ffmpeg.deleteDir(mountDir);
+            } catch {
+              // Ignore cleanup errors
+            }
+          }
+        },
+      };
+    } catch (err) {
+      if (typeof ffmpeg.deleteDir === 'function') {
+        try {
+          await ffmpeg.deleteDir(mountDir);
+        } catch {
+          // Ignore
+        }
+      }
+      console.warn('[ffmpeg-worker] WORKERFS mount unavailable, falling back to MEMFS write:', err);
+    }
+  }
+
+  await writeVirtualFile(name, source);
+  return {
+    inputPath: name,
+    cleanup: () => deleteVirtualFile(name),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -293,21 +452,22 @@ self.onmessage = async (e) => {
 
     const inName = `in_${Date.now()}.${inExt}`;
     const outName = `out_${Date.now()}.${outExt}`;
+    let preparedInput = null;
 
     try {
-      await writeVirtualFile(inName, file);
+      preparedInput = await prepareInputFile(inName, file);
 
       let args = [];
       if (isStreamCopy) {
         if (outExt === 'mp4') {
-          args = ['-i', inName, '-c', 'copy', '-movflags', '+faststart', outName];
+          args = ['-i', preparedInput.inputPath, '-c', 'copy', '-movflags', '+faststart', outName];
         } else {
-          args = ['-i', inName, '-c', 'copy', outName];
+          args = ['-i', preparedInput.inputPath, '-c', 'copy', outName];
         }
       } else {
         const vc = videoCodec || 'copy';
         const ac = audioCodec || 'copy';
-        args = ['-i', inName, '-c:v', vc, '-c:a', ac];
+        args = ['-i', preparedInput.inputPath, '-c:v', vc, '-c:a', ac];
         if (outExt === 'mp4') args.push('-movflags', '+faststart');
         args.push(outName);
       }
@@ -320,7 +480,7 @@ self.onmessage = async (e) => {
           console.warn('[ffmpeg-worker] Stream copy failed for MP4. Retrying with video copy + AAC audio...');
           args = [
             '-i',
-            inName,
+            preparedInput.inputPath,
             '-c:v',
             'copy',
             '-c:a',
@@ -359,7 +519,7 @@ self.onmessage = async (e) => {
     } catch (err) {
       self.postMessage({ id, type: 'error', error: err.message || String(err) });
     } finally {
-      await deleteVirtualFile(inName);
+      if (preparedInput) await preparedInput.cleanup();
       await deleteVirtualFile(outName);
     }
     return;
@@ -385,27 +545,31 @@ self.onmessage = async (e) => {
 
     const inName = `in_${Date.now()}.${inExt}`;
     const outName = `out_${Date.now()}.${outExt}`;
+    let actualOutName = outName;
+    let fallbackOut = null;
+    let usedStreamCopy = isStreamCopy;
+    let preparedInput = null;
 
     try {
-      await writeVirtualFile(inName, file);
+      preparedInput = await prepareInputFile(inName, file);
 
       let args = [];
       if (isStreamCopy) {
-        args = ['-i', inName, '-vn', '-c:a', 'copy', outName];
+        args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'copy', outName];
       } else {
         const br = `${bitrateKbps || 192}k`;
         if (outExt === 'mp3') {
-          args = ['-i', inName, '-vn', '-c:a', 'libmp3lame', '-b:a', br, outName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'libmp3lame', '-b:a', br, outName];
         } else if (outExt === 'wav') {
-          args = ['-i', inName, '-vn', '-c:a', 'pcm_s16le', outName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'pcm_s16le', outName];
         } else if (outExt === 'flac') {
-          args = ['-i', inName, '-vn', '-c:a', 'flac', outName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'flac', outName];
         } else if (outExt === 'aac' || outExt === 'm4a') {
-          args = ['-i', inName, '-vn', '-c:a', 'aac', '-b:a', br, outName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'aac', '-b:a', br, outName];
         } else if (outExt === 'opus') {
-          args = ['-i', inName, '-vn', '-c:a', 'libopus', '-b:a', br, outName];
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'libopus', '-b:a', br, outName];
         } else {
-          args = ['-i', inName, '-vn', outName];
+          args = ['-i', preparedInput.inputPath, '-vn', outName];
         }
       }
 
@@ -415,15 +579,17 @@ self.onmessage = async (e) => {
         if (isStreamCopy) {
           console.warn('[ffmpeg-worker] Audio copy failed. Retrying with AAC transcode...');
           outExt = 'm4a';
-          const fallbackOut = `out_${Date.now()}.${outExt}`;
-          args = ['-i', inName, '-vn', '-c:a', 'aac', '-b:a', '192k', fallbackOut];
+          fallbackOut = `out_${Date.now()}_fallback.${outExt}`;
+          actualOutName = fallbackOut;
+          usedStreamCopy = false;
+          args = ['-i', preparedInput.inputPath, '-vn', '-c:a', 'aac', '-b:a', '192k', fallbackOut];
           await runFFmpegArgs(id, args);
         } else {
           throw err;
         }
       }
 
-      const outBytes = await readVirtualFile(outName);
+      const outBytes = await readVirtualFile(actualOutName);
       const mime = getMime(outExt);
       const elapsedMs = Math.round(performance.now() - startTime);
 
@@ -437,7 +603,7 @@ self.onmessage = async (e) => {
             mimeType: mime,
             sizeBytes: outBytes.byteLength,
             elapsedMs,
-            isStreamCopy,
+            isStreamCopy: usedStreamCopy,
           },
         },
         [outBytes.buffer]
@@ -445,8 +611,9 @@ self.onmessage = async (e) => {
     } catch (err) {
       self.postMessage({ id, type: 'error', error: err.message || String(err) });
     } finally {
-      await deleteVirtualFile(inName);
+      if (preparedInput) await preparedInput.cleanup();
       await deleteVirtualFile(outName);
+      if (fallbackOut) await deleteVirtualFile(fallbackOut);
     }
     return;
   }
@@ -463,16 +630,18 @@ self.onmessage = async (e) => {
     const vName = `v_${Date.now()}.${vExt}`;
     const aName = `a_${Date.now()}.${aExt}`;
     const outName = `out_${Date.now()}.${outExt}`;
+    let preparedVideo = null;
+    let preparedAudio = null;
 
     try {
-      await writeVirtualFile(vName, videoFile);
-      await writeVirtualFile(aName, audioFile);
+      preparedVideo = await prepareInputFile(vName, videoFile);
+      preparedAudio = await prepareInputFile(aName, audioFile);
 
-      let args = ['-i', vName];
+      let args = ['-i', preparedVideo.inputPath];
       if (audioDelayMs && audioDelayMs !== 0) {
         args.push('-itsoffset', (audioDelayMs / 1000).toFixed(3));
       }
-      args.push('-i', aName, '-map', '0:v:0', '-map', '1:a:0');
+      args.push('-i', preparedAudio.inputPath, '-map', '0:v:0', '-map', '1:a:0');
 
       if (isStreamCopy) {
         args.push('-c:v', 'copy', '-c:a', 'copy', '-shortest');
@@ -490,13 +659,13 @@ self.onmessage = async (e) => {
       } catch (err) {
         if (isStreamCopy && outExt === 'mp4') {
           console.warn('[ffmpeg-worker] Direct merge copy failed. Retrying with video copy + AAC audio...');
-          args = ['-i', vName];
+          args = ['-i', preparedVideo.inputPath];
           if (audioDelayMs && audioDelayMs !== 0) {
             args.push('-itsoffset', (audioDelayMs / 1000).toFixed(3));
           }
           args.push(
             '-i',
-            aName,
+            preparedAudio.inputPath,
             '-map',
             '0:v:0',
             '-map',
@@ -540,8 +709,8 @@ self.onmessage = async (e) => {
     } catch (err) {
       self.postMessage({ id, type: 'error', error: err.message || String(err) });
     } finally {
-      await deleteVirtualFile(vName);
-      await deleteVirtualFile(aName);
+      if (preparedVideo) await preparedVideo.cleanup();
+      if (preparedAudio) await preparedAudio.cleanup();
       await deleteVirtualFile(outName);
     }
     return;

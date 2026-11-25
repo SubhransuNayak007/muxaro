@@ -55,7 +55,7 @@
           active: true,
           isExtension: true,
           nonce: nonce || undefined,
-          capabilities: ['residential-fetch', 'native-download', 'stream-chunks', 'cors-bypass'],
+          capabilities: ['client-extract', 'residential-fetch', 'native-download', 'stream-chunks', 'cors-bypass'],
           timestamp: Date.now(),
         },
         targetOrigin
@@ -69,7 +69,7 @@
           active: true,
           isExtension: true,
           nonce: nonce || undefined,
-          capabilities: ['residential-fetch', 'native-download', 'stream-chunks', 'cors-bypass'],
+          capabilities: ['client-extract', 'residential-fetch', 'native-download', 'stream-chunks', 'cors-bypass'],
           timestamp: Date.now(),
         },
         targetOrigin
@@ -205,6 +205,12 @@
     // 4. Status Query
     if (data.type === 'MUXARO_GET_STATUS' || (data.source === APP_SOURCE && data.type === 'GET_STATUS')) {
       handleGetStatus(data);
+      return;
+    }
+
+    // 5. Client-Side Residential Media Extraction
+    if (data.type === 'MUXARO_EXTRACT_MEDIA' || (data.source === APP_SOURCE && data.type === 'EXTRACT_MEDIA')) {
+      handleExtractMedia(data);
       return;
     }
   });
@@ -362,6 +368,57 @@
           ...(response || {}),
         };
         window.postMessage(payload, targetOrigin);
+      }
+    );
+  }
+
+  function handleExtractMedia(data) {
+    const validUrl = validateUrl(data.url);
+    const requestId = data.requestId || String(Date.now());
+    const targetOrigin = getTargetOrigin();
+
+    if (!validUrl) {
+      window.postMessage(
+        {
+          source: BRIDGE_SOURCE,
+          type: 'EXTRACT_RESPONSE',
+          requestId,
+          success: false,
+          error: 'Invalid or disallowed URL',
+        },
+        targetOrigin
+      );
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        action: 'EXTRACT_MEDIA',
+        payload: { url: validUrl, requestId },
+      },
+      response => {
+        if (chrome.runtime.lastError) {
+          window.postMessage(
+            {
+              source: BRIDGE_SOURCE,
+              type: 'EXTRACT_RESPONSE',
+              requestId,
+              success: false,
+              error: chrome.runtime.lastError.message,
+            },
+            targetOrigin
+          );
+          return;
+        }
+        window.postMessage(
+          {
+            source: BRIDGE_SOURCE,
+            type: 'EXTRACT_RESPONSE',
+            requestId,
+            ...(response || { success: false, error: 'No response from extension' }),
+          },
+          targetOrigin
+        );
       }
     );
   }

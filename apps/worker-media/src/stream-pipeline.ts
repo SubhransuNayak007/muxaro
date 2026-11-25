@@ -72,22 +72,73 @@ export interface StreamPipelineOptions {
   readonly timeoutMs?: number;
 }
 
-const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
-const YTDLP_BIN = process.env.YTDLP_PATH || 'yt-dlp';
+type ExtendedMediaJobPayload = MediaJobPayload & {
+  operation?: string;
+  clipUrls?: string[];
+  audioUrl?: string;
+  audioAssetId?: string;
+  videoUrl?: string;
+  videoAssetId?: string;
+  secondaryAudioStorageKey?: string;
+  formatId?: string;
+  streamCopy?: boolean;
+  egressProfileId?: string;
+};
 
 function getExecutionEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  const customPaths = [
-    'C:\\Users\\sbhrn\\.deno\\bin',
-    'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312\\Scripts',
-    'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312',
+  const candidateDirs = [
     path.join(os.homedir(), '.deno', 'bin'),
+    path.join(os.homedir(), '.local', 'bin'),
+    ...(process.platform !== 'win32' ? ['/usr/local/bin', '/usr/bin'] : []),
   ];
+  for (const envVar of ['FFMPEG_PATH', 'FFPROBE_PATH', 'YTDLP_PATH', 'DENO_PATH']) {
+    const val = env[envVar]?.trim();
+    if (val && path.isAbsolute(val)) {
+      candidateDirs.unshift(path.dirname(val));
+    }
+  }
   const existingPath = env.PATH || env.Path || '';
-  env.PATH = `${customPaths.join(';')};${existingPath}`;
-  env.Path = env.PATH;
+  const merged = [...candidateDirs, ...existingPath.split(path.delimiter)]
+    .map((entry) => entry.trim())
+    .filter((entry, idx, arr) => entry.length > 0 && arr.indexOf(entry) === idx)
+    .join(path.delimiter);
+  env.PATH = merged;
+  if (process.platform === 'win32') {
+    env.Path = merged;
+  }
   return env;
 }
+
+function resolveExecutable(envVar: string, defaultCommand: string): string {
+  const configured = process.env[envVar]?.trim();
+  if (configured) {
+    if (path.isAbsolute(configured) && fs.existsSync(configured)) {
+      return configured;
+    }
+    return configured;
+  }
+  const searchDirs = (getExecutionEnv().PATH || '').split(path.delimiter).filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? ['', '.exe', '.cmd', '.bat']
+    : [''];
+  for (const dir of searchDirs) {
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${defaultCommand}${ext}`);
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // continue scanning $PATH
+      }
+    }
+  }
+  return defaultCommand;
+}
+
+const FFMPEG_BIN = resolveExecutable('FFMPEG_PATH', 'ffmpeg');
+const YTDLP_BIN = resolveExecutable('YTDLP_PATH', 'yt-dlp');
 
 /**
  * Resolves local artifact file paths ensuring compatible directory structures
@@ -134,6 +185,302 @@ export async function probeInputMedia(
   };
 }
 
+function resolveLocalUploadOrStorage(sessionId?: string, storageKey?: string): string | undefined {
+  if (storageKey) {
+    if (fs.existsSync(storageKey)) {
+      return storageKey;
+    }
+    const { directPath, artifactPath } = getStorageArtifactPath(storageKey);
+    if (fs.existsSync(directPath)) return directPath;
+    if (fs.existsSync(artifactPath)) return artifactPath;
+  }
+  if (sessionId) {
+    const uploadCandidates = [
+      path.resolve(process.cwd(), '.muxaro-uploads', sessionId),
+      path.resolve(process.cwd(), 'storage/uploads', sessionId),
+      path.resolve(os.tmpdir(), sessionId),
+    ];
+    for (const dir of uploadCandidates) {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter((f) => !f.startsWith('part_'));
+        if (files.length > 0) {
+          return path.join(dir, files[0]);
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function getCookieFileCandidates(): string[] {
+  return [
+    process.env.YTDLP_COOKIES_FILE,
+    process.env.YTDLP_COOKIES_PATH,
+    path.resolve(process.cwd(), '.muxaro-data', 'cookies.txt'),
+    path.resolve(process.cwd(), 'storage', 'cookies.txt'),
+    path.resolve(os.tmpdir(), 'muxaro-data', 'cookies.txt'),
+  ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
+}
+
+function resolveWorkerEgressArgs(egressProfileId?: string): string[] {
+  const args: string[] = ['--js-runtimes', 'deno', '--js-runtimes', 'node', '--no-warnings'];
+  let matchedProfile: {
+    proxyUrl?: string;
+    playerClients?: string;
+    bgutilUrl?: string;
+    poToken?: string;
+    visitorData?: string;
+    cookiesPath?: string;
+    forceIpVersion?: '4' | '6' | 'auto';
+  } | null = null;
+
+  const jsonEnv = process.env.MUXARO_EGRESS_PROFILES_JSON?.trim();
+  if (jsonEnv) {
+    try {
+      const profiles = JSON.parse(jsonEnv);
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        matchedProfile =
+          (egressProfileId ? profiles.find((p: any) => p?.id === egressProfileId) : null) || profiles[0];
+      }
+    } catch {
+      // ignore malformed JSON
+    }
+  }
+
+  const playerClients = (matchedProfile?.playerClients || process.env.YTDLP_PLAYER_CLIENTS || 'ios,android,tv,mweb,web').trim();
+  const poToken = (matchedProfile?.poToken || process.env.YTDLP_PO_TOKEN || '').trim();
+  const visitorData = (matchedProfile?.visitorData || process.env.YTDLP_VISITOR_DATA || '').trim();
+  let ytArg = `youtube:player_client=${playerClients}`;
+  if (poToken) {
+    const formatted = /^[a-zA-Z0-9_]+[+]/.test(poToken) ? poToken : `web+${poToken}`;
+    ytArg += `;po_token=${formatted}${visitorData ? `+${visitorData}` : ''}`;
+  }
+  args.push('--extractor-args', ytArg);
+
+  const bgutilUrl = (
+    matchedProfile?.bgutilUrl ||
+    process.env.BGUTIL_BASE_URL ||
+    process.env.YTDLP_BGUTIL_URL ||
+    process.env.POT_PROVIDER_URL ||
+    ''
+  ).trim();
+  if (bgutilUrl) {
+    args.push('--extractor-args', `youtubepot-bgutilhttp:base_url=${bgutilUrl}`);
+  }
+
+  const proxy = (
+    matchedProfile?.proxyUrl ||
+    process.env.YTDLP_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.HTTP_PROXY ||
+    ''
+  ).trim();
+  if (proxy) {
+    args.push('--proxy', proxy);
+  }
+
+  if (matchedProfile?.forceIpVersion === '4') {
+    args.push('--force-ipv4');
+  } else if (matchedProfile?.forceIpVersion === '6') {
+    args.push('--force-ipv6');
+  }
+
+  const explicitCookie = matchedProfile?.cookiesPath;
+  if (explicitCookie && fs.existsSync(explicitCookie)) {
+    args.push('--cookies', explicitCookie);
+  } else {
+    const cookies = getCookieFileCandidates();
+    if (cookies.length > 0) {
+      args.push('--cookies', cookies[0]);
+    }
+  }
+
+  return args;
+}
+
+function selectYtDlpFormatArgs(
+  sourceUrl: string,
+  opts: { isAudioOnly?: boolean; targetResolution?: string; targetExt?: ContainerFormat; formatId?: string }
+): string[] {
+  if (opts.formatId) {
+    return ['-f', opts.formatId, '--merge-output-format', 'mkv'];
+  }
+  if (opts.isAudioOnly) {
+    return ['-f', 'ba/b'];
+  }
+  const res = opts.targetResolution || '';
+  const is8K = /^(?:8k|4320p?)/i.test(res) || res.includes('4320');
+  const is4K = /^(?:4k|2160p?)/i.test(res) || res.includes('2160');
+  const is1440 = /^(?:2k|1440p?)/i.test(res) || res.includes('1440');
+  const isRedditOrFacebook = /(?:reddit\.com|redd\.it|facebook\.com|fb\.watch)/i.test(sourceUrl);
+
+  if (is8K) {
+    const format8k = opts.targetExt === 'mp4'
+      ? 'bestvideo[height>=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best'
+      : 'bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best';
+    return ['-f', format8k, '--merge-output-format', 'mkv', '--buffer-size', '32M', '--http-chunk-size', '10M'];
+  }
+  if (is4K || isRedditOrFacebook) {
+    const format4k = opts.targetExt === 'mp4'
+      ? 'bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/bestvideo+bestaudio/best'
+      : 'bestvideo[height<=2160]+bestaudio/bestvideo+bestaudio/best';
+    return ['-f', format4k, '--merge-output-format', 'mkv', '--buffer-size', '16M'];
+  }
+  if (is1440) {
+    return ['-f', 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best', '--merge-output-format', 'mkv', '--buffer-size', '16M'];
+  }
+  const heightMatch = res.match(/(\d{3,4})/);
+  const maxHeight = heightMatch ? Math.min(4320, Math.max(144, Number.parseInt(heightMatch[1], 10))) : 1080;
+  return [
+    '-f',
+    `bv*[height<=${maxHeight}]+ba/b[height<=${maxHeight}]/best`,
+    '--merge-output-format',
+    'mkv',
+  ];
+}
+
+async function downloadRemoteMediaToTempDir(
+  rawUrl: string,
+  workDir: string,
+  baseName: string,
+  opts: {
+    isAudioOnly?: boolean;
+    targetResolution?: string;
+    targetExt?: ContainerFormat;
+    formatId?: string;
+    allowPlaylist?: boolean;
+    egressProfileId?: string;
+    signal?: AbortSignal;
+  }
+): Promise<string> {
+  const safeInfo = await assertSafeMediaUrl(rawUrl);
+  const safeUrl = safeInfo.canonicalUrl || rawUrl;
+
+  const ytdlpArgs: string[] = [
+    '-q',
+    ...resolveWorkerEgressArgs(opts.egressProfileId),
+  ];
+
+  if (!opts.allowPlaylist && !safeInfo.isPlaylist) {
+    ytdlpArgs.push('--no-playlist');
+  }
+
+  const resolvedFfmpeg = resolveExecutable('FFMPEG_PATH', 'ffmpeg');
+  if (path.isAbsolute(resolvedFfmpeg)) {
+    ytdlpArgs.push('--ffmpeg-location', path.dirname(resolvedFfmpeg));
+  }
+
+  ytdlpArgs.push(...selectYtDlpFormatArgs(safeUrl, opts));
+  const template = path.join(workDir, `${baseName}.%(ext)s`);
+  ytdlpArgs.push('-o', template, '--', safeUrl);
+
+  const ytdlpBin = resolveExecutable('YTDLP_PATH', 'yt-dlp');
+  await new Promise<void>((resolve, reject) => {
+    let stderr = '';
+    const child = spawn(ytdlpBin, ytdlpArgs, {
+      shell: false,
+      windowsHide: true,
+      env: getExecutionEnv(),
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+
+    const onAbort = () => {
+      try {
+        if (process.platform === 'win32' && child.pid) {
+          spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], { shell: false, windowsHide: true });
+        } else {
+          child.kill('SIGTERM');
+        }
+      } catch {}
+    };
+
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        onAbort();
+        return reject(new MuxaroError('Job cancelled by client', 'CANCELLED', 499));
+      }
+      opts.signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf-8')).slice(-8192);
+    });
+    child.on('error', (err) => {
+      opts.signal?.removeEventListener('abort', onAbort);
+      reject(new MuxaroError(`yt-dlp spawn failed: ${err.message}`, 'INTERNAL_ERROR', 500));
+    });
+    child.on('close', (code) => {
+      opts.signal?.removeEventListener('abort', onAbort);
+      if (opts.signal?.aborted) {
+        return reject(new MuxaroError('Job cancelled by client', 'CANCELLED', 499));
+      }
+      if (code === 0) {
+        return resolve();
+      }
+      if (StreamPipeline.isAgeRestricted(stderr)) {
+        return reject(
+          new MuxaroError(
+            'This YouTube video is age-restricted and requires sign-in. Please use a public video or direct media URL.',
+            'UNPROCESSABLE_ENTITY',
+            422
+          )
+        );
+      }
+      const cleanErr = StreamPipeline.extractYtDlpErrorMessage(stderr);
+      reject(new MuxaroError(`yt-dlp exited with code ${code}: ${cleanErr}`, 'EXTRACTION_FAILED', 502));
+    });
+  });
+
+  const produced = fs.readdirSync(workDir)
+    .filter((f) => f.startsWith(`${baseName}.`) && !f.endsWith('.part') && !f.endsWith('.ytdl'))
+    .map((f) => path.join(workDir, f));
+
+  if (produced.length === 0) {
+    throw new MuxaroError(`yt-dlp produced no output file for ${baseName}`, 'EXTRACTION_FAILED', 502);
+  }
+  return validateSandboxPath(produced[0]);
+}
+
+function parseResolutionDimensions(targetResolution?: string, fallbackWidth = 1280, fallbackHeight = 720): { width: number; height: number } {
+  if (!targetResolution) {
+    return {
+      width: fallbackWidth % 2 === 0 ? fallbackWidth : fallbackWidth + 1,
+      height: fallbackHeight % 2 === 0 ? fallbackHeight : fallbackHeight + 1,
+    };
+  }
+  const r = targetResolution.toLowerCase();
+  if (r.includes('8k') || r.includes('4320')) return { width: 7680, height: 4320 };
+  if (r.includes('4k') || r.includes('2160')) return { width: 3840, height: 2160 };
+  if (r.includes('1440') || r.includes('2k')) return { width: 2560, height: 1440 };
+  if (r.includes('1080')) return { width: 1920, height: 1080 };
+  if (r.includes('720')) return { width: 1280, height: 720 };
+  if (r.includes('480')) return { width: 854, height: 480 };
+  if (r.includes('360')) return { width: 640, height: 360 };
+  const m = r.match(/(\d{3,4})/);
+  if (m) {
+    const h = Math.min(4320, Math.max(144, Number.parseInt(m[1], 10)));
+    const w = Math.round((h * 16) / 9);
+    return { width: w % 2 === 0 ? w : w + 1, height: h % 2 === 0 ? h : h + 1 };
+  }
+  return { width: 1280, height: 720 };
+}
+
+function getContainerOutputArgs(targetExt: ContainerFormat): string[] {
+  if (targetExt === 'mp4') {
+    return ['-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof'];
+  }
+  if (targetExt === 'mov') {
+    return ['-f', 'mov', '-movflags', 'frag_keyframe+empty_moov+default_base_moof'];
+  }
+  if (targetExt === 'webm') {
+    return ['-f', 'webm'];
+  }
+  if (targetExt === 'mkv') {
+    return ['-f', 'matroska'];
+  }
+  return ['-f', targetExt];
+}
+
 // =============================================================================
 // 3. ZERO-COPY STREAM PIPELINE RUNNER
 // =============================================================================
@@ -145,201 +492,450 @@ export class StreamPipeline {
    */
   public static async execute(options: StreamPipelineOptions): Promise<PipelineProcessingResult> {
     const startTime = Date.now();
-    const { job, signal } = options;
+    const job = options.job as ExtendedMediaJobPayload;
+    const { signal } = options;
     const s3Client = options.s3Client || getS3Client();
     const bucketName = options.bucketName || getR2BucketName();
     const redis = options.redisClient || getMuxaroRedis();
 
-    // 1. Resolve input source: URL, uploaded storage key, or readable stream
-    const isExplicitStream = Boolean(options.inputStream);
-    let inputSource = job.sourceUrl || job.inputStorageKey || '';
-    if (!inputSource && job.uploadSessionId) {
-      const uploadCandidates = [
-        path.resolve(process.cwd(), '.muxaro-uploads', job.uploadSessionId),
-        path.resolve(process.cwd(), 'storage/uploads', job.uploadSessionId),
-        path.resolve(os.tmpdir(), job.uploadSessionId),
-      ];
-      for (const dir of uploadCandidates) {
-        if (fs.existsSync(dir)) {
-          const files = fs.readdirSync(dir);
-          if (files.length > 0) {
-            inputSource = path.join(dir, files[0]);
-            break;
-          }
-        }
-      }
-    }
-    if (!inputSource && !isExplicitStream) {
-      throw new MuxaroError('No source URL, input storage key, or stream provided', 'BAD_REQUEST', 400);
-    }
-
-    const isRemoteUrl = !isExplicitStream && (Boolean(job.sourceUrl) || /^https?:\/\//i.test(inputSource));
     const targetExt = (job.targetFormat || 'mp4').toLowerCase() as ContainerFormat;
-    let isPipedInput = isExplicitStream;
-    let upstreamChild: ChildProcess | null = null;
-    let upstreamStderr = '';
-    let upstreamError: Error | null = null;
-    let inputStream: Readable | undefined = options.inputStream;
+    const isExplicitStream = Boolean(options.inputStream);
+    const clipUrls = Array.isArray(job.clipUrls) ? job.clipUrls.map((u) => String(u || '').trim()).filter(Boolean) : [];
+    const isConcatMode = !isExplicitStream && (job.operation === 'CONCAT_VIDEO' || clipUrls.length >= 2);
+    const secondaryAudioUrl = job.secondaryAudioUrl || job.audioUrl;
+    const secondaryAudioSessionId = job.secondaryAudioSessionId || job.audioAssetId;
+    const isDualTrackMerge =
+      !isExplicitStream &&
+      !isConcatMode &&
+      (job.tool === 'merge_av' || job.operation === 'MERGE_AUDIO_VIDEO') &&
+      Boolean(secondaryAudioUrl || secondaryAudioSessionId || job.secondaryAudioStorageKey);
 
-    if (isRemoteUrl) {
-      // 1a. SSRF defense via URL guard
-      const safeInfo = await assertSafeMediaUrl(inputSource);
-      inputSource = safeInfo.canonicalUrl || inputSource;
+    let tempWorkDir: string | null = null;
+    const cleanupTempDir = () => {
+      if (tempWorkDir) {
+        try {
+          fs.rmSync(tempWorkDir, { recursive: true, force: true });
+        } catch {}
+        tempWorkDir = null;
+      }
+    };
 
-      const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(inputSource);
+    try {
+      const storageKey = `outputs/${job.retentionTier}/${job.jobId}.${targetExt}`;
+      const outputFilename = `${job.title ? sanitizeFilename(job.title) : job.jobId}.${targetExt}`;
+      const mimeType = CONTAINER_MIME_TYPES[targetExt] || 'application/octet-stream';
 
-      // 1b. Spawn yt-dlp in streaming mode (--js-runtimes deno,node -q --no-warnings -o -)
-      const ytdlpArgs = [
-        '--js-runtimes', 'deno,node',
-        '-q',
-        '--no-warnings',
-        '--force-ipv4',
-      ];
-
-      const cookieCandidates = [
-        process.env.YTDLP_COOKIES_FILE,
-        path.resolve(process.cwd(), '.muxaro-data', 'cookies.txt'),
-        path.resolve(process.cwd(), 'storage', 'cookies.txt'),
-        path.resolve(os.tmpdir(), 'muxaro-data', 'cookies.txt'),
-      ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
-
-      if (cookieCandidates.length > 0) {
-        ytdlpArgs.push('--cookies', cookieCandidates[0]);
+      let inputSource = job.sourceUrl || job.videoUrl || job.inputStorageKey || '';
+      if (!inputSource && (job.uploadSessionId || job.videoAssetId)) {
+        inputSource = resolveLocalUploadOrStorage(job.uploadSessionId || job.videoAssetId) || '';
       }
 
-      if (!safeInfo.isPlaylist && job.tool !== 'batch_playlist') {
-        ytdlpArgs.push('--no-playlist');
+      if (!isConcatMode && !inputSource && !isExplicitStream) {
+        throw new MuxaroError('No source URL, input storage key, or stream provided', 'BAD_REQUEST', 400);
       }
-      const isRedditOrFacebook = /(?:reddit\.com|redd\.it|facebook\.com|fb\.watch)/i.test(inputSource);
-      const is8K = Boolean(
-        (job.targetResolution && /^(?:8k|4320p?)/i.test(job.targetResolution)) ||
-        (job.targetResolution && job.targetResolution.includes('4320'))
-      );
-      const is4K = Boolean(
-        (job.targetResolution && /^(?:4k|2160p?)/i.test(job.targetResolution)) ||
-        (job.targetResolution && job.targetResolution.includes('2160'))
-      );
 
-      if (job.tool === 'extract_audio') {
-        ytdlpArgs.push('-f', 'ba/b');
-      } else if (is8K) {
-        // Enforce 8K Lossless Remuxing Rules: Pair best 8K video stream with best audio
-        const format8k = targetExt === 'mp4'
-          ? 'bestvideo[height>=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best'
-          : 'bestvideo[height>=4320]+bestaudio/bestvideo[height<=4320]+bestaudio/bestvideo+bestaudio/best';
-        ytdlpArgs.push(
-          '-f', format8k,
-          '--merge-output-format', 'mkv',
-          '--buffer-size', '32M',
-          '--http-chunk-size', '10M'
-        );
-      } else if (isRedditOrFacebook || is4K) {
-        // Enforce 4K Lossless Remuxing Rules: Reddit/Facebook HD & 4K: bestvideo+bestaudio/best so audio is never dropped
-        ytdlpArgs.push(
-          '-f', 'bestvideo+bestaudio/best',
-          '--merge-output-format', 'mkv',
-          '--buffer-size', '16M'
-        );
-      } else {
-        ytdlpArgs.push('-f', 'bv*[height<=1080]+ba/b[height<=1080]/best');
-      }
-      ytdlpArgs.push('-o', '-', inputSource);
+      const isRemoteUrl = !isExplicitStream && !isConcatMode && (Boolean(job.sourceUrl || job.videoUrl) || /^https?:\/\//i.test(inputSource));
+      let isPipedInput = isExplicitStream;
+      let upstreamChild: ChildProcess | null = null;
+      let upstreamStderr = '';
+      let upstreamError: Error | null = null;
+      let inputStream: Readable | undefined = options.inputStream;
+      let durationSeconds = job.totalDurationSeconds || 0;
+      let plan: EcoEnforcementPlan;
+      let savings: EcoSavingsEstimate;
+      let ffmpegArgs: string[];
 
-      upstreamChild = spawn(YTDLP_BIN, ytdlpArgs, {
-        shell: false,
-        windowsHide: true,
-        env: getExecutionEnv(),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      if (isConcatMode) {
+        if (clipUrls.length < 2) {
+          throw new MuxaroError('CONCAT_VIDEO requires at least 2 clipUrls', 'BAD_REQUEST', 400);
+        }
 
-      upstreamChild.stdout?.on('error', () => {});
-      upstreamChild.stderr?.on('error', () => {});
-      upstreamChild.stdin?.on('error', () => {});
+        tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `muxaro-concat-${job.jobId}-`));
+        const clipFiles: string[] = [];
+        const clipProbes: ProbedMediaMetadata[] = [];
 
-      upstreamChild.stderr?.on('data', (d: Buffer) => {
-        const text = d.toString('utf-8');
-        upstreamStderr = (upstreamStderr + text).slice(-8192);
-      });
-
-      upstreamChild.on('error', (err) => {
-        upstreamError = new MuxaroError(`yt-dlp spawn failed: ${err.message}`, 'INTERNAL_ERROR', 500);
-        terminateChild('yt-dlp spawn error');
-      });
-
-      upstreamChild.on('close', (code) => {
-        if (code !== 0 && !isTerminated) {
-          if (StreamPipeline.isAgeRestricted(upstreamStderr)) {
-            upstreamError = new MuxaroError(
-              'This YouTube video is age-restricted and requires sign-in. Please use a public video or direct media URL.',
-              'UNPROCESSABLE_ENTITY',
-              422
-            );
+        for (let i = 0; i < clipUrls.length; i++) {
+          const clip = clipUrls[i];
+          let localClip: string;
+          if (/^https?:\/\//i.test(clip)) {
+            localClip = await downloadRemoteMediaToTempDir(clip, tempWorkDir, `clip_${i}`, {
+              targetResolution: job.targetResolution,
+              targetExt,
+              formatId: job.formatId,
+              signal,
+            });
           } else {
-            const cleanErr = StreamPipeline.extractYtDlpErrorMessage(upstreamStderr);
-            upstreamError = new MuxaroError(`yt-dlp exited with code ${code}: ${cleanErr}`, 'EXTRACTION_FAILED', 502);
+            const resolved = resolveLocalUploadOrStorage(undefined, clip) || clip;
+            localClip = validateSandboxPath(resolved);
           }
-          terminateChild(`yt-dlp exited with code ${code}`);
+          clipFiles.push(localClip);
+          const clipProbe = await probeInputMedia(localClip).catch(() => ({ durationSeconds: 0 }));
+          clipProbes.push(clipProbe);
+          durationSeconds += clipProbe.durationSeconds || 0;
         }
-      });
 
-      if (upstreamChild.stdout) {
-        inputStream = upstreamChild.stdout as Readable;
-        isPipedInput = true;
-      }
-    } else if (!isPipedInput) {
-      if (!fs.existsSync(inputSource)) {
-        const { directPath } = getStorageArtifactPath(inputSource);
-        if (fs.existsSync(directPath)) {
-          inputSource = directPath;
-        }
-      }
-      // Only call validateSandboxPath for local file paths!
-      inputSource = validateSandboxPath(inputSource);
-    }
+        const firstProbe = clipProbes[0] || { durationSeconds: 0 };
+        const uniformCodecs = clipProbes.every(
+          (p) =>
+            p.video?.codec &&
+            p.video.codec === firstProbe.video?.codec &&
+            p.video.width === firstProbe.video?.width &&
+            p.video.height === firstProbe.video?.height &&
+            Boolean(p.audio?.codec) === Boolean(firstProbe.audio?.codec) &&
+            (!p.audio?.codec || p.audio.codec === firstProbe.audio?.codec)
+        );
+        const canStreamCopyConcat =
+          uniformCodecs &&
+          job.ecoMode !== false &&
+          job.streamCopy !== false &&
+          !job.targetResolution &&
+          !job.normalizeAudio &&
+          Boolean(
+            firstProbe.video &&
+            EcoModeEngine.planExecution(job, firstProbe).isStreamCopy
+          );
 
-    // 2. Run FFprobe on source to extract stream topology & codecs
-    let probe: ProbedMediaMetadata;
-    if (isPipedInput) {
-      probe = {
-        durationSeconds: job.totalDurationSeconds || 0,
-        video: job.videoCodec ? {
-          codec: job.videoCodec,
-          width: 0,
-          height: job.targetResolution ? (Number.parseInt(job.targetResolution.replace(/[^\d]/g, ''), 10) || 0) : 0,
-        } : undefined,
-        audio: job.audioCodec ? {
-          codec: job.audioCodec,
-        } : undefined,
-      };
-    } else {
-      try {
-        probe = await probeInputMedia(inputSource);
-      } catch (probeErr) {
-        // If direct probing fails on a remote URL, fallback to minimal duration or throw
-        if (job.totalDurationSeconds && job.totalDurationSeconds > 0) {
-          probe = { durationSeconds: job.totalDurationSeconds };
+        const is8K = Boolean(
+          (job.targetResolution && /^(?:8k|4320p?)/i.test(job.targetResolution)) ||
+          (firstProbe.video?.height && firstProbe.video.height >= 4320)
+        );
+        const containerFlags = getContainerOutputArgs(targetExt);
+
+        if (canStreamCopyConcat) {
+          const concatManifestPath = path.join(tempWorkDir, 'concat.txt');
+          const manifestLines = clipFiles.map((f) => {
+            const normalized = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
+            return `file '${normalized}'`;
+          });
+          fs.writeFileSync(concatManifestPath, manifestLines.join('\n'), 'utf8');
+
+          ffmpegArgs = [
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-progress', 'pipe:2',
+            '-nostdin',
+            '-threads', '4',
+            '-protocol_whitelist', 'file,pipe',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concatManifestPath,
+            '-c', 'copy',
+            ...containerFlags,
+            '-t', '14400',
+            '-fs', is8K ? '34359738368' : '4294967296',
+            'pipe:1',
+          ];
+
+          plan = {
+            isStreamCopy: true,
+            action: 'STREAM_COPY_REMUX',
+            scaleCapApplied: false,
+            targetResolution: job.targetResolution,
+            ffmpegVideoArgs: ['-c:v', 'copy'],
+            ffmpegAudioArgs: ['-c:a', 'copy'],
+            ffmpegFilterArgs: [],
+            ffmpegFormatArgs: containerFlags,
+            reason: 'Zero-Copy Multi-Clip Concat',
+          };
         } else {
-          probe = { durationSeconds: 0 };
+          const dims = parseResolutionDimensions(
+            job.targetResolution,
+            firstProbe.video?.width || 1280,
+            firstProbe.video?.height || 720
+          );
+          const filterInputs: string[] = [];
+          const filterChains: string[] = [];
+          const concatRefs: string[] = [];
+
+          for (let i = 0; i < clipFiles.length; i++) {
+            filterInputs.push('-i', clipFiles[i]);
+            filterChains.push(
+              `[${i}:v:0]scale=${dims.width}:${dims.height}:force_original_aspect_ratio=decrease,` +
+              `pad=${dims.width}:${dims.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30,format=yuv420p[v${i}]`
+            );
+            if (clipProbes[i]?.audio) {
+              filterChains.push(
+                `[${i}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`
+              );
+            } else {
+              const clipDur = Math.max(0.1, clipProbes[i]?.durationSeconds || 1);
+              filterChains.push(
+                `anullsrc=channel_layout=stereo:sample_rate=48000:duration=${clipDur.toFixed(3)}[a${i}]`
+              );
+            }
+            concatRefs.push(`[v${i}][a${i}]`);
+          }
+
+          filterChains.push(`${concatRefs.join('')}concat=n=${clipFiles.length}:v=1:a=1[outv][cat_a]`);
+          const audioOutLabel = job.normalizeAudio ? '[outa]' : '[cat_a]';
+          if (job.normalizeAudio) {
+            filterChains.push('[cat_a]loudnorm=I=-14:TP=-1.5:LRA=11[outa]');
+          }
+
+          const videoEncodeArgs = targetExt === 'webm'
+            ? ['-c:v', 'libvpx-vp9', '-crf', '30', '-b:v', '0']
+            : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p'];
+          const audioEncodeArgs = targetExt === 'webm'
+            ? ['-c:a', 'libopus', '-b:a', job.audioBitrate || '128k']
+            : ['-c:a', 'aac', '-b:a', job.audioBitrate || '192k'];
+
+          ffmpegArgs = [
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-progress', 'pipe:2',
+            '-nostdin',
+            '-threads', '4',
+            '-protocol_whitelist', 'file,pipe',
+            ...filterInputs,
+            '-filter_complex', filterChains.join(';'),
+            '-map', '[outv]',
+            '-map', audioOutLabel,
+            ...videoEncodeArgs,
+            ...audioEncodeArgs,
+            ...containerFlags,
+            '-t', '14400',
+            '-fs', is8K ? '34359738368' : '4294967296',
+            'pipe:1',
+          ];
+
+          plan = {
+            isStreamCopy: false,
+            action: 'OPTIMIZED_TRANSCODE',
+            scaleCapApplied: Boolean(job.targetResolution),
+            targetResolution: job.targetResolution,
+            targetWidth: dims.width,
+            targetHeight: dims.height,
+            presetUsed: targetExt === 'webm' ? 'vp9' : 'veryfast',
+            ffmpegVideoArgs: videoEncodeArgs,
+            ffmpegAudioArgs: audioEncodeArgs,
+            ffmpegFilterArgs: [],
+            ffmpegFormatArgs: containerFlags,
+            reason: 'Multi-Clip Filter Concat',
+          };
         }
+        savings = EcoModeEngine.estimateSavings(plan, durationSeconds);
+      } else if (isDualTrackMerge) {
+        tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `muxaro-merge-${job.jobId}-`));
+
+        let localVideoPath: string;
+        if (isRemoteUrl) {
+          localVideoPath = await downloadRemoteMediaToTempDir(inputSource, tempWorkDir, 'video_src', {
+            targetResolution: job.targetResolution,
+            targetExt,
+            formatId: job.formatId,
+            signal,
+          });
+        } else {
+          const resolvedVideo = resolveLocalUploadOrStorage(job.uploadSessionId || job.videoAssetId, inputSource) || inputSource;
+          localVideoPath = validateSandboxPath(resolvedVideo);
+        }
+
+        let localAudioPath: string;
+        if (secondaryAudioUrl && /^https?:\/\//i.test(secondaryAudioUrl)) {
+          localAudioPath = await downloadRemoteMediaToTempDir(secondaryAudioUrl, tempWorkDir, 'audio_src', {
+            isAudioOnly: true,
+            signal,
+          });
+        } else {
+          const resolvedAudio = resolveLocalUploadOrStorage(
+            secondaryAudioSessionId,
+            job.secondaryAudioStorageKey
+          );
+          if (!resolvedAudio) {
+            throw new MuxaroError('Secondary audio input not found for A/V merge', 'BAD_REQUEST', 400);
+          }
+          localAudioPath = validateSandboxPath(resolvedAudio);
+        }
+
+        const videoProbe: ProbedMediaMetadata = await probeInputMedia(localVideoPath).catch(() => ({ durationSeconds: 0 }));
+        const audioProbe: ProbedMediaMetadata = await probeInputMedia(localAudioPath).catch(() => ({ durationSeconds: 0 }));
+        durationSeconds = durationSeconds || videoProbe.durationSeconds || audioProbe.durationSeconds || 0;
+
+        const basePlan = EcoModeEngine.planExecution(job, {
+          ...videoProbe,
+          audio: audioProbe.audio,
+        });
+        const containerFlags = getContainerOutputArgs(targetExt);
+        const offsetSeconds = (job.audioOffsetMs || 0) / 1000;
+
+        const videoArgs = job.ecoMode !== false && job.streamCopy !== false && !job.targetResolution && basePlan.isStreamCopy
+          ? ['-c:v', 'copy']
+          : basePlan.ffmpegVideoArgs;
+
+        const audioFilters: string[] = [];
+        if (job.normalizeAudio) {
+          audioFilters.push('loudnorm=I=-14:TP=-1.5:LRA=11');
+        }
+        const canCopyAudio =
+          !job.normalizeAudio &&
+          audioProbe.audio?.codec &&
+          ((targetExt === 'mp4' || targetExt === 'mov') ? ['aac', 'alac'].includes(audioProbe.audio.codec) :
+            targetExt === 'webm' ? ['opus', 'vorbis'].includes(audioProbe.audio.codec) : true);
+        const audioArgs = canCopyAudio
+          ? ['-c:a', 'copy']
+          : targetExt === 'webm'
+          ? ['-c:a', 'libopus', '-b:a', job.audioBitrate || '128k']
+          : ['-c:a', 'aac', '-b:a', job.audioBitrate || '192k'];
+
+        const is8K = Boolean(
+          (job.targetResolution && /^(?:8k|4320p?)/i.test(job.targetResolution)) ||
+          (videoProbe.video?.height && videoProbe.video.height >= 4320)
+        );
+
+        ffmpegArgs = [
+          '-hide_banner',
+          '-loglevel', 'error',
+          '-progress', 'pipe:2',
+          '-nostdin',
+          '-threads', '4',
+          '-protocol_whitelist', 'file,pipe',
+          '-i', localVideoPath,
+          ...(offsetSeconds !== 0 ? ['-itsoffset', offsetSeconds.toFixed(3)] : []),
+          '-i', localAudioPath,
+          '-map', '0:v:0',
+          '-map', '1:a:0',
+          ...videoArgs,
+          ...audioArgs,
+          ...(audioFilters.length > 0 ? ['-af', audioFilters.join(',')] : []),
+          ...basePlan.ffmpegFilterArgs,
+          ...containerFlags,
+          '-t', '14400',
+          '-fs', is8K ? '34359738368' : '4294967296',
+          'pipe:1',
+        ];
+
+        const streamCopyBoth = videoArgs[1] === 'copy' && audioArgs[1] === 'copy';
+        plan = {
+          ...basePlan,
+          isStreamCopy: streamCopyBoth,
+          action: streamCopyBoth ? 'STREAM_COPY_REMUX' : 'OPTIMIZED_TRANSCODE',
+          ffmpegFormatArgs: containerFlags,
+          reason: 'Dual-Track A/V Mux',
+        };
+        savings = EcoModeEngine.estimateSavings(plan, durationSeconds);
+      } else {
+        if (isRemoteUrl) {
+          const safeInfo = await assertSafeMediaUrl(inputSource);
+          inputSource = safeInfo.canonicalUrl || inputSource;
+
+          const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(inputSource);
+          const isAdaptiveHighRes = Boolean(
+            isYouTube ||
+            (job.targetResolution && /^(?:1080p?|1440p?|2k|4k|2160p?|8k|4320p?)/i.test(job.targetResolution)) ||
+            (job.formatId && job.formatId.includes('+'))
+          );
+
+          if (isAdaptiveHighRes && job.tool !== 'extract_audio') {
+            // Adaptive DASH streams (YouTube 1080p/1440p/4K/8K) require yt-dlp on-disk video+audio muxing before FFmpeg pipe
+            tempWorkDir = fs.mkdtempSync(path.join(os.tmpdir(), `muxaro-job-${job.jobId}-`));
+            inputSource = await downloadRemoteMediaToTempDir(inputSource, tempWorkDir, 'source', {
+              targetResolution: job.targetResolution,
+              targetExt,
+              formatId: job.formatId,
+              allowPlaylist: job.tool === 'batch_playlist',
+              egressProfileId: job.egressProfileId,
+              signal,
+            });
+            isPipedInput = false;
+          } else {
+            const ytdlpArgs = [
+              '-q',
+              ...resolveWorkerEgressArgs(job.egressProfileId),
+            ];
+            if (!safeInfo.isPlaylist && job.tool !== 'batch_playlist') {
+              ytdlpArgs.push('--no-playlist');
+            }
+
+            ytdlpArgs.push(...selectYtDlpFormatArgs(inputSource, {
+              isAudioOnly: job.tool === 'extract_audio',
+              targetResolution: job.targetResolution,
+              targetExt,
+              formatId: job.formatId,
+            }));
+            ytdlpArgs.push('-o', '-', '--', inputSource);
+
+            upstreamChild = spawn(YTDLP_BIN, ytdlpArgs, {
+              shell: false,
+              windowsHide: true,
+              env: getExecutionEnv(),
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            upstreamChild.stdout?.on('error', () => {});
+            upstreamChild.stderr?.on('error', () => {});
+            upstreamChild.stdin?.on('error', () => {});
+
+            upstreamChild.stderr?.on('data', (d: Buffer) => {
+              const text = d.toString('utf-8');
+              upstreamStderr = (upstreamStderr + text).slice(-8192);
+            });
+
+            upstreamChild.on('error', (err) => {
+              upstreamError = new MuxaroError(`yt-dlp spawn failed: ${err.message}`, 'INTERNAL_ERROR', 500);
+              terminateChild('yt-dlp spawn error');
+            });
+
+            upstreamChild.on('close', (code) => {
+              if (code !== 0 && !isTerminated) {
+                if (StreamPipeline.isAgeRestricted(upstreamStderr)) {
+                  upstreamError = new MuxaroError(
+                    'This YouTube video is age-restricted and requires sign-in. Please use a public video or direct media URL.',
+                    'UNPROCESSABLE_ENTITY',
+                    422
+                  );
+                } else {
+                  const cleanErr = StreamPipeline.extractYtDlpErrorMessage(upstreamStderr);
+                  upstreamError = new MuxaroError(`yt-dlp exited with code ${code}: ${cleanErr}`, 'EXTRACTION_FAILED', 502);
+                }
+                terminateChild(`yt-dlp exited with code ${code}`);
+              }
+            });
+
+            if (upstreamChild.stdout) {
+              inputStream = upstreamChild.stdout as Readable;
+              isPipedInput = true;
+            }
+          }
+        } else if (!isPipedInput) {
+          if (!fs.existsSync(inputSource)) {
+            const { directPath } = getStorageArtifactPath(inputSource);
+            if (fs.existsSync(directPath)) {
+              inputSource = directPath;
+            }
+          }
+          inputSource = validateSandboxPath(inputSource);
+        }
+
+        // 2. Run FFprobe on source to extract stream topology & codecs
+        let probe: ProbedMediaMetadata;
+        if (isPipedInput) {
+          probe = {
+            durationSeconds: job.totalDurationSeconds || 0,
+            video: job.videoCodec ? {
+              codec: job.videoCodec,
+              width: 0,
+              height: job.targetResolution ? (Number.parseInt(job.targetResolution.replace(/[^\d]/g, ''), 10) || 0) : 0,
+            } : undefined,
+            audio: job.audioCodec ? {
+              codec: job.audioCodec,
+            } : undefined,
+          };
+        } else {
+          try {
+            probe = await probeInputMedia(inputSource);
+          } catch {
+            probe = { durationSeconds: job.totalDurationSeconds || 0 };
+          }
+        }
+
+        durationSeconds = probe.durationSeconds || job.totalDurationSeconds || 0;
+        plan = EcoModeEngine.planExecution(job, probe);
+        savings = EcoModeEngine.estimateSavings(plan, durationSeconds);
+        ffmpegArgs = StreamPipeline.buildFFmpegArgs(inputSource, plan, targetExt, isPipedInput);
       }
-    }
 
-    const durationSeconds = probe.durationSeconds || job.totalDurationSeconds || 0;
-
-    // 3. Formulate Eco Mode execution plan
-    const plan = EcoModeEngine.planExecution(job, probe);
-    const savings = EcoModeEngine.estimateSavings(plan, durationSeconds);
-
-    // 4. Construct target storage key & content type
-    const storageKey = `outputs/${job.retentionTier}/${job.jobId}.${targetExt}`;
-    const outputFilename = `${job.title ? sanitizeFilename(job.title) : job.jobId}.${targetExt}`;
-    const mimeType = CONTAINER_MIME_TYPES[targetExt] || 'application/octet-stream';
-
-    // 5. Construct safe FFmpeg argument array
-    const ffmpegArgs = StreamPipeline.buildFFmpegArgs(inputSource, plan, targetExt, isPipedInput);
-
-    // 6. Spawn FFmpeg process with pipe streaming
-    const { childProcess, outputStream } = StreamPipeline.spawnFFmpeg(ffmpegArgs, inputStream);
+      // 6. Spawn FFmpeg process with pipe streaming
+      const { childProcess, outputStream } = StreamPipeline.spawnFFmpeg(ffmpegArgs, inputStream);
 
     // 7. Track process lifecycle & abort signal
     let isTerminated = false;
@@ -653,6 +1249,9 @@ export class StreamPipeline {
       }
 
       throw err;
+      }
+    } finally {
+      cleanupTempDir();
     }
   }
 

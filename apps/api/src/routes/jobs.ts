@@ -18,10 +18,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import {
   createJobRequestSchema,
   canZeroCopyRemux,
+  assertSafeMediaUrl,
   MuxaroError,
   RETENTION_SECONDS,
   TIER_CONFIGS,
@@ -48,20 +49,94 @@ import {
   type ScopedWorkerTicket,
 } from '../security/scoped-job-urls.js';
 
+function getExecutionEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  const candidateDirs = [
+    path.join(os.homedir(), '.deno', 'bin'),
+    path.join(os.homedir(), '.local', 'bin'),
+    ...(process.platform !== 'win32' ? ['/usr/local/bin', '/usr/bin'] : []),
+  ];
+  for (const envVar of ['FFMPEG_PATH', 'FFPROBE_PATH', 'YTDLP_PATH', 'DENO_PATH']) {
+    const val = env[envVar]?.trim();
+    if (val && path.isAbsolute(val)) {
+      candidateDirs.unshift(path.dirname(val));
+    }
+  }
+  const existingPath = env.PATH || env.Path || '';
+  const merged = [...candidateDirs, ...existingPath.split(path.delimiter)]
+    .map((entry) => entry.trim())
+    .filter((entry, idx, arr) => entry.length > 0 && arr.indexOf(entry) === idx)
+    .join(path.delimiter);
+  env.PATH = merged;
+  if (process.platform === 'win32') {
+    env.Path = merged;
+  }
+  return env;
+}
+
+function resolveExecutable(envVar: string, defaultCommand: string): string {
+  const configured = process.env[envVar]?.trim();
+  if (configured) {
+    if (path.isAbsolute(configured) && fs.existsSync(configured)) {
+      return configured;
+    }
+    return configured;
+  }
+  const searchDirs = (getExecutionEnv().PATH || '').split(path.delimiter).filter(Boolean);
+  const extensions = process.platform === 'win32'
+    ? ['', '.exe', '.cmd', '.bat']
+    : [''];
+  for (const dir of searchDirs) {
+    for (const ext of extensions) {
+      const candidate = path.join(dir, `${defaultCommand}${ext}`);
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // continue scanning $PATH
+      }
+    }
+  }
+  return defaultCommand;
+}
+
+function terminateChildProcess(child: ChildProcess): void {
+  try {
+    if (!child.pid) return;
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], {
+        shell: false,
+        windowsHide: true,
+      });
+    } else {
+      child.kill('SIGTERM');
+    }
+  } catch {}
+}
+
 function computeJobDedupHash(params: {
   tool: string;
+  operation?: string;
   sourceUrl?: string;
   uploadSessionId?: string;
+  clipUrls?: string[];
+  secondaryAudioUrl?: string;
+  secondaryAudioSessionId?: string;
   targetFormat: string;
   targetResolution?: string;
   videoCodec?: string;
   audioCodec?: string;
   audioBitrate?: string;
 }): string {
-  const source = params.sourceUrl || params.uploadSessionId || '';
+  const source = params.clipUrls && params.clipUrls.length > 0
+    ? params.clipUrls.join('|')
+    : params.sourceUrl || params.uploadSessionId || '';
   const raw = [
     params.tool,
+    params.operation || '',
     source,
+    params.secondaryAudioUrl || params.secondaryAudioSessionId || '',
     params.targetFormat,
     params.targetResolution || '',
     params.videoCodec || '',
@@ -149,6 +224,8 @@ function formatJobResponse(job: MediaJob) {
     try {
       const cleanKey = job.outputStorageKey.replace(/^\/+/, '');
       const candidates = [
+        ...(process.env.ARTIFACTS_ROOT ? [path.resolve(process.env.ARTIFACTS_ROOT, cleanKey)] : []),
+        ...(process.env.STORAGE_ROOT ? [path.resolve(process.env.STORAGE_ROOT, cleanKey), path.resolve(process.env.STORAGE_ROOT, 'artifacts', cleanKey)] : []),
         path.resolve(process.cwd(), 'storage/artifacts', cleanKey),
         path.resolve(process.cwd(), 'storage', cleanKey),
         path.resolve(process.cwd(), 'apps/worker-media/storage/artifacts', cleanKey),
@@ -157,10 +234,6 @@ function formatJobResponse(job: MediaJob) {
         path.resolve(process.cwd(), '../worker-media/storage', cleanKey),
         path.resolve(process.cwd(), 'apps/api/storage/artifacts', cleanKey),
         path.resolve(process.cwd(), 'apps/api/storage', cleanKey),
-        path.resolve('D:/yt doenlord/apps/worker-media/storage/artifacts', cleanKey),
-        path.resolve('D:/yt doenlord/apps/worker-media/storage', cleanKey),
-        path.resolve('D:/yt doenlord/storage/artifacts', cleanKey),
-        path.resolve('D:/yt doenlord/storage', cleanKey),
       ];
       for (const p of candidates) {
         if (fs.existsSync(p)) {
@@ -173,9 +246,15 @@ function formatJobResponse(job: MediaJob) {
 
   const upperStatus = String(job.status || 'QUEUED').toUpperCase();
   const normalizedStatus = upperStatus === 'COMPLETED' ? 'READY' : upperStatus;
+  const opts = (job.optionsJson && typeof job.optionsJson === 'object')
+    ? (job.optionsJson as Record<string, any>)
+    : {};
+  const explicitOp = typeof opts.operation === 'string' ? opts.operation.toUpperCase() : '';
 
   const operation =
-    job.tool === 'extract_audio'
+    explicitOp === 'CONCAT_VIDEO' || (Array.isArray(opts.clipUrls) && opts.clipUrls.length >= 2)
+      ? 'CONCAT_VIDEO'
+      : job.tool === 'extract_audio'
       ? 'EXTRACT_AUDIO'
       : job.tool === 'merge_av'
       ? 'MERGE_AUDIO_VIDEO'
@@ -186,6 +265,7 @@ function formatJobResponse(job: MediaJob) {
     jobId: job.id,
     tool: job.tool,
     operation,
+    clipCount: Array.isArray(opts.clipUrls) ? opts.clipUrls.length : undefined,
     status: normalizedStatus,
     rawStatus: job.status,
     lane: job.lane,
@@ -378,13 +458,18 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       ? { ...(request.body as Record<string, any>) }
       : {};
 
+    const normalizedClipUrls = Array.isArray(rawBody.clipUrls)
+      ? rawBody.clipUrls.map((u: unknown) => String(u || '').trim()).filter(Boolean)
+      : [];
+    const requestedOperation = String(rawBody.operation || rawBody.jobType || '').trim().toUpperCase();
+    const isConcatJob = requestedOperation === 'CONCAT_VIDEO' || normalizedClipUrls.length > 0;
+
     if (!rawBody.tool) {
-      const op = String(rawBody.operation || rawBody.jobType || '').toUpperCase();
-      if (op.includes('AUDIO') || op === 'EXTRACT_AUDIO') {
-        rawBody.tool = 'extract_audio';
-      } else if (op.includes('MERGE') || op === 'MERGE_AUDIO_VIDEO' || op === 'MERGE_AV') {
+      if (isConcatJob || requestedOperation.includes('MERGE') || requestedOperation === 'MERGE_AUDIO_VIDEO' || requestedOperation === 'MERGE_AV') {
         rawBody.tool = 'merge_av';
-      } else if (op.includes('BATCH') || op.includes('PLAYLIST')) {
+      } else if (requestedOperation.includes('AUDIO') || requestedOperation === 'EXTRACT_AUDIO') {
+        rawBody.tool = 'extract_audio';
+      } else if (requestedOperation.includes('BATCH') || requestedOperation.includes('PLAYLIST')) {
         rawBody.tool = 'batch_playlist';
       } else {
         rawBody.tool = 'convert_video';
@@ -393,15 +478,49 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
 
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-    if (!rawBody.sourceUrl && rawBody.mediaUrl) {
-      rawBody.sourceUrl = rawBody.mediaUrl;
+    if (isConcatJob) {
+      if (normalizedClipUrls.length < 2) {
+        throw MuxaroError.invalidPayload('CONCAT_VIDEO requires at least 2 clipUrls');
+      }
+      if (normalizedClipUrls.length > 25) {
+        throw MuxaroError.invalidPayload('CONCAT_VIDEO supports at most 25 clipUrls per job');
+      }
+      for (const clipUrl of normalizedClipUrls) {
+        await assertSafeMediaUrl(clipUrl);
+      }
+      if (!rawBody.sourceUrl) {
+        rawBody.sourceUrl = normalizedClipUrls[0];
+      }
     }
 
-    // Only assign uploadSessionId from mediaAssetId if it is a valid UUID
-    if (!rawBody.uploadSessionId && (rawBody.mediaAssetId || rawBody.assetId)) {
-      const candidateId = String(rawBody.mediaAssetId || rawBody.assetId).trim();
+    if (!rawBody.sourceUrl && (rawBody.videoUrl || rawBody.mediaUrl)) {
+      rawBody.sourceUrl = rawBody.videoUrl || rawBody.mediaUrl;
+    }
+
+    if (!rawBody.secondaryAudioUrl && rawBody.audioUrl) {
+      rawBody.secondaryAudioUrl = rawBody.audioUrl;
+    }
+
+    if (rawBody.normalizeAudio === undefined && rawBody.normalizeLoudness !== undefined) {
+      rawBody.normalizeAudio = Boolean(rawBody.normalizeLoudness);
+    }
+
+    if (rawBody.ecoMode === undefined && (rawBody.preserveVideoStream !== undefined || rawBody.streamCopy !== undefined)) {
+      rawBody.ecoMode = Boolean(rawBody.preserveVideoStream ?? rawBody.streamCopy);
+    }
+
+    // Only assign uploadSessionId from videoAssetId / mediaAssetId if it is a valid UUID
+    if (!rawBody.uploadSessionId && (rawBody.videoAssetId || rawBody.mediaAssetId || rawBody.assetId)) {
+      const candidateId = String(rawBody.videoAssetId || rawBody.mediaAssetId || rawBody.assetId).trim();
       if (UUID_REGEX.test(candidateId)) {
         rawBody.uploadSessionId = candidateId;
+      }
+    }
+
+    if (!rawBody.secondaryAudioSessionId && rawBody.audioAssetId) {
+      const candidateAudioId = String(rawBody.audioAssetId).trim();
+      if (UUID_REGEX.test(candidateAudioId)) {
+        rawBody.secondaryAudioSessionId = candidateAudioId;
       }
     }
 
@@ -435,6 +554,21 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     if (typeof rawBody.targetFormat === 'string') {
       rawBody.targetFormat = rawBody.targetFormat.trim().toLowerCase();
     }
+
+    if (rawBody.sourceUrl && /^https?:\/\//i.test(String(rawBody.sourceUrl).trim()) && !isConcatJob) {
+      await assertSafeMediaUrl(String(rawBody.sourceUrl).trim());
+    }
+    if (rawBody.secondaryAudioUrl && /^https?:\/\//i.test(String(rawBody.secondaryAudioUrl).trim())) {
+      await assertSafeMediaUrl(String(rawBody.secondaryAudioUrl).trim());
+    }
+
+    const effectiveOperation = isConcatJob
+      ? 'CONCAT_VIDEO'
+      : rawBody.tool === 'extract_audio'
+      ? 'EXTRACT_AUDIO'
+      : rawBody.tool === 'merge_av'
+      ? 'MERGE_AUDIO_VIDEO'
+      : 'TRANSCODE_VIDEO';
 
     // Fast-path & Cobalt stream tunnel handling
     const targetExt = (rawBody.targetFormat || 'mp4').toLowerCase().replace(/^\./, '');
@@ -498,7 +632,8 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         const ytdlpArgs = [
           '--no-warnings',
           '--no-playlist',
-          '--js-runtimes', 'deno,node',
+          '--js-runtimes', 'deno',
+      '--js-runtimes', 'node',
           '--force-ipv4',
           '-f', rawBody.formatId || (targetExt === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best'),
           '-o', '-',
@@ -506,17 +641,10 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
           sourceUrl,
         ];
 
-        const env = { ...process.env };
-        const customPaths = [
-          'C:\\Users\\sbhrn\\.deno\\bin',
-          'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312\\Scripts',
-          'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312',
-          path.join(os.homedir(), '.deno', 'bin'),
-        ];
-        env.PATH = `${customPaths.join(';')};${env.PATH || ''}`;
-        env.Path = env.PATH;
+        const env = getExecutionEnv();
+        const ytdlpBin = resolveExecutable('YTDLP_PATH', 'yt-dlp');
 
-        const child = spawn('yt-dlp', ytdlpArgs, {
+        const child = spawn(ytdlpBin, ytdlpArgs, {
           shell: false,
           windowsHide: true,
           env,
@@ -526,11 +654,7 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         child.stdout.pipe(reply.raw);
 
         request.raw.on('close', () => {
-          try {
-            if (child.pid) {
-              spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], { shell: false, windowsHide: true });
-            }
-          } catch {}
+          terminateChildProcess(child);
         });
 
         return;
@@ -662,8 +786,12 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     // 5. Distributed Deduplication check via Redis
     const dedupHash = computeJobDedupHash({
       tool: body.tool,
+      operation: effectiveOperation,
       sourceUrl: body.sourceUrl,
       uploadSessionId: body.uploadSessionId,
+      clipUrls: isConcatJob ? normalizedClipUrls : undefined,
+      secondaryAudioUrl: body.secondaryAudioUrl,
+      secondaryAudioSessionId: body.secondaryAudioSessionId,
       targetFormat: body.targetFormat,
       targetResolution: body.targetResolution,
       videoCodec: body.videoCodec,
@@ -683,13 +811,15 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     // 6. Intelligent 4-Lane Routing:
     // - lane:batch for playlists & batch jobs
     // - lane:fast-io for zero-copy stream copy or Eco Mode remux
-    // - lane:transcode for heavy video encoding
+    // - lane:transcode for heavy video encoding, multi-clip concat, or dual-track merge
     let selectedLane: LaneType = 'transcode';
 
     if (body.lane) {
       selectedLane = body.lane;
     } else if (body.tool === 'batch_playlist') {
       selectedLane = 'batch';
+    } else if (isConcatJob || body.tool === 'merge_av') {
+      selectedLane = 'transcode';
     } else if (body.targetResolution && /^(?:4k|8k|2160p?|4320p?)/i.test(body.targetResolution)) {
       // 8K / 4K Rule: Always fast-io lossless zero-copy remux
       selectedLane = 'fast_io';
@@ -745,6 +875,19 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       request.log.warn({ err: mintErr, jobId }, '[Jobs] Failed to mint scoped worker ticket');
     }
 
+    const enrichedOptions = {
+      ...body,
+      operation: effectiveOperation,
+      ...(isConcatJob ? { clipUrls: normalizedClipUrls } : {}),
+      ...(rawBody.videoAssetId ? { videoAssetId: rawBody.videoAssetId } : {}),
+      ...(rawBody.audioAssetId ? { audioAssetId: rawBody.audioAssetId } : {}),
+      ...(rawBody.title ? { title: rawBody.title } : {}),
+      ...(rawBody.formatId ? { formatId: rawBody.formatId } : {}),
+      ...(rawBody.streamCopy !== undefined || rawBody.preserveVideoStream !== undefined
+        ? { streamCopy: Boolean(rawBody.streamCopy ?? rawBody.preserveVideoStream) }
+        : {}),
+    };
+
     // 9. Record Job in PostgreSQL Database
     const [insertedJob] = await db
       .insert(mediaJobs)
@@ -761,7 +904,7 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         uploadSessionId: body.uploadSessionId || null,
         targetFormat: body.targetFormat,
         targetResolution: body.targetResolution || null,
-        optionsJson: body,
+        optionsJson: enrichedOptions,
         progressPercent: '0.00',
         stage: 'queued',
         stageMessage: 'Queued for processing',
@@ -797,23 +940,28 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
 
     // 11. Dispatch Job to Designated BullMQ Queue with Scoped Worker Ticket
     let resolvedInputStorageKey: string | undefined;
+    let resolvedSecondaryAudioKey: string | undefined;
     try {
-      if (body.uploadSessionId) {
+      const resolveLocalUpload = (sessionId?: string): string | undefined => {
+        if (!sessionId) return undefined;
         const uploadCandidates = [
-          path.resolve(process.cwd(), '.muxaro-uploads', body.uploadSessionId),
-          path.resolve(process.cwd(), 'storage/uploads', body.uploadSessionId),
-          path.resolve(os.tmpdir(), body.uploadSessionId),
+          path.resolve(process.cwd(), '.muxaro-uploads', sessionId),
+          path.resolve(process.cwd(), 'storage/uploads', sessionId),
+          path.resolve(os.tmpdir(), sessionId),
         ];
         for (const dir of uploadCandidates) {
           if (fs.existsSync(dir)) {
-            const files = fs.readdirSync(dir);
+            const files = fs.readdirSync(dir).filter((f) => !f.startsWith('part_'));
             if (files.length > 0) {
-              resolvedInputStorageKey = path.join(dir, files[0]);
-              break;
+              return path.join(dir, files[0]);
             }
           }
         }
-      }
+        return undefined;
+      };
+
+      resolvedInputStorageKey = resolveLocalUpload(body.uploadSessionId);
+      resolvedSecondaryAudioKey = resolveLocalUpload(body.secondaryAudioSessionId);
 
       const bullmqJobData = {
         jobId,
@@ -823,8 +971,10 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         subjectKey,
         tier: userTier,
         tool: body.tool,
+        operation: effectiveOperation,
         lane: selectedLane,
         sourceUrl: body.sourceUrl,
+        clipUrls: isConcatJob ? normalizedClipUrls : undefined,
         uploadSessionId: body.uploadSessionId,
         inputStorageKey: resolvedInputStorageKey,
         targetFormat: body.targetFormat,
@@ -833,10 +983,17 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         audioCodec: body.audioCodec,
         audioBitrate: body.audioBitrate,
         audioOffsetMs: body.audioOffsetMs,
+        audioUrl: body.secondaryAudioUrl,
+        audioAssetId: rawBody.audioAssetId || body.secondaryAudioSessionId,
+        videoAssetId: rawBody.videoAssetId || body.uploadSessionId,
         secondaryAudioUrl: body.secondaryAudioUrl,
         secondaryAudioSessionId: body.secondaryAudioSessionId,
+        secondaryAudioStorageKey: resolvedSecondaryAudioKey,
         normalizeAudio: body.normalizeAudio,
         ecoMode: body.ecoMode,
+        streamCopy: enrichedOptions.streamCopy,
+        formatId: enrichedOptions.formatId,
+        title: enrichedOptions.title,
         retentionTier,
         expiresAt: expiresAt.toISOString(),
         outputStorageKey: outputKey,
@@ -890,20 +1047,25 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
         await queueService.enqueueJob(
           {
             jobId,
-            operation:
-              body.tool === 'extract_audio'
-                ? 'EXTRACT_AUDIO'
-                : body.tool === 'merge_av'
-                ? 'MERGE_AUDIO_VIDEO'
-                : 'TRANSCODE_VIDEO',
+            operation: effectiveOperation as any,
             sourceUrl: body.sourceUrl,
             mediaUrl: body.sourceUrl,
+            mediaAssetId: rawBody.videoAssetId || body.uploadSessionId,
             localFilePath: resolvedInputStorageKey,
             targetFormat: body.targetFormat,
             targetResolution: body.targetResolution,
-            formatId: (body as { formatId?: string }).formatId,
+            formatId: enrichedOptions.formatId,
+            streamCopy: enrichedOptions.streamCopy,
+            title: enrichedOptions.title,
             idempotencyKey: body.idempotencyKey,
             ownerTier: userTier === 'pro' ? 'PREMIUM' : userTier === 'free_account' ? 'REGISTERED' : 'GUEST',
+            metadata: {
+              ...(isConcatJob ? { clipUrls: normalizedClipUrls } : {}),
+              audioUrl: body.secondaryAudioUrl,
+              audioAssetId: rawBody.audioAssetId || body.secondaryAudioSessionId,
+              audioOffsetMs: body.audioOffsetMs,
+              normalizeAudio: body.normalizeAudio,
+            },
           },
           request.user?.id || `guest:${guestHash}`
         );
@@ -991,7 +1153,8 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     const ytdlpArgs = [
       '--no-warnings',
       '--no-playlist',
-      '--js-runtimes', 'deno,node',
+      '--js-runtimes', 'deno',
+      '--js-runtimes', 'node',
       '--force-ipv4',
       '-f', targetFormat === 'mp3' ? 'bestaudio/best' : 'best[ext=mp4]/bestvideo+bestaudio/best',
       '-o', '-',
@@ -999,17 +1162,10 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       targetUrl,
     ];
 
-    const env = { ...process.env };
-    const customPaths = [
-      'C:\\Users\\sbhrn\\.deno\\bin',
-      'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312\\Scripts',
-      'C:\\Users\\sbhrn\\AppData\\Local\\Programs\\Python\\Python312',
-      path.join(os.homedir(), '.deno', 'bin'),
-    ];
-    env.PATH = `${customPaths.join(';')};${env.PATH || ''}`;
-    env.Path = env.PATH;
+    const env = getExecutionEnv();
+    const ytdlpBin = resolveExecutable('YTDLP_PATH', 'yt-dlp');
 
-    const child = spawn('yt-dlp', ytdlpArgs, {
+    const child = spawn(ytdlpBin, ytdlpArgs, {
       shell: false,
       windowsHide: true,
       env,
@@ -1019,11 +1175,7 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
     child.stdout.pipe(reply.raw);
 
     request.raw.on('close', () => {
-      try {
-        if (child.pid) {
-          spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F'], { shell: false, windowsHide: true });
-        }
-      } catch {}
+      terminateChildProcess(child);
     });
   });
 

@@ -5,6 +5,7 @@ import { jobManager } from '@/lib/job-manager';
 import { validateMediaUrl } from '@/lib/security-validator';
 import { createApiErrorResponse } from '@/lib/api-error';
 import { getUploadsDir } from '@/lib/upload-storage';
+import { proxyToBackend } from '@/lib/backend-proxy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -18,6 +19,7 @@ const CORS_HEADERS: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   const requestId = `cjob_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const reqForProxy = req.clone();
 
   try {
     let body: any = {};
@@ -29,6 +31,11 @@ export async function POST(req: NextRequest) {
 
     let sourceMedia = String(body?.sourceUrl || body?.mediaUrl || body?.url || '').trim();
     const candidateSessionId = String(body?.uploadSessionId || body?.mediaAssetId || body?.assetId || '').trim();
+    const clipUrls = Array.isArray(body?.clipUrls) ? body.clipUrls : [];
+
+    if (!sourceMedia && clipUrls.length > 0) {
+      sourceMedia = String(clipUrls[0] || '').trim();
+    }
 
     if (!sourceMedia && candidateSessionId) {
       const uploadsRoot = getUploadsDir();
@@ -41,14 +48,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!sourceMedia) {
+    if (!sourceMedia && !candidateSessionId) {
       return createApiErrorResponse('Source media URL or uploadSessionId is required.', 'INVALID_URL', requestId, CORS_HEADERS);
     }
 
     // SSRF & URL validation (only for external HTTP/HTTPS URLs)
     let normalizedUrl = sourceMedia;
-    const isLocalFile = fs.existsSync(sourceMedia);
-    if (!isLocalFile) {
+    const isLocalFile = Boolean(sourceMedia && fs.existsSync(sourceMedia));
+    if (sourceMedia && !isLocalFile) {
       const validation = validateMediaUrl(sourceMedia);
       if (!validation.valid) {
         return createApiErrorResponse(
@@ -59,6 +66,13 @@ export async function POST(req: NextRequest) {
         );
       }
       normalizedUrl = validation.normalizedUrl;
+    }
+
+    const upstream = await proxyToBackend(reqForProxy, 'jobs');
+    if (upstream) return upstream;
+
+    if (!sourceMedia) {
+      return createApiErrorResponse('Source media URL or uploadSessionId could not be resolved.', 'INVALID_URL', requestId, CORS_HEADERS);
     }
 
     const job = await jobManager.createJob({
@@ -177,7 +191,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const upstream = await proxyToBackend(req, 'jobs');
+  if (upstream) return upstream;
+
   const jobs = jobManager.listJobs();
   return NextResponse.json(
     {

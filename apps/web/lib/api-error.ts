@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 
-export type ApiErrorCode = 'HOST_BLOCKED' | 'INVALID_URL' | 'TIMEOUT';
+export type ApiErrorCode =
+  | 'HOST_BLOCKED'
+  | 'INVALID_URL'
+  | 'TIMEOUT'
+  | 'ERR_BACKEND_NOT_CONFIGURED'
+  | 'ERR_EXTRACTION_FAILED';
 
 export interface StandardApiErrorPayload {
   ok: false;
@@ -18,7 +23,7 @@ export interface StandardApiErrorPayload {
 
 export function classifyApiError(
   err: unknown,
-  defaultCode: ApiErrorCode = 'HOST_BLOCKED',
+  defaultCode: ApiErrorCode = 'ERR_EXTRACTION_FAILED',
   statusOverride?: number
 ): { code: ApiErrorCode; status: number; rawMessage: string } {
   let rawMessage = '';
@@ -35,6 +40,24 @@ export function classifyApiError(
   }
 
   const lower = rawMessage.toLowerCase();
+
+  // 0. Unbacked Serverless / Missing Binary / Unconfigured Backend -> 503
+  if (
+    (err as any)?.code === 'ERR_BACKEND_NOT_CONFIGURED' ||
+    (err as any)?.code === 'ENOENT' ||
+    lower.includes('backend_not_configured') ||
+    lower.includes('backend not configured') ||
+    lower.includes('api_internal_url') ||
+    lower.includes('spawn yt-dlp enoent') ||
+    lower.includes('spawn ffprobe enoent') ||
+    lower.includes('no media backend worker')
+  ) {
+    return {
+      code: 'ERR_BACKEND_NOT_CONFIGURED',
+      status: statusOverride ?? 503,
+      rawMessage,
+    };
+  }
 
   // 1. TIMEOUT
   if (
@@ -143,7 +166,17 @@ export function classifyApiError(
   }
 
   // Default fallback
-  const resolvedStatus = statusOverride ?? (defaultCode === 'HOST_BLOCKED' ? 403 : defaultCode === 'TIMEOUT' ? 504 : 400);
+  const resolvedStatus =
+    statusOverride ??
+    (defaultCode === 'HOST_BLOCKED'
+      ? 403
+      : defaultCode === 'TIMEOUT'
+        ? 504
+        : defaultCode === 'ERR_BACKEND_NOT_CONFIGURED'
+          ? 503
+          : defaultCode === 'ERR_EXTRACTION_FAILED'
+            ? 502
+            : 400);
   return {
     code: defaultCode,
     status: resolvedStatus,
@@ -153,7 +186,7 @@ export function classifyApiError(
 
 export function createApiErrorResponse(
   err: unknown,
-  defaultCode: ApiErrorCode = 'HOST_BLOCKED',
+  defaultCode: ApiErrorCode = 'ERR_EXTRACTION_FAILED',
   requestId?: string,
   extraHeaders?: Record<string, string>,
   statusOverride?: number

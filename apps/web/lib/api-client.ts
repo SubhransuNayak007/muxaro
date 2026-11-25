@@ -131,9 +131,25 @@ export function getApiBaseUrl(): string {
 
 export const API_BASE = '/api/v1';
 
-const MULTIPART_CHUNK_BYTES = 5 * 1024 * 1024; // 5 MB chunks via file.slice()
+const MULTIPART_CHUNK_BYTES = Math.floor(3.5 * 1024 * 1024); // Strictly under Vercel 4.5 MB payload limit
 const MAX_PART_RETRIES = 3;
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+const localFileRegistry = new Map<string, File>();
+
+export function registerLocalFile(id: string, file: File): void {
+  if (!id || !file) return;
+  localFileRegistry.set(id, file);
+}
+
+export function getRegisteredLocalFile(id?: string | null): File | null {
+  if (!id) return null;
+  return localFileRegistry.get(id) ?? null;
+}
+
+export function isClientOnlyAssetId(id?: string | null): boolean {
+  return Boolean(id && (id.startsWith('client_local_') || id.startsWith('local_')));
+}
 
 let cachedCsrfToken: string | null = null;
 
@@ -988,171 +1004,8 @@ class ApiClient {
       if (raw && typeof raw === 'object') {
         return normalizeManifest(raw, { sourceUrl: normalizedUrl, isLocalUpload: false });
       }
+      throw new Error('Media inspection returned an empty manifest.');
     } catch (primaryErr: any) {
-      // Resilient fallback for YouTube/Vimeo links if edge/backend returns 503 or network is offline
-      try {
-        const parsed = new URL(normalizedUrl);
-        const host = parsed.hostname.toLowerCase();
-
-        // YouTube client-side oEmbed fallback
-        let ytId: string | null = null;
-        if (host === 'youtu.be') {
-          ytId = parsed.pathname.slice(1).split('/')[0].split('?')[0];
-        } else if (
-          host === 'youtube.com' ||
-          host === 'www.youtube.com' ||
-          host === 'm.youtube.com' ||
-          host === 'music.youtube.com'
-        ) {
-          if (parsed.pathname === '/watch') ytId = parsed.searchParams.get('v');
-          else if (parsed.pathname.startsWith('/embed/') || parsed.pathname.startsWith('/shorts/')) {
-            ytId = parsed.pathname.split('/')[2];
-          }
-        }
-
-        if (ytId && /^[a-zA-Z0-9_-]{11}$/.test(ytId)) {
-          let title = 'YouTube Media';
-          let author = 'YouTube Creator';
-          let thumbnail = `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`;
-
-          try {
-            const oembedRes = await fetch(
-              `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ytId}&format=json`
-            );
-            if (oembedRes.ok) {
-              const oe = (await oembedRes.json()) as any;
-              if (oe?.title) title = String(oe.title);
-              if (oe?.author_name) author = String(oe.author_name);
-              if (oe?.thumbnail_url) thumbnail = String(oe.thumbnail_url);
-            }
-          } catch {
-            // Keep default metadata
-          }
-
-          const fallbackManifest = {
-            id: `yt_${ytId}`,
-            title,
-            author,
-            sourceUrl: `https://www.youtube.com/watch?v=${ytId}`,
-            thumbnailUrl: thumbnail,
-            durationSeconds: 0,
-            isLive: false,
-            isPlaylist: false,
-            videoStreams: [
-              {
-                id: 'v8k',
-                formatId: '571',
-                resolution: '8K',
-                resolutionLabel: '8K (Ultra HD)',
-                width: 7680,
-                height: 4320,
-                fps: 60,
-                codec: 'av01.0.12m.08',
-                container: 'mp4',
-                isStreamCopyCandidate: true,
-                isRecommended: false,
-              },
-              {
-                id: 'v4k',
-                formatId: '313',
-                resolution: '4K',
-                resolutionLabel: '4K (Ultra HD)',
-                width: 3840,
-                height: 2160,
-                fps: 60,
-                codec: 'vp09.00.51.08',
-                container: 'mp4',
-                isStreamCopyCandidate: true,
-                isRecommended: false,
-              },
-              {
-                id: 'v1440',
-                formatId: '271',
-                resolution: '1440p',
-                resolutionLabel: '1440p (Quad HD)',
-                width: 2560,
-                height: 1440,
-                fps: 60,
-                codec: 'vp09.00.41.08',
-                container: 'mp4',
-                isStreamCopyCandidate: true,
-                isRecommended: false,
-              },
-              {
-                id: 'v1080',
-                formatId: '137',
-                resolution: '1080p',
-                resolutionLabel: '1080p (Full HD)',
-                width: 1920,
-                height: 1080,
-                fps: 60,
-                codec: 'avc1.64002a',
-                container: 'mp4',
-                isStreamCopyCandidate: true,
-                isRecommended: true,
-              },
-              {
-                id: 'v720',
-                formatId: '136',
-                resolution: '720p',
-                resolutionLabel: '720p (HD)',
-                width: 1280,
-                height: 720,
-                fps: 30,
-                codec: 'avc1.4d401f',
-                container: 'mp4',
-                isStreamCopyCandidate: true,
-              },
-              {
-                id: 'v480',
-                formatId: '135',
-                resolution: '480p',
-                resolutionLabel: '480p (Standard)',
-                width: 854,
-                height: 480,
-                fps: 30,
-                codec: 'avc1.4d401e',
-                container: 'mp4',
-              },
-              {
-                id: 'v360',
-                formatId: '134',
-                resolution: '360p',
-                resolutionLabel: '360p (Mobile)',
-                width: 640,
-                height: 360,
-                fps: 30,
-                codec: 'avc1.4d4015',
-                container: 'mp4',
-              },
-            ],
-            audioStreams: [
-              {
-                id: 'a_orig',
-                formatId: '140',
-                codec: 'm4a',
-                bitrateKbps: 128,
-                sampleRateHz: 44100,
-                channels: 2,
-                isStreamCopyCandidate: true,
-              },
-              {
-                id: 'a_mp3',
-                formatId: 'mp3_hq',
-                codec: 'mp3',
-                bitrateKbps: 320,
-                sampleRateHz: 48000,
-                channels: 2,
-              },
-            ],
-            adapterId: 'youtube-permitted-adapter',
-          };
-          return normalizeManifest(fallbackManifest, { sourceUrl: normalizedUrl, isLocalUpload: false });
-        }
-      } catch {
-        // Fall through to re-throw primary error
-      }
-
       throw primaryErr;
     }
 
@@ -1167,20 +1020,52 @@ class ApiClient {
     const trimmed = (url || '').trim();
     const normalizedUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
+    const tryDirectClientExtraction = async (): Promise<MediaManifest | null> => {
+      if (typeof window === 'undefined') return null;
+      try {
+        const { extractMediaViaDirectBridge } = await import('./background-download.ts');
+        const extracted = await extractMediaViaDirectBridge(normalizedUrl);
+        if (extracted && typeof extracted === 'object') {
+          return normalizeManifest(extracted, { sourceUrl: normalizedUrl, isLocalUpload: false });
+        }
+      } catch {
+        // Ignore bridge unavailability
+      }
+      return null;
+    };
+
     try {
       const raw: any = await this.requestStrict<any>('/probe', {
         method: 'POST',
         body: JSON.stringify({ url: normalizedUrl }),
       });
       if (raw && typeof raw === 'object') {
+        if (raw.code === 'ERR_BACKEND_NOT_CONFIGURED' || raw.error?.code === 'ERR_BACKEND_NOT_CONFIGURED') {
+          const direct = await tryDirectClientExtraction();
+          if (direct) return direct;
+
+          const cfgErr = new ApiClientError(
+            raw.rawMessage || raw.error?.message || 'Backend worker is not configured.',
+            503,
+            { code: 'ERR_BACKEND_NOT_CONFIGURED' }
+          );
+          (cfgErr as any).code = 'ERR_BACKEND_NOT_CONFIGURED';
+          (cfgErr as any).status = 503;
+          throw cfgErr;
+        }
+
         if (
           raw.status === 'host_restricted' ||
           raw.ok === false ||
           raw.code === 'HOST_BLOCKED' ||
-          raw.error?.code === 'HOST_BLOCKED'
+          raw.error?.code === 'HOST_BLOCKED' ||
+          raw.error?.code === 'ERR_BOT_VERIFICATION_REQUIRED'
         ) {
+          const direct = await tryDirectClientExtraction();
+          if (direct) return direct;
+
           const blockErr = new ApiClientError(
-            raw.rawMessage || raw.message || raw.error?.message || 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.',
+            raw.rawMessage || raw.message || raw.error?.message || 'Host challenged cloud extraction. Use MUXARO Direct on desktop Chrome or connect a custom worker.',
             200,
             { code: 'HOST_BLOCKED' }
           );
@@ -1193,15 +1078,33 @@ class ApiClient {
         return normalizeManifest(payload, { sourceUrl: normalizedUrl, isLocalUpload: false });
       }
     } catch (err: any) {
-      if (
-        err?.code === 'HOST_BLOCKED' ||
-        err?.status === 'host_restricted' ||
-        (err instanceof ApiClientError && (err.status === 403 || err.status === 200)) ||
-        /blocks free cloud servers/i.test(err?.message || '')
-      ) {
+      const errCode = String(err?.code || '').toUpperCase();
+      if (errCode === 'ERR_BACKEND_NOT_CONFIGURED' || err?.status === 503) {
+        const direct = await tryDirectClientExtraction();
+        if (direct) return direct;
         throw err;
       }
-      // Graceful fallback to inspectMedia
+      if (
+        errCode === 'HOST_BLOCKED' ||
+        errCode === 'ERR_BOT_VERIFICATION_REQUIRED' ||
+        err?.status === 'host_restricted' ||
+        (err instanceof ApiClientError && (err.status === 403 || err.status === 422 || err.status === 200)) ||
+        /blocks free cloud servers|host challenged|confirm you['’]re not a bot|bot verification/i.test(err?.message || '')
+      ) {
+        const direct = await tryDirectClientExtraction();
+        if (direct) return direct;
+        const blockErr = new ApiClientError(
+          err?.message || 'Host challenged cloud extraction.',
+          403,
+          { code: 'HOST_BLOCKED' }
+        );
+        (blockErr as any).code = 'HOST_BLOCKED';
+        (blockErr as any).status = 'host_restricted';
+        throw blockErr;
+      }
+      if (err instanceof ApiClientError && err.status !== 404 && err.status !== 405) {
+        throw err;
+      }
     }
 
     return this.inspectMedia(normalizedUrl);
@@ -1507,7 +1410,9 @@ class ApiClient {
 
   /**
    * Upload a local computer file with real progress & AbortSignal cancellation.
-   * Uses resumable 5 MB multipart uploads for files > 5 MB and direct streaming for <= 5 MB.
+   * Uses R2 presigned / 3.5 MB chunked multipart upload for files > 3.5 MB and direct upload for <= 3.5 MB.
+   * When backend upload is unavailable (e.g. serverless without API_INTERNAL_URL), registers the File
+   * for in-browser FFmpegWorkerClient processing without emitting fake blob: server URLs.
    */
   async uploadLocalFile(
     file: File,
@@ -1520,92 +1425,228 @@ class ApiClient {
     const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
     const ext = extMatch ? extMatch[1].toLowerCase() : 'mp4';
     const baseTitle = file.name.replace(/\.[^.]+$/, '') || file.name;
+    const isAudioOnly = /^(audio\/|.*\.(mp3|wav|flac|m4a|opus|ogg|aac)$)/i.test(file.type || file.name);
 
     options?.onProgress?.(0);
 
-    let raw: any = null;
-    try {
-      raw =
-        file.size > MULTIPART_CHUNK_BYTES
-          ? await this.uploadMultipart(file, options)
-          : await this.uploadDirectWithProgress(file, options);
-    } catch (uploadErr: any) {
-      // $0 In-Browser Architecture: If cloud upload endpoint is unconfigured (404),
-      // create client-side manifest directly using HTML5 media and in-browser WASM tools
+    const inspectBrowserMetadata = async (): Promise<{
+      durationSeconds: number;
+      width: number;
+      height: number;
+    }> => {
+      let durationSeconds = 0;
+      let width = 1920;
+      let height = 1080;
+
+      if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof URL !== 'undefined') {
+        const tempObjectUrl = URL.createObjectURL(file);
+        try {
+          const media = document.createElement(isAudioOnly ? 'audio' : 'video') as HTMLVideoElement;
+          media.preload = 'metadata';
+          media.src = tempObjectUrl;
+          await new Promise<void>((resolve) => {
+            media.onloadedmetadata = () => {
+              if (media.duration && Number.isFinite(media.duration)) {
+                durationSeconds = Math.round(media.duration);
+              }
+              if (media.videoWidth && media.videoHeight) {
+                width = media.videoWidth;
+                height = media.videoHeight;
+              }
+              resolve();
+            };
+            media.onerror = () => resolve();
+            setTimeout(resolve, 1500);
+          });
+        } catch {
+          // Non-fatal metadata inspection failure
+        } finally {
+          try {
+            URL.revokeObjectURL(tempObjectUrl);
+          } catch {
+            // Ignored
+          }
+        }
+      }
+
+      return { durationSeconds, width, height };
+    };
+
+    const buildLocalManifest = async (serverResult?: any): Promise<MediaManifest> => {
+      const serverData =
+        serverResult && typeof serverResult === 'object' && 'data' in serverResult && serverResult.data
+          ? serverResult.data
+          : serverResult;
+
+      const resolvedServerId =
+        serverData?.assetId ||
+        serverData?.id ||
+        serverData?.uploadSessionId ||
+        serverData?.uploadId;
+
+      const manifestId = resolvedServerId
+        ? String(resolvedServerId)
+        : `client_local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+      registerLocalFile(manifestId, file);
+
       if (
-        typeof window !== 'undefined' &&
-        (uploadErr?.status === 404 || /404|not found/i.test(uploadErr?.message || ''))
+        serverData &&
+        typeof serverData === 'object' &&
+        (Array.isArray(serverData.videoStreams) ||
+          Array.isArray(serverData.audioStreams) ||
+          Array.isArray(serverData.streams) ||
+          Array.isArray(serverData.formats))
       ) {
-        const objectUrl = URL.createObjectURL(file);
-        options?.onProgress?.(100);
-        return {
-          id: `local_${Date.now()}`,
+        const normalized = normalizeManifest(serverData, {
+          sourceUrl: '',
           title: baseTitle,
-          platform: 'other',
-          durationSeconds: 0,
-          thumbnailUrl: '',
-          sourceUrl: objectUrl,
           fileSizeBytes: file.size,
           container: ext,
           isLocalUpload: true,
-          permitted: true,
-          rightsNote: '',
-          videoStreams: [
-            {
-              streamIndex: 0,
-              streamType: 'video',
-              codec: ext,
-              bitrateKbps: 0,
-              formatId: 'local-video',
-              resolutionLabel: 'Original',
-              fps: 30,
-              hdr: false,
-              estimatedSizeBytes: file.size,
-              isStreamCopyCandidate: true,
-              transcodeRequired: false,
-              url: objectUrl,
-            },
-          ],
-          audioStreams: [
-            {
-              streamIndex: 1,
-              streamType: 'audio',
-              codec: 'aac',
-              bitrateKbps: 192,
-              formatId: 'local-audio',
-              sampleRateHz: 48000,
-              channels: 2,
-              channelLayout: 'stereo',
-              estimatedSizeBytes: 0,
-              isStreamCopyCandidate: true,
-              transcodeRequired: false,
-              isNativeLossless: false,
-              url: objectUrl,
-            },
-          ],
+        });
+        registerLocalFile(normalized.id || manifestId, file);
+        return {
+          ...normalized,
+          id: normalized.id || manifestId,
+          sourceUrl: '',
+          isLocalUpload: true,
         };
       }
-      throw uploadErr;
-    }
 
-    if (!raw || typeof raw !== 'object') {
-      throw new Error('File upload completed, but media details were not returned.');
-    }
+      const { durationSeconds, width, height } = await inspectBrowserMetadata();
+      const resLabel =
+        height >= 4320
+          ? '8K Ultra HD'
+          : height >= 2160
+          ? '4K Ultra HD'
+          : height >= 1440
+          ? '1440p Quad HD'
+          : height >= 1080
+          ? '1080p Full HD'
+          : height >= 720
+          ? '720p HD'
+          : `${height}p`;
 
-    return normalizeManifest(raw, {
-      sourceUrl: '',
-      title: baseTitle,
-      fileSizeBytes: file.size,
-      container: ext,
-      isLocalUpload: true,
-    });
+      options?.onProgress?.(100);
+
+      return {
+        id: manifestId,
+        title: baseTitle,
+        platform: 'other',
+        durationSeconds,
+        thumbnailUrl: '',
+        sourceUrl: '',
+        fileSizeBytes: file.size,
+        container: ext,
+        isLocalUpload: true,
+        permitted: true,
+        rightsNote: resolvedServerId
+          ? 'Uploaded local media file'
+          : 'In-browser local processing',
+        videoStreams: isAudioOnly
+          ? []
+          : [
+              {
+                streamIndex: 0,
+                streamType: 'video',
+                codec: ext,
+                bitrateKbps:
+                  durationSeconds > 0
+                    ? Math.round((file.size * 8) / (durationSeconds * 1000))
+                    : 0,
+                formatId: 'local-video',
+                width,
+                height,
+                resolutionLabel: resLabel,
+                fps: 30,
+                hdr: false,
+                estimatedSizeBytes: file.size,
+                isStreamCopyCandidate: true,
+                transcodeRequired: false,
+                url: '',
+              },
+            ],
+        audioStreams: [
+          {
+            streamIndex: isAudioOnly ? 0 : 1,
+            streamType: 'audio',
+            codec: 'aac',
+            bitrateKbps: 192,
+            formatId: 'local-audio',
+            sampleRateHz: 48000,
+            channels: 2,
+            channelLayout: 'stereo',
+            estimatedSizeBytes: isAudioOnly ? file.size : 0,
+            isStreamCopyCandidate: true,
+            transcodeRequired: false,
+            isNativeLossless: true,
+            url: '',
+          },
+        ],
+      };
+    };
+
+    const shouldFallbackToClientLocal = (err: any): boolean => {
+      if (options?.signal?.aborted) return false;
+      if (err?.name === 'AbortError' || /cancelled/i.test(String(err?.message || ''))) {
+        return false;
+      }
+      if (typeof window === 'undefined') return false;
+      const status = Number(err?.status || 0);
+      const code = String(err?.code || '');
+      if (
+        code === 'ERR_BACKEND_NOT_CONFIGURED' ||
+        status === 503 ||
+        status === 404 ||
+        status === 502 ||
+        status === 504 ||
+        status === 0
+      ) {
+        return true;
+      }
+      return /not configured|network|failed to fetch|unavailable/i.test(String(err?.message || ''));
+    };
+
+    try {
+      let raw: any = null;
+      if (file.size > MULTIPART_CHUNK_BYTES) {
+        const { ResumableMultipartUploader } = await import('./multipart-uploader');
+        const uploader = new ResumableMultipartUploader(file, {
+          apiBase: getApiBaseUrl(),
+          signal: options?.signal,
+          onProgress: (stats) => options?.onProgress?.(stats.percent),
+        });
+        raw = await uploader.start();
+      } else {
+        raw = await this.uploadDirectWithProgress(file, options);
+      }
+
+      if (!raw || typeof raw !== 'object') {
+        return await buildLocalManifest();
+      }
+      return await buildLocalManifest(raw);
+    } catch (err: any) {
+      if (shouldFallbackToClientLocal(err)) {
+        return await buildLocalManifest();
+      }
+      throw err;
+    }
   }
 
   /**
    * Submit a real media processing job to POST /api/v1/jobs.
    */
   async createJob(params: CreateJobParams): Promise<ProcessingJob> {
-    const resolvedUrl = (params.mediaUrl || params.sourceUrl || '').trim();
+    const rawCandidateUrl = (params.mediaUrl || params.sourceUrl || '').trim();
+    if (/^blob:/i.test(rawCandidateUrl)) {
+      throw new ApiClientError(
+        'Cannot submit a browser blob: URL to server processing. Use in-browser processing or upload the file first.',
+        400,
+        { code: 'ERR_INVALID_SOURCE' }
+      );
+    }
+    const resolvedUrl = rawCandidateUrl;
     const isHttpUrl = /^https?:\/\//i.test(resolvedUrl);
     const isAudioRequest =
       params.jobType === 'extract_audio' ||
@@ -1634,19 +1675,43 @@ class ApiClient {
       operation: fastifyOperation,
       targetFormat,
       idempotencyKey,
-      sourceUrl: resolvedUrl || undefined,
-      mediaUrl: resolvedUrl || undefined,
       ecoMode: true,
     };
 
-    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const rawSessionId = (params.uploadSessionId as string | undefined) || (!isHttpUrl ? params.mediaAssetId : undefined);
-    if (rawSessionId && typeof rawSessionId === 'string' && UUID_REGEX.test(rawSessionId.trim())) {
-      payload.uploadSessionId = rawSessionId.trim();
-      payload.mediaAssetId = rawSessionId.trim();
+    const explicitSessionId =
+      typeof params.uploadSessionId === 'string' ? params.uploadSessionId.trim() : '';
+    const explicitMediaAssetId =
+      typeof params.mediaAssetId === 'string' ? params.mediaAssetId.trim() : '';
+    const resolvedAssetId = explicitMediaAssetId || explicitSessionId;
+    const resolvedSessionId = explicitSessionId || explicitMediaAssetId;
+
+    if (
+      isClientOnlyAssetId(resolvedAssetId) ||
+      isClientOnlyAssetId(resolvedSessionId)
+    ) {
+      throw new ApiClientError(
+        'This file is queued for in-browser processing because no backend upload session is configured.',
+        503,
+        { code: 'ERR_BACKEND_NOT_CONFIGURED' }
+      );
     }
+
+    if (resolvedSessionId) {
+      payload.uploadSessionId = resolvedSessionId;
+    }
+    if (resolvedAssetId) {
+      payload.mediaAssetId = resolvedAssetId;
+    }
+
     if (isHttpUrl) {
+      payload.sourceUrl = resolvedUrl;
       payload.mediaUrl = resolvedUrl;
+    } else if (!payload.mediaAssetId && !payload.uploadSessionId) {
+      throw new ApiClientError(
+        'Cannot submit job without a valid HTTP(S) media URL or uploaded mediaAssetId.',
+        400,
+        { code: 'ERR_INVALID_SOURCE' }
+      );
     }
     if (params.audioUrl && /^https?:\/\//i.test(params.audioUrl.trim())) {
       payload.audioUrl = params.audioUrl.trim();
@@ -2515,6 +2580,7 @@ class ApiClient {
     status: string;
     version?: string;
     ffmpegAvailable?: boolean;
+    backendConnected?: boolean;
     queueDepth?: number;
     workerPool?: { activeWorkers: number; totalSlots: number };
     database?: string;
@@ -2534,12 +2600,13 @@ class ApiClient {
         throw new Error('Health check returned invalid response.');
       },
       () => ({
-        status: 'OPERATIONAL',
+        status: 'DEGRADED',
         version: '1.0.0',
-        ffmpegAvailable: true,
+        ffmpegAvailable: false,
+        backendConnected: false,
         queueDepth: 0,
-        workerPool: { activeWorkers: 1, totalSlots: 48 },
-        uptimeSeconds: 3600,
+        workerPool: { activeWorkers: 0, totalSlots: 0 },
+        uptimeSeconds: 0,
       })
     );
   }
