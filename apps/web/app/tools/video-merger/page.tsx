@@ -13,7 +13,7 @@ import {
   AlertCircle,
   RotateCcw,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
+import { api, getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 import { ProcessingJob } from '@/lib/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
@@ -33,25 +33,101 @@ export default function VideoMergerPage() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [activeJob, setActiveJob] = useState<ProcessingJob | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const validNormalizedList = videoList
     .map((v) => normalizeMediaUrl(v))
     .filter((v) => Boolean(v));
 
   const handleAddVideo = () => {
-    setVideoList([...videoList, '']);
+    setVideoList((prev) => [...prev, '']);
   };
 
   const handleUpdateVideo = (index: number, val: string) => {
-    const updated = [...videoList];
-    updated[index] = val;
-    setVideoList(updated);
-    if (errorMsg) setErrorMsg(null);
+    // Support pasting 2+ newline-separated clip URLs into any slot
+    const lines = val
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length > 1) {
+      setVideoList((prev) => {
+        const next = [...prev];
+        lines.forEach((line, offset) => {
+          const targetIdx = index + offset;
+          if (targetIdx < next.length) {
+            next[targetIdx] = line;
+          } else {
+            next.push(line);
+          }
+        });
+        while (next.length < 2) next.push('');
+        return next;
+      });
+    } else {
+      setVideoList((prev) => {
+        const updated = [...prev];
+        updated[index] = val;
+        return updated;
+      });
+    }
+    if (errorMsg) {
+      setErrorMsg(null);
+      setBackendDisconnected(false);
+    }
   };
 
   const handleRemoveVideo = (index: number) => {
     if (videoList.length <= 2) return;
-    setVideoList(videoList.filter((_, i) => i !== index));
+    setVideoList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const formatMergeError = (status: number, json: any, fallback: string): string => {
+    const code = String(json?.code || json?.error?.code || '').toUpperCase();
+    const msg = String(
+      json?.error?.userMessage || json?.error?.message || json?.rawMessage || json?.message || ''
+    );
+    if (
+      status === 503 ||
+      code === 'ERR_BACKEND_NOT_CONFIGURED' ||
+      /ERR_BACKEND_NOT_CONFIGURED|API_INTERNAL_URL|not connected/i.test(msg)
+    ) {
+      setBackendDisconnected(true);
+      return 'Multi-clip video joining requires a connected media processing backend (HTTP 503: ERR_BACKEND_NOT_CONFIGURED). Configure API_INTERNAL_URL / NEXT_PUBLIC_API_URL or connect a custom worker in Settings.';
+    }
+    if (status === 502 || status === 504 || code === 'ERR_BACKEND_UNREACHABLE') {
+      setBackendDisconnected(true);
+      return `Could not reach the media processing backend (HTTP ${status}). Verify your worker service is running and try again.`;
+    }
+    return msg || fallback;
+  };
+
+  const hydrateJoinedJob = (raw: any, validClips: string[], requestedFormat: string): ProcessingJob => {
+    const payload = raw?.data && typeof raw.data === 'object' ? raw.data : raw;
+    const jobId = String(payload?.jobId || payload?.id || '');
+    if (!jobId) {
+      throw new Error('The merge endpoint did not return a valid job ID.');
+    }
+    const rawStatus = String(payload?.status || 'QUEUED').toUpperCase();
+    const status = (rawStatus === 'COMPLETED' ? 'READY' : rawStatus) as ProcessingJob['status'];
+    const progressRaw = Number(payload?.progressPercent ?? payload?.progress);
+
+    return {
+      id: jobId,
+      jobId,
+      jobType: 'transcode_video',
+      status,
+      operation: String(payload?.operation || 'CONCAT_VIDEO'),
+      targetFormat: String(payload?.targetFormat || requestedFormat),
+      streamCopy: true,
+      progress: Number.isFinite(progressRaw) ? Math.max(0, Math.min(100, Math.round(progressRaw))) : 0,
+      progressStage: String(payload?.stageMessage || payload?.stage || 'Queued for clip concatenation'),
+      inputTitle: String(payload?.title || payload?.inputTitle || `Joined Video (${validClips.length} clips)`),
+      sourceUrl: validClips[0],
+      downloadUrl: payload?.downloadUrl || undefined,
+      expiresAt: payload?.expiresAt || undefined,
+      createdAt: payload?.createdAt || new Date().toISOString(),
+    };
   };
 
   const startJoin = async () => {
@@ -61,26 +137,140 @@ export default function VideoMergerPage() {
 
     if (valid.length < 2) {
       setErrorMsg('Please enter at least two authorised video links to join (e.g. youtube.com/watch?v=... or direct MP4s).');
+      setBackendDisconnected(false);
       return;
     }
 
     setIsSubmitting(true);
     setErrorMsg(null);
+    setBackendDisconnected(false);
+
+    const idempotencyKey = `join_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const csrfToken = readCsrfTokenFromCookie();
+    const authToken = typeof window !== 'undefined' ? window.localStorage.getItem('muxaro_auth_token') : null;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'Idempotency-Key': idempotencyKey,
+      ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    };
+
+    const mergeBody = {
+      clipUrls: valid,
+      sourceUrl: valid[0],
+      operation: 'CONCAT_VIDEO',
+      targetFormat: outputFormat,
+      streamCopy: true,
+      title: `Joined Video (${valid.length} clips)`,
+      idempotencyKey,
+    };
+
+    const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+    const postWithFallback = async (subpath: string, body: Record<string, unknown>) => {
+      try {
+        const res = await fetch(`${apiBase}${subpath}`, {
+          method: 'POST',
+          credentials: 'include',
+          headers,
+          body: JSON.stringify(body),
+        });
+        if (!res.ok && apiBase !== '/api/v1' && (res.status === 502 || res.status === 503 || res.status === 504)) {
+          return await fetch(`/api/v1${subpath}`, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(body),
+          });
+        }
+        return res;
+      } catch (err) {
+        if (apiBase !== '/api/v1') {
+          return await fetch(`/api/v1${subpath}`, {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify(body),
+          });
+        }
+        throw err;
+      }
+    };
+
     try {
-      const job = await api.createJob({
-        sourceUrl: valid[0],
-        jobType: 'transcode_video',
-        operation: 'REMUX_STREAM_COPY',
-        targetFormat: outputFormat,
-        streamCopy: true,
-        title: `Joined Video (${valid.length} clips)`,
-      });
-      setActiveJob(job);
+      const mergeRes = await postWithFallback('/tools/merge', mergeBody);
+      const mergeJson = await mergeRes.json().catch(() => null);
+
+      if (mergeRes.ok && mergeJson?.success !== false) {
+        setActiveJob(hydrateJoinedJob(mergeJson, valid, outputFormat));
+        return;
+      }
+
+      const mergeCode = String(mergeJson?.code || mergeJson?.error?.code || '').toUpperCase();
+      // Never mask ERR_BACKEND_NOT_CONFIGURED (503) by falling back to single-clip edge mode
+      if (mergeRes.status === 503 || mergeCode === 'ERR_BACKEND_NOT_CONFIGURED') {
+        throw new Error(formatMergeError(mergeRes.status, mergeJson, 'Backend API not configured.'));
+      }
+
+      // Only fall back to /api/v1/jobs (with full clipUrls) if /tools/merge is not mounted (404/405)
+      if (mergeRes.status === 404 || mergeRes.status === 405) {
+        const jobsRes = await postWithFallback('/jobs', {
+          tool: 'convert_video',
+          operation: 'CONCAT_VIDEO',
+          sourceUrl: valid[0],
+          mediaUrl: valid[0],
+          clipUrls: valid,
+          targetFormat: outputFormat,
+          streamCopy: true,
+          title: `Joined Video (${valid.length} clips)`,
+          idempotencyKey,
+        });
+        const jobsJson = await jobsRes.json().catch(() => null);
+
+        if (jobsRes.ok && jobsJson?.success !== false) {
+          setActiveJob(hydrateJoinedJob(jobsJson, valid, outputFormat));
+          return;
+        }
+        throw new Error(
+          formatMergeError(
+            jobsRes.status,
+            jobsJson,
+            `Could not submit multi-clip join job (HTTP ${jobsRes.status}).`
+          )
+        );
+      }
+
+      // Also fall back to api.createJob only if /tools/merge rejected missing audioUrl on a legacy schema
+      if (mergeRes.status === 400 && /audio|video/i.test(String(mergeJson?.error?.message || ''))) {
+        const job = await api.createJob({
+          sourceUrl: valid[0],
+          clipUrls: valid,
+          jobType: 'transcode_video',
+          operation: 'CONCAT_VIDEO',
+          targetFormat: outputFormat,
+          streamCopy: true,
+          title: `Joined Video (${valid.length} clips)`,
+          idempotencyKey,
+        });
+        setActiveJob(job);
+        return;
+      }
+
+      throw new Error(
+        formatMergeError(
+          mergeRes.status,
+          mergeJson,
+          `Could not join video clips (HTTP ${mergeRes.status}).`
+        )
+      );
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : 'Could not join video clips. Check the links and try again.';
+      if (/ERR_BACKEND_NOT_CONFIGURED|not connected|API_INTERNAL_URL/i.test(message)) {
+        setBackendDisconnected(true);
+      }
       setErrorMsg(message);
     } finally {
       setIsSubmitting(false);
@@ -178,14 +368,18 @@ export default function VideoMergerPage() {
                         )}
                       </div>
 
-                      {normalized && (
+                      {normalized ? (
                         <div className="pl-9">
                           <ActiveLinkIndicator
                             url={normalized}
                             onClear={() => handleUpdateVideo(idx, '')}
                           />
                         </div>
-                      )}
+                      ) : rawUrl.trim().length > 0 ? (
+                        <p className="pl-9 text-xs text-error">
+                          Invalid clip URL — paste a valid http(s) media or playlist link.
+                        </p>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -219,15 +413,25 @@ export default function VideoMergerPage() {
                     <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                     <span>{errorMsg}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={startJoin}
-                    disabled={isSubmitting || validNormalizedList.length < 2}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Retry</span>
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {backendDisconnected && (
+                      <Link
+                        href="/settings?tab=instances"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                      >
+                        Configure Backend
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      onClick={startJoin}
+                      disabled={isSubmitting || validNormalizedList.length < 2}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Retry</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -247,7 +451,11 @@ export default function VideoMergerPage() {
 
             {activeJob && (
               <div className="mt-8 pt-6 border-t border-line">
-                <JobProgress initialJob={activeJob} onJobUpdate={setActiveJob} />
+                <JobProgress
+                  initialJob={activeJob}
+                  onJobUpdate={setActiveJob}
+                  onDismiss={() => setActiveJob(null)}
+                />
               </div>
             )}
           </div>

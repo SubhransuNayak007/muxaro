@@ -7,6 +7,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import type { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -24,13 +25,14 @@ export interface SyntheticMediaManifest {
 export function runFfmpegCommand(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const procEvents = proc as unknown as EventEmitter;
     let stderr = '';
 
-    proc.stderr?.on('data', (d) => {
+    proc.stderr?.on('data', (d: Buffer | string) => {
       stderr += d.toString();
     });
 
-    proc.on('close', (code) => {
+    procEvents.on('close', (code: number | null) => {
       if (code === 0) {
         resolve();
       } else {
@@ -38,7 +40,7 @@ export function runFfmpegCommand(args: string[]): Promise<void> {
       }
     });
 
-    proc.on('error', (err) => {
+    procEvents.on('error', (err: Error) => {
       reject(err);
     });
   });

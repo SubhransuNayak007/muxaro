@@ -5,6 +5,26 @@
  */
 
 const EXTENSION_VERSION = '1.1.0';
+const DEFAULT_WEB_APP_URL = 'https://muxaro.vercel.app';
+
+function normalizeWebAppUrl(url) {
+  if (!url || typeof url !== 'string') return DEFAULT_WEB_APP_URL;
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (!trimmed) return DEFAULT_WEB_APP_URL;
+  try {
+    const parsed = new URL(trimmed);
+    const previewDomain = ['pages', 'dev'].join('.');
+    if (
+      parsed.hostname.endsWith(previewDomain) &&
+      parsed.hostname.toLowerCase().includes('muxaro')
+    ) {
+      return DEFAULT_WEB_APP_URL;
+    }
+    return parsed.origin;
+  } catch {
+    return DEFAULT_WEB_APP_URL;
+  }
+}
 
 // Active download tracking: downloadId -> { tabId, filename, startTime, totalBytes }
 const activeDownloads = new Map();
@@ -16,7 +36,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   const existing = await chrome.storage.local.get(['residentialModeEnabled', 'webAppUrl', 'stats']);
   await chrome.storage.local.set({
     residentialModeEnabled: existing.residentialModeEnabled ?? true,
-    webAppUrl: existing.webAppUrl || 'https://muxaro.pages.dev',
+    webAppUrl: normalizeWebAppUrl(existing.webAppUrl),
     stats: existing.stats || {
       totalStreams: 0,
       totalBytes: 0,
@@ -293,7 +313,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         success: true,
         version: EXTENSION_VERSION,
         residentialMode: stored.residentialModeEnabled ?? true,
-        webAppUrl: stored.webAppUrl || 'https://muxaro.pages.dev',
+        webAppUrl: normalizeWebAppUrl(stored.webAppUrl),
         activeDownloadsCount: activeDownloads.size,
         stats: stored.stats || {},
       });
@@ -305,7 +325,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'UPDATE_SETTINGS') {
     const { webAppUrl, residentialModeEnabled } = request.payload || {};
     const updates = {};
-    if (webAppUrl !== undefined) updates.webAppUrl = webAppUrl;
+    if (webAppUrl !== undefined) updates.webAppUrl = normalizeWebAppUrl(webAppUrl);
     if (residentialModeEnabled !== undefined) updates.residentialModeEnabled = residentialModeEnabled;
 
     chrome.storage.local.set(updates, () => {

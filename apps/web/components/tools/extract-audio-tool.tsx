@@ -9,10 +9,10 @@
  * - AAC: 128k, 256k LC-AAC
  * - Web URL source or 4GB Local File Upload
  * - Real-time SSE progress tracking via useJobStream
- * - Strict Hallmark tokens, accessible styling, no transition:all
+ * - Strict Hallmark tokens, accessible styling, no blanket all-property transitions
  */
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import {
   Music,
@@ -23,23 +23,32 @@ import {
   AlertCircle,
   Download,
   RotateCcw,
-  Sliders,
   Play,
   Pause,
   X,
-  Volume2,
   ArrowRight,
-  Disc,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
+import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
+import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
+import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 
 export type AudioFormat = 'mp3' | 'flac' | 'wav' | 'aac';
 export type Mp3Bitrate = '128k' | '192k' | '256k' | '320k';
 export type AacBitrate = '128k' | '256k';
 export type PcmBitDepth = '16' | '24';
+
+const SAFE_CHUNK_SIZE_BYTES = Math.floor(3.5 * 1024 * 1024);
+
+function isBackendDisconnectedMessage(message: string): boolean {
+  return (
+    message.includes('ERR_BACKEND_NOT_CONFIGURED') ||
+    message.includes('503') ||
+    message.toLowerCase().includes('backend not configured')
+  );
+}
 
 export function ExtractAudioTool() {
   const [inputMode, setInputMode] = useState<'url' | 'file'>('url');
@@ -56,7 +65,6 @@ export function ExtractAudioTool() {
   const [audioChannels, setAudioChannels] = useState<'stereo' | 'mono'>('stereo');
 
   // Metadata tags
-  const [showMetadata, setShowMetadata] = useState<boolean>(false);
   const [tagTitle, setTagTitle] = useState<string>('');
   const [tagArtist, setTagArtist] = useState<string>('');
 
@@ -66,24 +74,57 @@ export function ExtractAudioTool() {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Local Browser FFmpeg WASM Fallback State
+  const [isLocalProcessing, setIsLocalProcessing] = useState<boolean>(false);
+  const [localProgress, setLocalProgress] = useState<FFmpegProgress | null>(null);
+  const [localResult, setLocalResult] = useState<FFmpegTaskResult | null>(null);
+
   // Job Submission & Streaming
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const jobStream = useJobStream(submittedJobId);
+
+  useEffect(() => {
+    return () => {
+      if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    };
+  }, [localResult?.url]);
+
+  const resolveUploadedId = (manifest: Record<string, any> | null | undefined): string => {
+    const id =
+      manifest?.uploadSessionId ||
+      manifest?.assetId ||
+      manifest?.uploadId ||
+      manifest?.id;
+    if (!id || typeof id !== 'string') {
+      throw new Error('Upload finished without a server session or asset ID.');
+    }
+    return id;
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    uploader?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
     setSelectedFile(file);
     setUploadedAssetId(null);
+    setUploadStats(null);
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
     const instance = new ResumableMultipartUploader(file, {
+      apiBase: getApiBaseUrl(),
+      chunkSize: SAFE_CHUNK_SIZE_BYTES,
       onProgress: (stats) => setUploadStats(stats),
       onError: (err) => {
-        setErrorMessage(err.message || 'File upload failed');
+        const msg = err.message || 'File upload failed';
+        setErrorMessage(msg);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
         setIsUploading(false);
       },
     });
@@ -94,21 +135,76 @@ export function ExtractAudioTool() {
     if (!uploader) return;
     setIsUploading(true);
     setErrorMessage(null);
+    setBackendDisconnected(false);
     try {
       const manifest = await uploader.start();
-      setUploadedAssetId(manifest.assetId || manifest.id || 'uploaded_asset');
+      setUploadedAssetId(resolveUploadedId(manifest));
       setIsUploading(false);
     } catch (err: any) {
-      if (err.message !== 'Upload paused or cancelled.') {
-        setErrorMessage(err.message || 'Upload failed.');
+      const msg = err?.message || 'Upload failed.';
+      if (msg !== 'Upload paused or cancelled.') {
+        setErrorMessage(msg);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
       }
       setIsUploading(false);
+    }
+  };
+
+  const handlePauseResumeUpload = async () => {
+    if (!uploader) return;
+    if (uploadStats?.state === 'uploading') {
+      await uploader.pause();
+      setIsUploading(false);
+    } else if (uploadStats?.state === 'paused') {
+      setIsUploading(true);
+      try {
+        const manifest = await uploader.resume();
+        setUploadedAssetId(resolveUploadedId(manifest));
+        setIsUploading(false);
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to resume upload.';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
+        }
+        setIsUploading(false);
+      }
+    }
+  };
+
+  const runLocalFfmpegExtract = async () => {
+    if (!selectedFile) return;
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setErrorMessage(null);
+    setIsLocalProcessing(true);
+    setLocalProgress({ ratio: 0, percent: 0, message: 'Initializing FFmpeg Web Worker…' });
+    try {
+      const bitrateStr = format === 'mp3' ? mp3Bitrate : format === 'aac' ? aacBitrate : undefined;
+      const bitrateKbps = bitrateStr ? parseInt(bitrateStr, 10) : undefined;
+      const client = FFmpegWorkerClient.getInstance();
+      const result = await client.extractAudio({
+        file: selectedFile,
+        fileName: selectedFile.name,
+        targetFormat: format,
+        streamCopy: false,
+        bitrateKbps,
+        onProgress: (prog) => setLocalProgress(prog),
+      });
+      setLocalResult(result);
+    } catch (err: any) {
+      setErrorMessage(
+        err?.message || 'Local FFmpeg WASM audio extraction failed for this file.'
+      );
+    } finally {
+      setIsLocalProcessing(false);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
     if (inputMode === 'url') {
       const trimmed = normalizeMediaUrl(urlInput);
@@ -116,11 +212,9 @@ export function ExtractAudioTool() {
         setErrorMessage('Please enter an authorised media link.');
         return;
       }
-    } else {
-      if (!uploadedAssetId) {
-        setErrorMessage('Please upload your media file before extracting audio.');
-        return;
-      }
+    } else if (!uploadedAssetId) {
+      setErrorMessage('Please upload your media file before extracting audio, or extract locally in browser.');
+      return;
     }
 
     setIsSubmitting(true);
@@ -130,6 +224,7 @@ export function ExtractAudioTool() {
       const job = await api.createJob({
         sourceUrl: inputMode === 'url' ? normalizeMediaUrl(urlInput) : undefined,
         mediaAssetId: inputMode === 'file' ? uploadedAssetId! : undefined,
+        uploadSessionId: inputMode === 'file' ? uploadedAssetId! : undefined,
         jobType: 'extract_audio',
         operation: 'EXTRACT_AUDIO',
         targetFormat: format,
@@ -137,13 +232,23 @@ export function ExtractAudioTool() {
         targetAudioBitrate: selectedBitrate,
         audioChannels: audioChannels === 'mono' ? 1 : 2,
         normalizeLoudness: normalizeVolume,
-        metadata: tagTitle || tagArtist ? { title: tagTitle, artist: tagArtist } : undefined,
+        metadata:
+          tagTitle || tagArtist || format === 'wav' || format === 'flac'
+            ? {
+                ...(tagTitle ? { title: tagTitle } : {}),
+                ...(tagArtist ? { artist: tagArtist } : {}),
+                ...(format === 'wav' || format === 'flac' ? { pcmBitDepth } : {}),
+              }
+            : undefined,
+        title: inputMode === 'file' && selectedFile ? selectedFile.name : undefined,
         idempotencyKey: `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       });
 
       setSubmittedJobId(job.jobId || job.id);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to submit audio extraction job.');
+    } catch (err: unknown) {
+      const msg = extractDisplayError(err, 'Failed to submit audio extraction job.');
+      setErrorMessage(msg);
+      setBackendDisconnected(isBackendDisconnectedMessage(msg));
     } finally {
       setIsSubmitting(false);
     }
@@ -151,14 +256,28 @@ export function ExtractAudioTool() {
 
   const handleReset = () => {
     jobStream.reset();
+    uploader?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setLocalProgress(null);
+    setIsLocalProcessing(false);
     setSubmittedJobId(null);
     setUrlInput('');
     setSelectedFile(null);
     setUploadedAssetId(null);
     setUploadStats(null);
     setUploader(null);
+    setIsUploading(false);
+    setTagTitle('');
+    setTagArtist('');
     setErrorMessage(null);
+    setBackendDisconnected(false);
   };
+
+  const jobDownloadHref = submittedJobId
+    ? jobStream.downloadUrl ||
+      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+    : null;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -177,7 +296,39 @@ export function ExtractAudioTool() {
         </p>
       </div>
 
-      {!submittedJobId ? (
+      {localResult ? (
+        <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-5">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
+            <div>
+              <h3 className="text-base font-bold text-[var(--muxaro-text-primary)]">
+                Local Browser Audio Extraction Complete
+              </h3>
+              <p className="text-xs text-[var(--muxaro-text-secondary)]">
+                Processed locally via FFmpeg Web Worker with zero server round-trip.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={localResult.url}
+              download={localResult.fileName}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download {localResult.fileName}</span>
+            </a>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-semibold text-[var(--muxaro-text-secondary)] hover:bg-[var(--muxaro-bg-elevated)]"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Extract Another Audio Track</span>
+            </button>
+          </div>
+        </div>
+      ) : !submittedJobId ? (
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Source Input Tabs */}
           <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-5">
@@ -213,13 +364,29 @@ export function ExtractAudioTool() {
                 <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--muxaro-text-secondary)]">
                   Video or Music URL
                 </label>
-                <input
-                  type="url"
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="Paste audio link or media URL…"
-                  className="w-full px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs sm:text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus:bg-[var(--muxaro-bg-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-colors duration-150"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    placeholder="Paste audio link or media URL…"
+                    className="w-full px-4 py-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs sm:text-sm text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus:bg-[var(--muxaro-bg-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-colors duration-150"
+                  />
+                  {urlInput && (
+                    <button
+                      type="button"
+                      onClick={() => setUrlInput('')}
+                      aria-label="Clear URL"
+                      className="absolute right-3 top-3 text-[var(--muxaro-text-tertiary)] hover:text-[var(--muxaro-text-primary)]"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-4">
@@ -240,16 +407,16 @@ export function ExtractAudioTool() {
                       Click to choose video/audio file
                     </p>
                     <p className="text-xs text-[var(--muxaro-text-tertiary)] mt-1">
-                      Extracts high-bitrate audio from MP4, MKV, WebM, MOV, and AVI
+                      Chunked uploads under 4 MB or instant browser FFmpeg extraction
                     </p>
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Music className="w-5 h-5 text-[var(--muxaro-indigo)]" />
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--muxaro-text-primary)]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Music className="w-5 h-5 text-[var(--muxaro-indigo)] shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-[var(--muxaro-text-primary)] truncate">
                             {selectedFile.name}
                           </div>
                           <div className="text-xs text-[var(--muxaro-text-tertiary)]">
@@ -259,14 +426,56 @@ export function ExtractAudioTool() {
                       </div>
 
                       {!uploadedAssetId ? (
-                        <button
-                          type="button"
-                          onClick={startUpload}
-                          disabled={isUploading}
-                          className="px-4 py-1.5 rounded-lg bg-[var(--muxaro-indigo)] text-white text-xs font-semibold hover:opacity-95 disabled:opacity-50"
-                        >
-                          {isUploading ? 'Uploading…' : 'Upload File'}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isUploading || uploadStats?.state === 'paused' ? (
+                            <button
+                              type="button"
+                              onClick={handlePauseResumeUpload}
+                              className="px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] text-xs font-medium text-[var(--muxaro-text-secondary)] hover:bg-[var(--muxaro-bg-elevated)]"
+                            >
+                              {uploadStats?.state === 'uploading' ? (
+                                <span className="flex items-center gap-1.5">
+                                  <Pause className="w-3.5 h-3.5" /> Pause
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5">
+                                  <Play className="w-3.5 h-3.5" /> Resume
+                                </span>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={startUpload}
+                              className="px-4 py-1.5 rounded-lg bg-[var(--muxaro-indigo)] text-white text-xs font-semibold hover:opacity-95"
+                            >
+                              Upload File
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={runLocalFfmpegExtract}
+                            disabled={isLocalProcessing}
+                            className="px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] text-xs font-semibold text-[var(--muxaro-text-primary)] hover:bg-[var(--muxaro-bg-elevated)] disabled:opacity-50"
+                          >
+                            {isLocalProcessing ? 'Extracting Locally…' : 'Process in Browser'}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Remove selected file"
+                            onClick={() => {
+                              uploader?.cancel().catch(() => {});
+                              setUploader(null);
+                              setIsUploading(false);
+                              setSelectedFile(null);
+                              setUploadedAssetId(null);
+                              setUploadStats(null);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
                       ) : (
                         <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
                           <CheckCircle2 className="w-4 h-4" /> Ready for extraction
@@ -274,7 +483,22 @@ export function ExtractAudioTool() {
                       )}
                     </div>
 
-                    {uploadStats && !uploadedAssetId && (
+                    {isLocalProcessing && localProgress && (
+                      <div className="space-y-1.5 pt-2">
+                        <div className="flex justify-between text-xs text-[var(--muxaro-text-secondary)]">
+                          <span>{localProgress.message || 'Extracting audio locally…'}</span>
+                          <span>{Math.round(localProgress.percent)}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className="w-full h-full bg-emerald-500 origin-left transition-transform duration-200"
+                            style={{ transform: `scaleX(${Math.min(1, Math.max(0, localProgress.percent / 100))})` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {uploadStats && !uploadedAssetId && !isLocalProcessing && (
                       <div className="space-y-1.5 pt-2">
                         <div className="flex justify-between text-xs text-[var(--muxaro-text-secondary)]">
                           <span>Uploading ({uploadStats.activeWorkers} concurrent streams)</span>
@@ -284,8 +508,8 @@ export function ExtractAudioTool() {
                         </div>
                         <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-[var(--muxaro-indigo)] transition-all duration-200"
-                            style={{ width: `${uploadStats.percent}%` }}
+                            className="w-full h-full bg-[var(--muxaro-indigo)] origin-left transition-transform duration-200"
+                            style={{ transform: `scaleX(${Math.min(1, Math.max(0, uploadStats.percent / 100))})` }}
                           />
                         </div>
                       </div>
@@ -445,19 +669,61 @@ export function ExtractAudioTool() {
                   </button>
                 </div>
               </div>
+
+              <div className="pt-3 border-t border-[var(--muxaro-border-subtle)] grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={tagTitle}
+                  onChange={(e) => setTagTitle(e.target.value)}
+                  placeholder="Optional track title metadata"
+                  className="px-3 py-2 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs text-[var(--muxaro-text-primary)]"
+                />
+                <input
+                  type="text"
+                  value={tagArtist}
+                  onChange={(e) => setTagArtist(e.target.value)}
+                  placeholder="Optional artist metadata"
+                  className="px-3 py-2 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs text-[var(--muxaro-text-primary)]"
+                />
+              </div>
             </div>
           </div>
 
           {errorMessage && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
+            <div
+              role="alert"
+              className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex flex-wrap items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {backendDisconnected && selectedFile && (
+                  <button
+                    type="button"
+                    onClick={runLocalFfmpegExtract}
+                    disabled={isLocalProcessing}
+                    className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                  >
+                    Extract Locally (FFmpeg WASM)
+                  </button>
+                )}
+                {backendDisconnected && (
+                  <Link
+                    href="/settings?tab=instances"
+                    className="px-3 py-1 rounded-lg border border-red-500/40 text-xs font-semibold hover:bg-red-500/10"
+                  >
+                    Configure Backend
+                  </Link>
+                )}
+              </div>
             </div>
           )}
 
           <button
             type="submit"
-            disabled={isSubmitting || (inputMode === 'file' && !uploadedAssetId)}
+            disabled={isSubmitting || isLocalProcessing || (inputMode === 'file' && !uploadedAssetId)}
             className="w-full py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
@@ -513,19 +779,42 @@ export function ExtractAudioTool() {
 
             <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
               <div
-                className={`h-full transition-all duration-300 ${
+                className={`w-full h-full origin-left transition-transform duration-300 ${
                   jobStream.status === 'FAILED'
                     ? 'bg-red-500'
                     : jobStream.status === 'READY'
                     ? 'bg-emerald-500'
                     : 'bg-[var(--muxaro-indigo)]'
                 }`}
-                style={{ width: `${jobStream.progress}%` }}
+                style={{ transform: `scaleX(${Math.min(1, Math.max(0, jobStream.progress / 100))})` }}
               />
             </div>
           </div>
 
-          {jobStream.status === 'READY' && jobStream.downloadUrl && (
+          {jobStream.error && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium space-y-2">
+              <div className="font-bold">Extraction Failed: {jobStream.error.code}</div>
+              <div>{jobStream.error.userMessage || jobStream.error.message}</div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={jobStream.retry}
+                  className="px-3 py-1 bg-red-600 text-white rounded text-xs font-semibold"
+                >
+                  Retry Job
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-3 py-1 rounded border border-[var(--muxaro-border)] text-xs font-semibold"
+                >
+                  Start Over
+                </button>
+              </div>
+            </div>
+          )}
+
+          {jobStream.status === 'READY' && jobDownloadHref && (
             <div className="p-6 rounded-xl bg-emerald-500/10 border border-emerald-500/30 space-y-4">
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
@@ -541,7 +830,7 @@ export function ExtractAudioTool() {
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <a
-                  href={jobStream.downloadUrl}
+                  href={jobDownloadHref}
                   download
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
                 >
@@ -563,6 +852,18 @@ export function ExtractAudioTool() {
                   <span>Extract Another Audio Track</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {!jobStream.isTerminal && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={jobStream.cancel}
+                className="text-xs text-red-500 hover:text-red-700 font-semibold"
+              >
+                Cancel Extraction
+              </button>
             </div>
           )}
         </div>

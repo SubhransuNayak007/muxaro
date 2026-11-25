@@ -130,7 +130,7 @@ describe('Entitlements - Engine Reservation Lifecycle & Bucket Isolation', () =>
       async () => {
         await engine.reserveJobQuota({
           userId,
-          tier: 'free',
+          userTier: 'free',
           jobType: 'VIDEO_DOWNLOAD',
           jobId: 'job_video_11',
         });

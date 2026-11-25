@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { NextRequest } from 'next/server';
+import { NextRequest } from '../../apps/web/node_modules/next/server.js';
 import { classifyApiError, createApiErrorResponse } from '../../apps/web/lib/api-error.ts';
 import { POST as handleProbePost, GET as handleProbeGet } from '../../apps/web/app/api/v1/probe/route.ts';
 import { POST as handleJobsPost } from '../../apps/web/app/api/v1/jobs/route.ts';

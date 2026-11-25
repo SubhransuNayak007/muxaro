@@ -8,7 +8,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit && node -e \"const fs=require('fs'),p=require('path');const w=d=>fs.existsSync(d)?fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()&&e.name!=='node_modules'&&e.name!=='.next'?w(p.join(d,e.name)):e.isFile()&&(e.name.endsWith('.ts')||e.name.endsWith('.tsx')||e.name.endsWith('.js')||e.name.endsWith('.mjs')||e.name.endsWith('.css'))?[p.join(d,e.name)]:[]):[];const win='C:'+String.fromCharCode(92)+'Users'+String.fromCharCode(92);for(const f of [...w('app'),...w('components'),...w('lib')]){const s=fs.readFileSync(f,'utf8');if(s.includes('transition: all')||s.includes('transition:all')){console.error('Forbidden transition:all in '+f);process.exit(1);}if(s.includes(win)){console.error('Developer path in '+f);process.exit(1);}}console.log('Web lint & typecheck passed.');\"",
     "seo:indexnow": "node ../../scripts/submit-indexnow.mjs"
   },
   "dependencies": {

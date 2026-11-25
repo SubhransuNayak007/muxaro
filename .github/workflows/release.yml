@@ -20,8 +20,7 @@ concurrency:
 
 env:
   NODE_VERSION: "24"
-  PRODUCTION_SITE_URL: "https://muxaro.app"
-  PRODUCTION_API_URL: "https://api.muxaro.app"
+  PRODUCTION_SITE_URL: "https://muxaro.vercel.app"
 
 jobs:
   release:
@@ -59,6 +58,15 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Validate release API URL variable (if configured)
+        env:
+          PROD_API_URL: ${{ vars.PRODUCTION_API_URL }}
+        run: |
+          if [ -n "$PROD_API_URL" ] && echo "$PROD_API_URL" | grep -qiE "api\.muxaro\.app|muxaro-api\.internal"; then
+            echo "::error::vars.PRODUCTION_API_URL cannot use dead/unresolvable host ($PROD_API_URL)."
+            exit 1
+          fi
+
       - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -67,27 +75,28 @@ jobs:
       - name: Install dependencies across build targets
         run: |
           npm --prefix apps/web ci --no-audit --no-fund
+          npm --prefix apps/api ci --no-audit --no-fund
           npm --prefix apps/media-worker install --no-audit --no-fund
           npm --prefix packages/entitlements ci --no-audit --no-fund
           npm --prefix packages/source-adapters install --no-audit --no-fund
 
       - name: TypeCheck & Build release artifacts
         env:
-          CLOUDFLARE_PAGES: "1"
-          NEXT_PUBLIC_SITE_URL: ${{ env.PRODUCTION_SITE_URL }}
-          NEXT_PUBLIC_API_URL: ${{ env.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL || '' }}
         run: |
           npm --prefix packages/entitlements run typecheck
           npm --prefix packages/source-adapters run typecheck
+          npm --prefix apps/api run typecheck
           npm --prefix apps/media-worker run build
-          (cd apps/web && npx tsc --noEmit && npx next build)
+          (cd apps/web && npm run lint && npx next build)
 
       - name: Package release tarballs
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           mkdir -p release-artifacts
-          tar -czf "release-artifacts/muxaro-web-static-${TAG}.tar.gz" -C apps/web/out .
+          tar -czf "release-artifacts/muxaro-web-next-${TAG}.tar.gz" -C apps/web .next public package.json next.config.mjs
           tar -czf "release-artifacts/muxaro-media-worker-${TAG}.tar.gz" \
             -C apps/media-worker dist package.json
 
@@ -123,7 +132,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            release-artifacts/muxaro-web-static-${{ steps.meta.outputs.tag }}.tar.gz
+            release-artifacts/muxaro-web-next-${{ steps.meta.outputs.tag }}.tar.gz
             release-artifacts/muxaro-media-worker-${{ steps.meta.outputs.tag }}.tar.gz
             release-artifacts/muxaro-${{ steps.meta.outputs.tag }}.spdx.json
             release-artifacts/SHA256SUMS.txt

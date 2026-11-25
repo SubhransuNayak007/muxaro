@@ -1,23 +1,22 @@
 // ==UserScript==
 // @name         MUXARO Direct - High-Speed Stream Downloader
-// @namespace    https://muxaro.pages.dev/
+// @namespace    https://muxaro.vercel.app/
 // @version      1.2.0
 // @description  Client-side high-speed stream downloader for MUXARO. Enables direct browser streaming with zero limits.
 // @author       MUXARO Engineering
 // @match        https://muxaro.vercel.app/*
-// @match        https://*.vercel.app/*
+// @match        *://*.vercel.app/*
 // @match        https://muxaro.app/*
-// @match        https://*.muxaro.app/*
-// @match        https://muxaro.pages.dev/*
-// @match        *://muxaro.pages.dev/*
-// @match        *://*.muxaro.pages.dev/*
-// @match        *://*-muxaro.pages.dev/*
+// @match        *://*.muxaro.app/*
 // @match        http://localhost:*/*
+// @match        https://localhost:*/*
 // @match        http://127.0.0.1:*/*
+// @match        https://127.0.0.1:*/*
 // @match        https://www.youtube.com/*
 // @connect      googlevideo.com
 // @connect      youtube.com
-// @connect      muxaro.pages.dev
+// @connect      muxaro.vercel.app
+// @connect      muxaro.app
 // @connect      vercel.app
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
@@ -30,6 +29,7 @@
   'use strict';
 
   const MUXARO_VERSION = '1.2.0';
+  const DEFAULT_MUXARO_ORIGIN = 'https://muxaro.vercel.app';
 
   // Origin verification helper
   function isAllowedOrigin(origin) {
@@ -46,9 +46,6 @@
       const u = new URL(origin);
       const host = u.hostname.toLowerCase();
       return (
-        host === 'muxaro.pages.dev' ||
-        host.endsWith('.muxaro.pages.dev') ||
-        host.endsWith('-muxaro.pages.dev') ||
         host === 'muxaro.app' ||
         host.endsWith('.muxaro.app') ||
         host === 'muxaro.vercel.app' ||
@@ -61,17 +58,35 @@
     }
   }
 
+  function getConfiguredAppOrigin() {
+    try {
+      if (typeof GM_getValue === 'function') {
+        const saved = GM_getValue('muxaro_last_origin', DEFAULT_MUXARO_ORIGIN);
+        if (saved && isAllowedOrigin(saved)) {
+          return String(saved).replace(/\/+$/, '');
+        }
+      }
+    } catch (_) {}
+    return DEFAULT_MUXARO_ORIGIN;
+  }
+
   // 1. Integration on MUXARO Web Application
   const isMuxaroHost = isAllowedOrigin(window.location.origin);
 
   if (isMuxaroHost) {
+    try {
+      if (typeof GM_setValue === 'function' && window.location.origin && window.location.origin !== 'null') {
+        GM_setValue('muxaro_last_origin', window.location.origin);
+      }
+    } catch (_) {}
+
     function getSafeTargetOrigin() {
       try {
         if (typeof window !== 'undefined' && window.location.origin && window.location.origin !== 'null') {
           return window.location.origin;
         }
       } catch (_) {}
-      return '*';
+      return DEFAULT_MUXARO_ORIGIN;
     }
 
     function setBridgeActiveState() {
@@ -308,7 +323,7 @@
 
       const btn = document.createElement('a');
       btn.id = 'muxaro-direct-yt-btn';
-      btn.href = 'https://muxaro.pages.dev/?url=' + encodeURIComponent(location.href) + '&direct=1';
+      btn.href = getConfiguredAppOrigin() + '/?url=' + encodeURIComponent(location.href) + '&direct=1';
       btn.target = '_blank';
       btn.rel = 'noopener noreferrer';
       btn.title = 'Stream in Original Quality with MUXARO Direct';

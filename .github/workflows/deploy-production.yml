@@ -10,6 +10,11 @@ on:
         required: false
         default: "main"
         type: string
+      deploy_legacy_cloudflare_pages:
+        description: "Also deploy optional legacy Cloudflare Pages test target (muxaro.pages.dev)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -21,17 +26,16 @@ concurrency:
 env:
   NODE_VERSION: "24"
   GCP_REGION: "us-central1"
+  PRODUCTION_SITE_URL: "https://muxaro.vercel.app"
   CLOUDFLARE_PROJECT_NAME: "muxaro"
-  PRODUCTION_SITE_URL: "https://muxaro.app"
-  PRODUCTION_API_URL: "https://api.muxaro.app"
 
 jobs:
   deploy-production:
-    name: Deploy Production (Protected Environment)
+    name: Deploy Production (Vercel Web + Containerized API & Worker)
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://muxaro.app
+      url: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
     permissions:
       contents: read
       id-token: write
@@ -42,26 +46,47 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: Check production deployment credentials
+      - name: Validate required production variables & deployment credentials
         id: creds
         env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROD_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           GCP_WIF: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           GCP_PROJ: ${{ secrets.GCP_PROJECT_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LEGACY_CF: ${{ inputs.deploy_legacy_cloudflare_pages }}
         run: |
-          if [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
-            echo "cloudflare=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "cloudflare=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Cloudflare production secrets not configured in 'production' environment. Skipping Cloudflare Pages deploy."
+          if [ -z "$PROD_API_URL" ]; then
+            echo "::error::vars.PRODUCTION_API_URL is required (must point to the live Fastify API origin for Vercel BFF API_INTERNAL_URL / NEXT_PUBLIC_API_URL)."
+            exit 1
           fi
+          if echo "$PROD_API_URL" | grep -qiE "api\.muxaro\.app|muxaro-api\.internal"; then
+            echo "::error::vars.PRODUCTION_API_URL cannot use dead/unresolvable host ($PROD_API_URL)."
+            exit 1
+          fi
+
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "vercel=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vercel=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Vercel secrets (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID) not configured. Skipping Vercel production deploy."
+          fi
+
           if [ -n "$GCP_WIF" ] && [ -n "$GCP_SA" ] && [ -n "$GCP_PROJ" ]; then
             echo "gcp=true" >> "$GITHUB_OUTPUT"
           else
             echo "gcp=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::GCP Workload Identity Federation secrets not configured in 'production' environment. Skipping Cloud Run deploy."
+            echo "::notice::GCP Cloud Run secrets not configured. See container deploy instructions for Fly.io / Railway / Docker Compose (infra/docker-compose.yml)."
+          fi
+
+          if [ "$LEGACY_CF" = "true" ] && [ -n "$CF_TOKEN" ] && [ -n "$CF_ACCOUNT" ]; then
+            echo "cloudflare=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cloudflare=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Node.js ${{ env.NODE_VERSION }}
@@ -69,37 +94,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install Web dependencies
+      - name: Install & Lint Web Application (apps/web)
         working-directory: apps/web
-        run: npm ci --no-audit --no-fund
-
-      - name: Build Production Cloudflare Pages Bundle
-        working-directory: apps/web
-        env:
-          CLOUDFLARE_PAGES: "1"
-          NEXT_PUBLIC_SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
-          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL || env.PRODUCTION_API_URL }}
-        run: npx next build
-
-      - name: Verify production static bundle hygiene
         run: |
-          test -f apps/web/out/index.html
-          test -f apps/web/out/robots.txt
-          test -f apps/web/out/sitemap.xml
-          test -f apps/web/out/_headers
-          test -f apps/web/out/_redirects
-          if grep -rnE "localhost:3000|localhost:4000|127\.0\.0\.1:4000" apps/web/out/; then
-            echo "::error::Hardcoded localhost URL leaked into production static export!"
-            exit 1
-          fi
-
-      - name: Deploy Production Frontend to Cloudflare Pages
-        if: steps.creds.outputs.cloudflare == 'true'
-        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web/out --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }} --branch=main
+          npm ci --no-audit --no-fund
+          npm run lint
 
       - name: Authenticate to Google Cloud via OIDC (Workload Identity Federation)
         if: steps.creds.outputs.gcp == 'true'
@@ -112,11 +111,13 @@ jobs:
         if: steps.creds.outputs.gcp == 'true'
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      - name: Build, Push & Deploy Cloud Run API and Internal Media Worker
+      - name: Build, Push & Deploy Backend Containers (Cloud Run API + Media Worker)
         if: steps.creds.outputs.gcp == 'true'
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           IMAGE_TAG: ${{ github.sha }}
+          SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
         run: |
           gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
@@ -132,6 +133,8 @@ jobs:
           sed -e "s|REGION|${GCP_REGION}|g" \
               -e "s|PROJECT_ID|${GCP_PROJECT_ID}|g" \
               -e "s|IMAGE_TAG|${IMAGE_TAG}|g" \
+              -e "s|FRONTEND_SITE_URL|${SITE_URL}|g" \
+              -e "s|API_PUBLIC_URL|${API_URL}|g" \
               infra/cloudrun/api-service.yaml > /tmp/api-service.resolved.yaml
 
           sed -e "s|REGION|${GCP_REGION}|g" \
@@ -147,19 +150,100 @@ jobs:
             --project="${GCP_PROJECT_ID}" \
             --region="${GCP_REGION}"
 
-      - name: Post-Deploy Production Health Verification
-        if: steps.creds.outputs.cloudflare == 'true' && steps.creds.outputs.gcp == 'true'
+      - name: Backend Container Deployment Reference (Fly.io / Railway / Docker Compose)
+        if: steps.creds.outputs.gcp != 'true'
+        run: |
+          echo "GCP Cloud Run deploy was skipped (no GCP secrets). To host apps/api + apps/worker-media + bgutil-pot-provider:"
+          echo "  1. Docker Compose (VPS/VM): docker compose -f infra/docker-compose.yml up -d --build"
+          echo "  2. Fly.io / Railway: deploy infra/Dockerfile.api (PORT=4000), infra/Dockerfile.worker-media (PORT=5000), and brainicism/bgutil-ytdlp-pot-provider:latest (PORT=4416) with POT_PROVIDER_URL & YTDLP_PO_TOKEN_BASE_URL wired."
+          docker compose -f infra/docker-compose.yml config -q
+
+      - name: Deploy Production Frontend to Vercel (apps/web)
+        if: steps.creds.outputs.vercel == 'true'
+        working-directory: apps/web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          API_INTERNAL_URL: ${{ vars.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@latest build --prod --token="$VERCEL_TOKEN"
+          DEPLOY_URL=$(npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "Deployed Vercel production URL: $DEPLOY_URL"
+
+      - name: Verify Local Next.js Production Build (when Vercel deploy skipped)
+        if: steps.creds.outputs.vercel != 'true'
+        working-directory: apps/web
+        env:
+          API_INTERNAL_URL: ${{ vars.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
+        run: |
+          npx next build
+          test -d .next
+          if grep -rnE "localhost:3000|localhost:4000|127\.0\.0\.1:4000" .next/static/; then
+            echo "::error::Hardcoded localhost URL leaked into production Next.js assets!"
+            exit 1
+          fi
+
+      - name: Optional Legacy Test Deploy to Cloudflare Pages (muxaro.pages.dev)
+        if: steps.creds.outputs.cloudflare == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_PAGES: "1"
+          NEXT_PUBLIC_SITE_URL: https://muxaro.pages.dev
+          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL }}
+        run: npx next build
+
+      - name: Upload Legacy Cloudflare Pages Bundle
+        if: steps.creds.outputs.cloudflare == 'true'
+        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/out --project-name=${{ env.CLOUDFLARE_PROJECT_NAME }} --branch=main
+
+      - name: Post-Deploy Production Health & Smoke Verification
+        if: steps.creds.outputs.vercel == 'true'
         env:
           SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
-          API_URL: ${{ vars.PRODUCTION_API_URL || env.PRODUCTION_API_URL }}
+          API_URL: ${{ vars.PRODUCTION_API_URL }}
         run: |
           curl -fsS "${API_URL}/api/v1/health"
           curl -fsS "${API_URL}/api/v1/ready"
           curl -fsSI "${SITE_URL}/" | head -n 1 | grep -q "200"
-          echo "Production health & readiness verification passed."
+
+          HEALTH_JSON=$(curl -fsS "${SITE_URL}/api/v1/health")
+          echo "$HEALTH_JSON" | node -e "
+            const fs = require('fs');
+            const body = JSON.parse(fs.readFileSync(0, 'utf8'));
+            const d = body.data || body;
+            if (d.status !== 'OPERATIONAL' || d.smokeTestStatus !== 'PASS') {
+              console.error('Vercel /api/v1/health failed operational smoke gate:', JSON.stringify(body));
+              process.exit(1);
+            }
+            console.log('Vercel /api/v1/health verified OPERATIONAL + smokeTestStatus=PASS');
+          "
+
+          PLAYLIST_STATUS=$(curl -s -o /tmp/playlist-inspect.json -w "%{http_code}" \
+            -X POST "${SITE_URL}/api/v1/playlists/inspect" \
+            -H "Content-Type: application/json" \
+            -d '{"url":"https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI","maxItems":1}')
+          echo "POST /api/v1/playlists/inspect returned HTTP ${PLAYLIST_STATUS}"
+          cat /tmp/playlist-inspect.json || true
+          if [ "$PLAYLIST_STATUS" = "404" ] || [ "$PLAYLIST_STATUS" = "503" ]; then
+            echo "::error::/api/v1/playlists/inspect failed with HTTP ${PLAYLIST_STATUS} (must not 404 or return 503 unbacked when backend is wired)."
+            exit 1
+          fi
+          echo "Production health, BFF proxy, and playlist inspect smoke verification passed."
 
       - name: Trigger IndexNow Search Ingestion Automation
         env:
           INDEXNOW_KEY: "d3e24b7a95614917a1518f97a8929e01"
-          INDEXNOW_HOST: "muxaro.app"
-        run: node scripts/submit-indexnow.mjs
+          SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
+        run: |
+          INDEXNOW_HOST=$(echo "$SITE_URL" | sed -E 's|^https?://||; s|/.*$||')
+          INDEXNOW_HOST="$INDEXNOW_HOST" node scripts/submit-indexnow.mjs

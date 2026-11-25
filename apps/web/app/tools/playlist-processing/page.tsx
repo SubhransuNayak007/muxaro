@@ -16,8 +16,51 @@ import {
   Search,
 } from 'lucide-react';
 
+import { getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
+
+const AUDIO_FORMATS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'opus'] as const;
+const RESOLUTION_OPTIONS = ['source', '2160p', '1440p', '1080p', '720p', '480p'] as const;
+const TERMINAL_STATUSES = new Set([
+  'COMPLETED',
+  'READY',
+  'PARTIAL_FAILURE',
+  'FAILED',
+  'CANCELLED',
+  'EXPIRED',
+]);
+
+function isAudioFormat(fmt: string): boolean {
+  return AUDIO_FORMATS.includes(fmt.toLowerCase() as any);
+}
+
+function parsePlaylistError(
+  status: number,
+  json: Record<string, any> | null,
+  fallback: string
+): { message: string; isBackendDisconnected: boolean } {
+  const code = json?.error?.code || json?.code;
+  const isBackendDisconnected =
+    status === 503 || code === 'ERR_BACKEND_NOT_CONFIGURED';
+  if (isBackendDisconnected) {
+    return {
+      message:
+        json?.error?.message ||
+        json?.rawMessage ||
+        'Backend worker is not configured (ERR_BACKEND_NOT_CONFIGURED). Connect an execution server in Settings or set API_INTERNAL_URL.',
+      isBackendDisconnected: true,
+    };
+  }
+  return {
+    message:
+      json?.error?.userMessage ||
+      json?.error?.message ||
+      json?.message ||
+      fallback,
+    isBackendDisconnected: false,
+  };
+}
 
 interface InspectedPlaylistItem {
   position: number;
@@ -62,6 +105,7 @@ function formatTrackDuration(seconds?: number): string {
 export default function PlaylistProcessingPage() {
   const [playlistUrl, setPlaylistUrl] = useState<string>('');
   const [targetFormat, setTargetFormat] = useState<string>('mp4');
+  const [targetResolution, setTargetResolution] = useState<string>('1080p');
   const [packageAsZip, setPackageAsZip] = useState<boolean>(true);
 
   const [isInspecting, setIsInspecting] = useState<boolean>(false);
@@ -70,6 +114,7 @@ export default function PlaylistProcessingPage() {
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
   const [playlistJob, setPlaylistJob] = useState<PlaylistJobStatus | null>(null);
 
   const inspectPlaylist = useCallback(async () => {
@@ -82,17 +127,31 @@ export default function PlaylistProcessingPage() {
     setIsInspecting(true);
     setInspectError(null);
     setSubmitError(null);
+    setBackendDisconnected(false);
     try {
-      const res = await fetch('/api/v1/playlists/inspect', {
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const res = await fetch(`${apiBase}/playlists/inspect`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({ url: trimmed, maxItems: 50 }),
       });
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
       if (!res.ok || !json?.success) {
-        throw new Error(
-          json?.error?.message || `Could not inspect playlist (HTTP ${res.status}).`
+        const parsed = parsePlaylistError(
+          res.status,
+          json,
+          `Could not inspect playlist (HTTP ${res.status}).`
         );
+        setBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
       }
       const data = json.data;
       const rawItems = Array.isArray(data?.items) ? data.items : [];
@@ -122,35 +181,55 @@ export default function PlaylistProcessingPage() {
   }, [playlistUrl]);
 
   const submitPlaylistJob = useCallback(async () => {
-    const trimmed = playlistUrl.trim();
+    const trimmed = normalizeMediaUrl(playlistUrl);
     if (!trimmed) {
-      setSubmitError('Please paste an authorised playlist link first.');
+      setSubmitError('Please paste a valid authorised playlist link (e.g. youtube.com/playlist?list=...).');
       return;
     }
 
     setIsSubmitting(true);
     setSubmitError(null);
+    setBackendDisconnected(false);
     try {
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
       const idempotencyKey = `pl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      const res = await fetch('/api/v1/playlists/jobs', {
+      const audioOnly = isAudioFormat(targetFormat);
+      const operation = audioOnly
+        ? 'EXTRACT_AUDIO'
+        : targetFormat === 'native'
+        ? 'REMUX_STREAM_COPY'
+        : 'TRANSCODE_VIDEO';
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const res = await fetch(`${apiBase}/playlists/jobs`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({
           playlistUrl: trimmed,
+          operation,
           targetFormat,
+          targetResolution: audioOnly ? undefined : targetResolution,
           packageAsZip,
           idempotencyKey,
         }),
       });
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
       if (!res.ok || !json?.success) {
-        throw new Error(
-          json?.error?.message || `Could not start playlist job (HTTP ${res.status}).`
+        const parsed = parsePlaylistError(
+          res.status,
+          json,
+          `Could not start playlist job (HTTP ${res.status}).`
         );
+        setBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
       }
       const d = json.data || {};
       const total = Number(d.totalItems) || inspected?.totalItems || 0;
@@ -175,28 +254,47 @@ export default function PlaylistProcessingPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [playlistUrl, targetFormat, packageAsZip, inspected]);
+  }, [playlistUrl, targetFormat, targetResolution, packageAsZip, inspected]);
 
   // Poll real playlist job status while active (pauses when tab is hidden)
   useEffect(() => {
     if (!playlistJob?.playlistJobId) return;
     const st = playlistJob.status.toUpperCase();
-    if (st === 'COMPLETED' || st === 'READY' || st === 'FAILED' || st === 'CANCELLED') {
+    if (TERMINAL_STATUSES.has(st)) {
       return;
     }
 
+    const apiBase = getApiBaseUrl();
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         return;
       }
       try {
         const res = await fetch(
-          `/api/v1/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}`,
-          { headers: { Accept: 'application/json' } }
+          `${apiBase}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}`,
+          { credentials: 'include', headers: { Accept: 'application/json' } }
         );
-        const json = await res.json().catch(() => null);
-        if (!res.ok || !json?.success || !json.data) return;
+        const json = (await res.json().catch(() => null)) as Record<string, any> | null;
+        if (!res.ok || !json?.success || !json.data) {
+          if (
+            res.status === 503 ||
+            res.status === 403 ||
+            res.status === 404 ||
+            json?.code === 'ERR_BACKEND_NOT_CONFIGURED'
+          ) {
+            const parsed = parsePlaylistError(
+              res.status,
+              json,
+              `Playlist status check failed (HTTP ${res.status}).`
+            );
+            setBackendDisconnected(parsed.isBackendDisconnected);
+            setSubmitError(parsed.message);
+            setPlaylistJob((prev) => (prev ? { ...prev, status: 'FAILED' } : null));
+          }
+          return;
+        }
         const d = json.data;
+        const nextStatus = String(d.status || playlistJob.status).toUpperCase();
         const total = Number(d.totalItems) || playlistJob.totalItems;
         const completed = Number(d.completedItems) || 0;
         const pct =
@@ -205,11 +303,14 @@ export default function PlaylistProcessingPage() {
             : total > 0
             ? Math.round((completed / total) * 100)
             : 0;
+        if (nextStatus === 'FAILED' && d.error) {
+          setSubmitError(String(d.error));
+        }
         setPlaylistJob((prev) =>
           prev
             ? {
                 ...prev,
-                status: String(d.status || prev.status).toUpperCase(),
+                status: nextStatus,
                 totalItems: total,
                 completedItems: completed,
                 failedItems: Number(d.failedItems) || 0,
@@ -257,6 +358,12 @@ export default function PlaylistProcessingPage() {
 
   const isJobComplete =
     playlistJob?.status === 'COMPLETED' || playlistJob?.status === 'READY';
+  const isJobPartial = playlistJob?.status === 'PARTIAL_FAILURE';
+  const isJobFailed = playlistJob?.status === 'FAILED';
+  const playlistZipHref = playlistJob
+    ? playlistJob.zipDownloadUrl ||
+      `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
+    : null;
 
   return (
     <div className="w-full">
@@ -362,20 +469,30 @@ export default function PlaylistProcessingPage() {
                   <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{inspectError}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={inspectPlaylist}
-                  disabled={isInspecting || !playlistUrl.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Retry</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {backendDisconnected && (
+                    <Link
+                      href="/settings?tab=instances"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                    >
+                      Configure Backend
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={inspectPlaylist}
+                    disabled={isInspecting || !playlistUrl.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Retry</span>
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Format & ZIP Delivery Options */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-line-subtle">
+            {/* Format, Resolution & ZIP Delivery Options */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-line-subtle">
               <div>
                 <label
                   htmlFor="playlist-format"
@@ -390,9 +507,38 @@ export default function PlaylistProcessingPage() {
                   className="w-full px-3.5 py-2.5 rounded-sm bg-base border border-line text-content text-sm focus:border-brand transition-colors"
                 >
                   <option value="mp4">MP4 (Standard video)</option>
-                  <option value="flac">FLAC (Lossless audio)</option>
-                  <option value="mp3">MP3 (320 kbps audio)</option>
                   <option value="mkv">MKV (High compatibility)</option>
+                  <option value="webm">WEBM (VP9 / Opus video)</option>
+                  <option value="mp3">MP3 (320 kbps audio)</option>
+                  <option value="flac">FLAC (Lossless audio)</option>
+                  <option value="aac">AAC (M4A audio)</option>
+                  <option value="wav">WAV (PCM audio)</option>
+                </select>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="playlist-resolution"
+                  className="block text-sm font-medium text-content mb-2"
+                >
+                  Target resolution
+                </label>
+                <select
+                  id="playlist-resolution"
+                  value={isAudioFormat(targetFormat) ? 'audio_only' : targetResolution}
+                  disabled={isAudioFormat(targetFormat)}
+                  onChange={(e) => setTargetResolution(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-sm bg-base border border-line text-content text-sm disabled:opacity-60 focus:border-brand transition-colors"
+                >
+                  {isAudioFormat(targetFormat) ? (
+                    <option value="audio_only">Audio only</option>
+                  ) : (
+                    RESOLUTION_OPTIONS.map((resOpt) => (
+                      <option key={resOpt} value={resOpt}>
+                        {resOpt === 'source' ? 'Original source' : resOpt}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -408,7 +554,7 @@ export default function PlaylistProcessingPage() {
                     onChange={(e) => setPackageAsZip(e.target.checked)}
                     className="w-4 h-4 rounded-sm border border-line accent-brand"
                   />
-                  <span>Bundle completed files into one ZIP archive (recommended)</span>
+                  <span>Bundle completed files into one ZIP archive</span>
                 </label>
               </div>
             </div>
@@ -470,15 +616,25 @@ export default function PlaylistProcessingPage() {
                   <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{submitError}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={submitPlaylistJob}
-                  disabled={isSubmitting || !playlistUrl.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Retry</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {backendDisconnected && (
+                    <Link
+                      href="/settings?tab=instances"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap"
+                    >
+                      Configure Backend
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={submitPlaylistJob}
+                    disabled={isSubmitting || !playlistUrl.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Retry</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -506,15 +662,28 @@ export default function PlaylistProcessingPage() {
                     </h2>
                     <p className="text-xs text-content-secondary mt-0.5 tabular-nums">
                       {playlistJob.completedItems} of {playlistJob.totalItems} items complete
+                      {playlistJob.failedItems > 0
+                        ? ` (${playlistJob.failedItems} failed)`
+                        : ''}
                     </p>
                   </div>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-surface-elevated border border-line text-content">
                     {isJobComplete ? (
                       <CheckCircle2 className="w-3.5 h-3.5 text-success" aria-hidden="true" />
+                    ) : isJobPartial || isJobFailed ? (
+                      <AlertCircle className="w-3.5 h-3.5 text-error" aria-hidden="true" />
                     ) : (
                       <Loader2 className="w-3.5 h-3.5 text-brand motion-safe:animate-spin" aria-hidden="true" />
                     )}
-                    <span>{isJobComplete ? 'Ready to download' : 'Processing'}</span>
+                    <span>
+                      {isJobComplete
+                        ? 'Ready to download'
+                        : isJobPartial
+                        ? 'Partial archive ready'
+                        : isJobFailed
+                        ? 'Failed'
+                        : 'Processing'}
+                    </span>
                   </span>
                 </div>
 
@@ -527,26 +696,32 @@ export default function PlaylistProcessingPage() {
                 </div>
 
                 {/* Prominent Single Verified ZIP Delivery CTA */}
-                {isJobComplete && playlistJob.zipDownloadUrl && (
-                  <div className="p-4 rounded-md bg-surface-muted border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-bold text-content">
-                        All {playlistJob.completedItems} files are packaged and ready
-                      </p>
-                      <p className="text-xs text-content-secondary mt-0.5">
-                        Download everything cleanly in one verified ZIP file instead of multiple pop-up downloads.
-                      </p>
+                {packageAsZip &&
+                  playlistZipHref &&
+                  (isJobComplete ||
+                    (isJobPartial && playlistJob.completedItems > 0) ||
+                    !!playlistJob.zipDownloadUrl) && (
+                    <div className="p-4 rounded-md bg-surface-muted border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-bold text-content">
+                          {isJobPartial
+                            ? `${playlistJob.completedItems} of ${playlistJob.totalItems} files packaged into archive`
+                            : `All ${playlistJob.completedItems} files are packaged and ready`}
+                        </p>
+                        <p className="text-xs text-content-secondary mt-0.5">
+                          Download everything cleanly in one verified ZIP file instead of multiple pop-up downloads.
+                        </p>
+                      </div>
+                      <a
+                        href={playlistZipHref}
+                        download
+                        className="muxaro-btn-primary px-5 py-2.5 text-sm inline-flex items-center justify-center gap-2 whitespace-nowrap active:opacity-90 shrink-0"
+                      >
+                        <Download className="w-4 h-4" aria-hidden="true" />
+                        <span>Download all as ZIP</span>
+                      </a>
                     </div>
-                    <a
-                      href={playlistJob.zipDownloadUrl}
-                      download
-                      className="muxaro-btn-primary px-5 py-2.5 text-sm inline-flex items-center justify-center gap-2 whitespace-nowrap active:opacity-90 shrink-0"
-                    >
-                      <Download className="w-4 h-4" aria-hidden="true" />
-                      <span>Download all as ZIP</span>
-                    </a>
-                  </div>
-                )}
+                  )}
 
                 {/* Individual Item Completion States + Manual Per-Item Download */}
                 {derivedItemStates.length > 0 && (

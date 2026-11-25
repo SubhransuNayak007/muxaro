@@ -1,6 +1,6 @@
 # ==============================================================================
 # MUXARO Stateless Media Processing Worker Container
-# Isolated FFmpeg / FFprobe + yt-dlp transcoding & packaging worker
+# Isolated FFmpeg / FFprobe + yt-dlp (nightly) + Deno + bgutil PO-token worker
 # Security: Non-root (UID 10001), bounded /tmp ephemeral scratch, INTERNAL ingress only
 # ==============================================================================
 
@@ -18,16 +18,22 @@ RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm inst
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 
-# Install FFmpeg (6+/8+ per Debian release), FFprobe, yt-dlp, tini, curl, ca-certificates
+# Install FFmpeg, FFprobe, yt-dlp (latest nightly), Deno JS runtime, bgutil-ytdlp-pot-provider plugin, tini, curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     tini \
     curl \
     ca-certificates \
+    unzip \
     python3 \
-    && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    python3-pip \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && chmod 0755 /usr/local/bin/deno \
+    && curl -fsSL https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod 0755 /usr/local/bin/yt-dlp \
-    && ffmpeg -version && ffprobe -version && yt-dlp --version \
+    && python3 -m pip install --no-cache-dir --break-system-packages -U bgutil-ytdlp-pot-provider \
+    && ffmpeg -version && ffprobe -version && yt-dlp --version && deno --version \
+    && apt-get purge -y --auto-remove \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # Dedicated unprivileged worker identity (UID 10001, no login shell)
@@ -50,6 +56,11 @@ ENV PORT=8080
 ENV SCRATCH_DIR=/tmp/muxaro-scratch
 ENV MAX_CONCURRENT_JOBS=2
 ENV JOB_TIMEOUT_SECONDS=540
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/bin/ffprobe
+ENV YTDLP_PATH=/usr/local/bin/yt-dlp
+ENV DENO_PATH=/usr/local/bin/deno
+ENV YTDLP_JS_RUNTIMES=deno,node
 
 WORKDIR /app/apps/media-worker
 

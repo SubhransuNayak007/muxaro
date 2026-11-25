@@ -18,8 +18,8 @@ import {
   Loader2,
   Search,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
-import { ProcessingJob } from '@/lib/types';
+import { api, getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
+import { JobState, ProcessingJob } from '@/lib/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 import { useUnifiedQuota, quotaManager } from '@/lib/quota/quota-manager';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
@@ -37,7 +37,103 @@ interface BatchEntry {
   id: string;
   url: string;
   format: string;
+  resolution: string;
   operation: 'extract_audio' | 'transcode_video';
+}
+
+interface BatchSessionSummary {
+  id: string;
+  title: string;
+  status: string;
+  totalItems: number;
+  completedItems: number;
+  failedItems: number;
+  progress: number;
+  zipDownloadUrl?: string | null;
+}
+
+const VIDEO_FORMATS = ['mp4', 'mkv', 'webm', 'mov', 'native'] as const;
+const AUDIO_FORMATS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'opus'] as const;
+const RESOLUTION_OPTIONS = ['source', '2160p', '1440p', '1080p', '720p', '480p'] as const;
+const TERMINAL_STATUSES = new Set([
+  'COMPLETED',
+  'READY',
+  'PARTIAL_FAILURE',
+  'FAILED',
+  'CANCELLED',
+  'EXPIRED',
+]);
+
+function isAudioFormat(fmt: string): boolean {
+  return AUDIO_FORMATS.includes(fmt.toLowerCase() as any);
+}
+
+function mapApiOperation(op: 'extract_audio' | 'transcode_video', format: string) {
+  if (op === 'extract_audio' || isAudioFormat(format)) return 'EXTRACT_AUDIO' as const;
+  if (format === 'native') return 'REMUX_STREAM_COPY' as const;
+  return 'TRANSCODE_VIDEO' as const;
+}
+
+function parseEndpointError(
+  status: number,
+  json: Record<string, any> | null,
+  fallback: string
+): { message: string; isBackendDisconnected: boolean } {
+  const code = json?.error?.code || json?.code;
+  const isBackendDisconnected =
+    status === 503 || code === 'ERR_BACKEND_NOT_CONFIGURED';
+  if (isBackendDisconnected) {
+    return {
+      message:
+        json?.error?.message ||
+        json?.rawMessage ||
+        'Backend worker is not configured (ERR_BACKEND_NOT_CONFIGURED). Connect an execution server in Settings or set API_INTERNAL_URL.',
+      isBackendDisconnected: true,
+    };
+  }
+  return {
+    message:
+      json?.error?.userMessage ||
+      json?.error?.message ||
+      json?.message ||
+      fallback,
+    isBackendDisconnected: false,
+  };
+}
+
+function normalizeChildJob(raw: Record<string, any>, idx: number): ProcessingJob {
+  const id = String(raw?.id || raw?.jobId || `batch_job_${idx}`);
+  const rawStatus = String(raw?.status || 'QUEUED').toUpperCase();
+  const status = (rawStatus === 'COMPLETED' ? 'READY' : rawStatus) as JobState;
+  const targetFormat = String(raw?.targetFormat || 'mp4');
+  return {
+    id,
+    jobId: id,
+    batchId: raw?.batchId || undefined,
+    itemNumber: raw?.itemNumber ?? idx + 1,
+    sourceUrl: raw?.sourceUrl || undefined,
+    jobType: raw?.operation === 'EXTRACT_AUDIO' ? 'extract_audio' : 'transcode_video',
+    operation: String(raw?.operation || 'TRANSCODE_VIDEO'),
+    targetFormat,
+    targetResolution: raw?.targetResolution || undefined,
+    streamCopy: Boolean(raw?.losslessPreserved ?? targetFormat === 'native'),
+    status,
+    progress: typeof raw?.progress === 'number' ? raw.progress : 0,
+    progressStage: String(raw?.stageMessage || raw?.stage || status),
+    inputTitle: String(raw?.inputTitle || raw?.title || `Item ${idx + 1}`),
+    downloadUrl: raw?.downloadUrl || raw?.artifact?.downloadUrl || undefined,
+    error:
+      raw?.error?.userMessage ||
+      raw?.error?.message ||
+      raw?.userMessage ||
+      undefined,
+    errorMessage:
+      raw?.error?.message || raw?.userMessage || undefined,
+    userMessage: raw?.userMessage || undefined,
+    createdAt: String(raw?.createdAt || new Date().toISOString()),
+    completedAt: raw?.completedAt || undefined,
+    expiresAt: raw?.expiresAt || undefined,
+  };
 }
 
 interface InspectedPlaylistItem {
@@ -89,20 +185,36 @@ export default function PlaylistBatchPage() {
     'transcode_video'
   );
   const [batchFormat, setBatchFormat] = useState<string>('mp4');
+  const [batchResolution, setBatchResolution] = useState<string>('1080p');
   const [isBatchSubmitting, setIsBatchSubmitting] = useState<boolean>(false);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchBackendDisconnected, setBatchBackendDisconnected] = useState<boolean>(false);
+  const [batchSession, setBatchSession] = useState<BatchSessionSummary | null>(null);
   const [activeJobs, setActiveJobs] = useState<ProcessingJob[]>([]);
 
   // Playlist state (starts clean and empty)
   const [playlistUrl, setPlaylistUrl] = useState<string>('');
   const [playlistFormat, setPlaylistFormat] = useState<string>('mp4');
+  const [playlistResolution, setPlaylistResolution] = useState<string>('1080p');
   const [packageZip, setPackageZip] = useState<boolean>(true);
   const [isInspecting, setIsInspecting] = useState<boolean>(false);
   const [inspectError, setInspectError] = useState<string | null>(null);
   const [inspected, setInspected] = useState<InspectedPlaylist | null>(null);
   const [isPlaylistSubmitting, setIsPlaylistSubmitting] = useState<boolean>(false);
   const [playlistError, setPlaylistError] = useState<string | null>(null);
+  const [playlistBackendDisconnected, setPlaylistBackendDisconnected] = useState<boolean>(false);
   const [playlistJob, setPlaylistJob] = useState<PlaylistJobStatus | null>(null);
+
+  const handleBatchOperationChange = (
+    nextOp: 'extract_audio' | 'transcode_video'
+  ) => {
+    setBatchOp(nextOp);
+    if (nextOp === 'extract_audio' && !isAudioFormat(batchFormat)) {
+      setBatchFormat('mp3');
+    } else if (nextOp === 'transcode_video' && isAudioFormat(batchFormat)) {
+      setBatchFormat('mp4');
+    }
+  };
 
   const handleAddBatchItem = (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,11 +229,13 @@ export default function PlaylistBatchPage() {
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         url: normalized,
         format: batchFormat,
+        resolution: batchOp === 'extract_audio' ? 'audio_only' : batchResolution,
         operation: batchOp,
       },
     ]);
     setNewUrl('');
     setBatchError(null);
+    setBatchBackendDisconnected(false);
   };
 
   const handleRunBatch = async () => {
@@ -135,24 +249,99 @@ export default function PlaylistBatchPage() {
 
     setIsBatchSubmitting(true);
     setBatchError(null);
+    setBatchBackendDisconnected(false);
+    setBatchSession(null);
+
     try {
-      const jobs: ProcessingJob[] = [];
-      for (const item of items) {
-        const name = item.url.split('/').pop() || 'Media file';
-        const job = await api.createJob({
-          sourceUrl: item.url,
-          jobType: item.operation,
-          operation:
-            item.operation === 'extract_audio'
-              ? 'EXTRACT_AUDIO'
-              : 'CONVERT_FORMAT',
-          targetFormat: item.format,
-          streamCopy: item.format === 'native',
-          title: name,
-        });
-        jobs.push(job);
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
+      const idempotencyKey = `bat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const primary = items[0];
+      const primaryOp = mapApiOperation(primary.operation, primary.format);
+
+      const res = await fetch(`${apiBase}/batches`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({
+          title: `Batch (${items.length} ${items.length === 1 ? 'item' : 'items'})`,
+          operation: primaryOp,
+          targetFormat: primary.format,
+          targetResolution:
+            primary.operation === 'extract_audio' ? undefined : primary.resolution,
+          streamCopy: primary.format === 'native',
+          idempotencyKey,
+          items: items.map((item) => ({
+            mediaUrl: item.url,
+            title: item.url.split('/').pop()?.split('?')[0] || 'Media file',
+            operation: mapApiOperation(item.operation, item.format),
+            targetFormat: item.format,
+            targetResolution:
+              item.operation === 'extract_audio' ? undefined : item.resolution,
+            streamCopy: item.format === 'native',
+          })),
+        }),
+      });
+
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
+
+      if (res.status === 404 || res.status === 405) {
+        const jobs: ProcessingJob[] = [];
+        for (const item of items) {
+          const name = item.url.split('/').pop() || 'Media file';
+          const job = await api.createJob({
+            sourceUrl: item.url,
+            jobType: item.operation,
+            operation: mapApiOperation(item.operation, item.format),
+            targetFormat: item.format,
+            targetResolution:
+              item.operation === 'extract_audio' ? undefined : item.resolution,
+            streamCopy: item.format === 'native',
+            title: name,
+          });
+          jobs.push(job);
+        }
+        setActiveJobs(jobs);
+        quotaManager.recordOptimisticDeduction('video', items.length);
+        refreshQuota().catch(() => {});
+        return;
       }
-      setActiveJobs(jobs);
+
+      if (!res.ok || !json?.success || !json?.data) {
+        const parsed = parseEndpointError(
+          res.status,
+          json,
+          `Could not start batch processing (HTTP ${res.status}).`
+        );
+        setBatchBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
+      }
+
+      const d = json.data;
+      const batchId = String(d.batchId || d.id || '');
+      const childJobs = Array.isArray(d.jobs)
+        ? d.jobs.map((j: Record<string, any>, idx: number) => normalizeChildJob(j, idx))
+        : [];
+      setActiveJobs(childJobs);
+      if (batchId) {
+        setBatchSession({
+          id: batchId,
+          title: String(d.title || `Batch (${items.length} items)`),
+          status: String(d.status || 'QUEUED').toUpperCase(),
+          totalItems: Number(d.totalItems) || items.length,
+          completedItems: Number(d.completedItems) || 0,
+          failedItems: Number(d.failedItems) || 0,
+          progress: typeof d.progress === 'number' ? d.progress : 0,
+          zipDownloadUrl: d.zipDownloadUrl || null,
+        });
+      }
       quotaManager.recordOptimisticDeduction('video', items.length);
       refreshQuota().catch(() => {});
     } catch (err: unknown) {
@@ -160,11 +349,85 @@ export default function PlaylistBatchPage() {
         err instanceof Error
           ? err.message
           : 'Could not start batch processing. Check your links and try again.';
+      if (
+        message.includes('ERR_BACKEND_NOT_CONFIGURED') ||
+        message.includes('503')
+      ) {
+        setBatchBackendDisconnected(true);
+      }
       setBatchError(message);
     } finally {
       setIsBatchSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (!batchSession?.id) return;
+    if (TERMINAL_STATUSES.has(batchSession.status.toUpperCase())) return;
+
+    const apiBase = getApiBaseUrl();
+    const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      try {
+        const [summaryRes, jobsRes] = await Promise.all([
+          fetch(`${apiBase}/batches/${encodeURIComponent(batchSession.id)}`, {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          }),
+          fetch(`${apiBase}/batches/${encodeURIComponent(batchSession.id)}/jobs`, {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          }),
+        ]);
+        const summaryJson = (await summaryRes.json().catch(() => null)) as Record<string, any> | null;
+        if (!summaryRes.ok || !summaryJson?.success || !summaryJson?.data) {
+          if (
+            summaryRes.status === 503 ||
+            summaryRes.status === 403 ||
+            summaryRes.status === 404 ||
+            summaryJson?.code === 'ERR_BACKEND_NOT_CONFIGURED'
+          ) {
+            const parsed = parseEndpointError(
+              summaryRes.status,
+              summaryJson,
+              `Batch status polling failed (HTTP ${summaryRes.status}).`
+            );
+            setBatchBackendDisconnected(parsed.isBackendDisconnected);
+            setBatchError(parsed.message);
+            setBatchSession((prev) => (prev ? { ...prev, status: 'FAILED' } : null));
+          }
+          return;
+        }
+        const d = summaryJson.data;
+        setBatchSession({
+          id: String(d.batchId || d.id || batchSession.id),
+          title: String(d.title || batchSession.title),
+          status: String(d.status || 'PROCESSING').toUpperCase(),
+          totalItems: Number(d.totalItems) || batchSession.totalItems,
+          completedItems: Number(d.completedItems) || 0,
+          failedItems: Number(d.failedItems) || 0,
+          progress: typeof d.progress === 'number' ? d.progress : batchSession.progress,
+          zipDownloadUrl: d.zipDownloadUrl || null,
+        });
+
+        const jobsJson = (await jobsRes.json().catch(() => null)) as Record<string, any> | null;
+        if (jobsRes.ok && jobsJson?.success && Array.isArray(jobsJson?.data?.jobs)) {
+          setActiveJobs(
+            jobsJson.data.jobs.map((j: Record<string, any>, idx: number) =>
+              normalizeChildJob(j, idx)
+            )
+          );
+        }
+      } catch {
+        // Keep current status on transient network hiccup
+      }
+    };
+
+    const timer = setInterval(poll, 2000);
+    return () => clearInterval(timer);
+  }, [batchSession?.id, batchSession?.status, batchSession?.title, batchSession?.totalItems, batchSession?.progress]);
 
   const inspectPlaylist = useCallback(async () => {
     const trimmed = normalizeMediaUrl(playlistUrl);
@@ -176,17 +439,31 @@ export default function PlaylistBatchPage() {
     setIsInspecting(true);
     setInspectError(null);
     setPlaylistError(null);
+    setPlaylistBackendDisconnected(false);
     try {
-      const res = await fetch('/api/v1/playlists/inspect', {
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const res = await fetch(`${apiBase}/playlists/inspect`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({ url: trimmed, maxItems: 50 }),
       });
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
       if (!res.ok || !json?.success) {
-        throw new Error(
-          json?.error?.message || `Could not inspect playlist (HTTP ${res.status}).`
+        const parsed = parseEndpointError(
+          res.status,
+          json,
+          `Could not inspect playlist (HTTP ${res.status}).`
         );
+        setPlaylistBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
       }
       const data = json.data;
       const rawItems = Array.isArray(data?.items) ? data.items : [];
@@ -231,27 +508,47 @@ export default function PlaylistBatchPage() {
 
     setIsPlaylistSubmitting(true);
     setPlaylistError(null);
+    setPlaylistBackendDisconnected(false);
     try {
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
       const idempotencyKey = `plb_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-      const res = await fetch('/api/v1/playlists/jobs', {
+      const audioOnly = isAudioFormat(playlistFormat);
+      const operation = audioOnly
+        ? 'EXTRACT_AUDIO'
+        : playlistFormat === 'native'
+        ? 'REMUX_STREAM_COPY'
+        : 'TRANSCODE_VIDEO';
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const res = await fetch(`${apiBase}/playlists/jobs`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify({
           playlistUrl: trimmed,
+          operation,
           targetFormat: playlistFormat,
+          targetResolution: audioOnly ? undefined : playlistResolution,
           packageAsZip: packageZip,
           idempotencyKey,
         }),
       });
-      const json = await res.json().catch(() => null);
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
       if (!res.ok || !json?.success) {
-        throw new Error(
-          json?.error?.message || `Could not start playlist job (HTTP ${res.status}).`
+        const parsed = parseEndpointError(
+          res.status,
+          json,
+          `Could not start playlist job (HTTP ${res.status}).`
         );
+        setPlaylistBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
       }
       const d = json.data || {};
       const total = Number(d.totalItems) || inspected?.totalItems || 0;
@@ -278,27 +575,55 @@ export default function PlaylistBatchPage() {
     } finally {
       setIsPlaylistSubmitting(false);
     }
-  }, [playlistUrl, playlistFormat, packageZip, inspected, remainingPlaylist, totalPlaylistLimit, refreshQuota]);
+  }, [
+    playlistUrl,
+    playlistFormat,
+    playlistResolution,
+    packageZip,
+    inspected,
+    remainingPlaylist,
+    totalPlaylistLimit,
+    refreshQuota,
+  ]);
 
   useEffect(() => {
     if (!playlistJob?.playlistJobId) return;
     const st = playlistJob.status.toUpperCase();
-    if (st === 'COMPLETED' || st === 'READY' || st === 'FAILED' || st === 'CANCELLED') {
+    if (TERMINAL_STATUSES.has(st)) {
       return;
     }
 
+    const apiBase = getApiBaseUrl();
     const poll = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         return;
       }
       try {
         const res = await fetch(
-          `/api/v1/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}`,
-          { headers: { Accept: 'application/json' } }
+          `${apiBase}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}`,
+          { credentials: 'include', headers: { Accept: 'application/json' } }
         );
-        const json = await res.json().catch(() => null);
-        if (!res.ok || !json?.success || !json.data) return;
+        const json = (await res.json().catch(() => null)) as Record<string, any> | null;
+        if (!res.ok || !json?.success || !json.data) {
+          if (
+            res.status === 503 ||
+            res.status === 403 ||
+            res.status === 404 ||
+            json?.code === 'ERR_BACKEND_NOT_CONFIGURED'
+          ) {
+            const parsed = parseEndpointError(
+              res.status,
+              json,
+              `Playlist status check failed (HTTP ${res.status}).`
+            );
+            setPlaylistBackendDisconnected(parsed.isBackendDisconnected);
+            setPlaylistError(parsed.message);
+            setPlaylistJob((prev) => (prev ? { ...prev, status: 'FAILED' } : null));
+          }
+          return;
+        }
         const d = json.data;
+        const nextStatus = String(d.status || playlistJob.status).toUpperCase();
         const total = Number(d.totalItems) || playlistJob.totalItems;
         const completed = Number(d.completedItems) || 0;
         const pct =
@@ -307,11 +632,14 @@ export default function PlaylistBatchPage() {
             : total > 0
             ? Math.round((completed / total) * 100)
             : 0;
+        if (nextStatus === 'FAILED' && d.error) {
+          setPlaylistError(String(d.error));
+        }
         setPlaylistJob((prev) =>
           prev
             ? {
                 ...prev,
-                status: String(d.status || prev.status).toUpperCase(),
+                status: nextStatus,
                 totalItems: total,
                 completedItems: completed,
                 failedItems: Number(d.failedItems) || 0,
@@ -359,6 +687,22 @@ export default function PlaylistBatchPage() {
 
   const isPlaylistComplete =
     playlistJob?.status === 'COMPLETED' || playlistJob?.status === 'READY';
+  const isPlaylistPartial = playlistJob?.status === 'PARTIAL_FAILURE';
+  const isPlaylistFailed = playlistJob?.status === 'FAILED';
+  const playlistZipHref = playlistJob
+    ? playlistJob.zipDownloadUrl ||
+      `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
+    : null;
+  const batchZipHref = batchSession
+    ? batchSession.zipDownloadUrl ||
+      `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
+    : null;
+  const isBatchZipReady =
+    !!batchSession &&
+    (batchSession.status === 'COMPLETED' ||
+      batchSession.status === 'READY' ||
+      (batchSession.status === 'PARTIAL_FAILURE' && batchSession.completedItems > 0) ||
+      !!batchSession.zipDownloadUrl);
 
   return (
     <div className="w-full">
@@ -477,7 +821,7 @@ export default function PlaylistBatchPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label
                         htmlFor="pb-batch-op"
@@ -489,7 +833,7 @@ export default function PlaylistBatchPage() {
                         id="pb-batch-op"
                         value={batchOp}
                         onChange={(e) =>
-                          setBatchOp(
+                          handleBatchOperationChange(
                             e.target.value as 'extract_audio' | 'transcode_video'
                           )
                         }
@@ -512,10 +856,38 @@ export default function PlaylistBatchPage() {
                         onChange={(e) => setBatchFormat(e.target.value)}
                         className="w-full px-3.5 py-2 rounded-sm bg-base border border-line text-content text-sm focus:border-brand transition-colors"
                       >
-                        <option value="mp4">MP4 (Standard video)</option>
-                        <option value="mkv">MKV (High compatibility)</option>
-                        <option value="mp3">MP3 (320 kbps audio)</option>
-                        <option value="flac">FLAC (Lossless audio)</option>
+                        {(batchOp === 'extract_audio' ? AUDIO_FORMATS : VIDEO_FORMATS).map(
+                          (fmt) => (
+                            <option key={fmt} value={fmt}>
+                              {fmt === 'native' ? 'Native stream copy' : fmt.toUpperCase()}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="pb-batch-resolution"
+                        className="block text-xs font-medium text-content-secondary mb-1.5"
+                      >
+                        Resolution
+                      </label>
+                      <select
+                        id="pb-batch-resolution"
+                        value={batchOp === 'extract_audio' ? 'audio_only' : batchResolution}
+                        disabled={batchOp === 'extract_audio'}
+                        onChange={(e) => setBatchResolution(e.target.value)}
+                        className="w-full px-3.5 py-2 rounded-sm bg-base border border-line text-content text-sm disabled:opacity-60 focus:border-brand transition-colors"
+                      >
+                        {batchOp === 'extract_audio' ? (
+                          <option value="audio_only">Audio only</option>
+                        ) : (
+                          RESOLUTION_OPTIONS.map((resOpt) => (
+                            <option key={resOpt} value={resOpt}>
+                              {resOpt === 'source' ? 'Original source' : resOpt}
+                            </option>
+                          ))
+                        )}
                       </select>
                     </div>
                   </div>
@@ -556,7 +928,10 @@ export default function PlaylistBatchPage() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="px-2.5 py-1 rounded-full bg-surface border border-line text-xs font-medium text-content-secondary">
-                            {item.format}
+                            {item.format.toUpperCase()}
+                            {item.operation === 'transcode_video' && item.resolution !== 'source'
+                              ? ` · ${item.resolution}`
+                              : ''}
                           </span>
                           <button
                             type="button"
@@ -580,15 +955,25 @@ export default function PlaylistBatchPage() {
                       <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                       <span>{batchError}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleRunBatch}
-                      disabled={isBatchSubmitting || items.length === 0}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Retry</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {batchBackendDisconnected && (
+                        <Link
+                          href="/settings?tab=instances"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap"
+                        >
+                          Configure Backend
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleRunBatch}
+                        disabled={isBatchSubmitting || items.length === 0}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Retry</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -605,13 +990,68 @@ export default function PlaylistBatchPage() {
                     : `Process ${items.length} ${items.length === 1 ? 'file' : 'files'}`}
                 </button>
 
+                {batchSession && (
+                  <div className="mt-6 pt-6 border-t border-line">
+                    <div className="p-4 rounded-md bg-surface-elevated border border-line space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-content">
+                            {batchSession.title}
+                          </p>
+                          <p className="text-xs text-content-secondary tabular-nums mt-0.5">
+                            {batchSession.completedItems} of {batchSession.totalItems} complete
+                            {batchSession.failedItems > 0
+                              ? ` (${batchSession.failedItems} failed)`
+                              : ''}
+                            {' '}— {batchSession.status}
+                          </p>
+                        </div>
+                        {isBatchZipReady && batchZipHref ? (
+                          <a
+                            href={batchZipHref}
+                            download
+                            className="muxaro-btn-primary px-4 py-2 text-xs sm:text-sm inline-flex items-center gap-2 whitespace-nowrap active:opacity-90 shrink-0"
+                          >
+                            <Download className="w-4 h-4" aria-hidden="true" />
+                            <span>Download batch ZIP</span>
+                          </a>
+                        ) : !TERMINAL_STATUSES.has(batchSession.status) ? (
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-brand">
+                            <Loader2 className="w-3.5 h-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                            <span>Processing {batchSession.progress}%</span>
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-surface border border-line overflow-hidden">
+                        <div
+                          className="h-full w-full bg-brand origin-left transition-transform duration-300"
+                          style={{
+                            transform: `scaleX(${Math.min(1, Math.max(0, batchSession.progress / 100))})`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeJobs.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-line space-y-4">
+                  <div className="mt-6 space-y-4">
                     <h2 className="text-base font-bold text-content">
                       Active batch jobs
                     </h2>
                     {activeJobs.map((job) => (
-                      <JobProgress key={job.id} initialJob={job} />
+                      <JobProgress
+                        key={job.id}
+                        initialJob={job}
+                        onJobUpdate={(updated) => {
+                          setActiveJobs((prev) =>
+                            prev.map((j) => (j.id === updated.id ? updated : j))
+                          );
+                        }}
+                        onDismiss={() => {
+                          setActiveJobs((prev) => prev.filter((j) => j.id !== job.id));
+                        }}
+                      />
                     ))}
                   </div>
                 )}
@@ -688,19 +1128,29 @@ export default function PlaylistBatchPage() {
                       <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                       <span>{inspectError}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={inspectPlaylist}
-                      disabled={isInspecting || !playlistUrl.trim()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Retry</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {playlistBackendDisconnected && (
+                        <Link
+                          href="/settings?tab=instances"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap"
+                        >
+                          Configure Backend
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={inspectPlaylist}
+                        disabled={isInspecting || !playlistUrl.trim()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Retry</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label
                       htmlFor="pb-playlist-format"
@@ -715,9 +1165,38 @@ export default function PlaylistBatchPage() {
                       className="w-full px-3.5 py-2.5 rounded-sm bg-base border border-line text-content text-sm focus:border-brand transition-colors"
                     >
                       <option value="mp4">MP4 (Standard video)</option>
-                      <option value="flac">FLAC (Lossless audio)</option>
-                      <option value="mp3">MP3 (320 kbps audio)</option>
                       <option value="mkv">MKV (High compatibility)</option>
+                      <option value="webm">WEBM (VP9 / Opus video)</option>
+                      <option value="mp3">MP3 (320 kbps audio)</option>
+                      <option value="flac">FLAC (Lossless audio)</option>
+                      <option value="aac">AAC (M4A audio)</option>
+                      <option value="wav">WAV (PCM audio)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="pb-playlist-resolution"
+                      className="block text-sm font-medium text-content mb-2"
+                    >
+                      Target resolution
+                    </label>
+                    <select
+                      id="pb-playlist-resolution"
+                      value={isAudioFormat(playlistFormat) ? 'audio_only' : playlistResolution}
+                      disabled={isAudioFormat(playlistFormat)}
+                      onChange={(e) => setPlaylistResolution(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-sm bg-base border border-line text-content text-sm disabled:opacity-60 focus:border-brand transition-colors"
+                    >
+                      {isAudioFormat(playlistFormat) ? (
+                        <option value="audio_only">Audio only</option>
+                      ) : (
+                        RESOLUTION_OPTIONS.map((resOpt) => (
+                          <option key={resOpt} value={resOpt}>
+                            {resOpt === 'source' ? 'Original source' : resOpt}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 
@@ -773,15 +1252,25 @@ export default function PlaylistBatchPage() {
                       <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                       <span>{playlistError}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={submitPlaylist}
-                      disabled={isPlaylistSubmitting || !playlistUrl.trim()}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Retry</span>
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {playlistBackendDisconnected && (
+                        <Link
+                          href="/settings?tab=instances"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap"
+                        >
+                          Configure Backend
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={submitPlaylist}
+                        disabled={isPlaylistSubmitting || !playlistUrl.trim()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-sm border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Retry</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -807,15 +1296,28 @@ export default function PlaylistBatchPage() {
                         </h2>
                         <p className="text-xs text-content-secondary tabular-nums">
                           {playlistJob.completedItems} of {playlistJob.totalItems} items complete
+                          {playlistJob.failedItems > 0
+                            ? ` (${playlistJob.failedItems} failed)`
+                            : ''}
                         </p>
                       </div>
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-surface-elevated border border-line text-content">
                         {isPlaylistComplete ? (
                           <CheckCircle2 className="w-3.5 h-3.5 text-success" aria-hidden="true" />
+                        ) : isPlaylistPartial || isPlaylistFailed ? (
+                          <AlertCircle className="w-3.5 h-3.5 text-error" aria-hidden="true" />
                         ) : (
                           <Loader2 className="w-3.5 h-3.5 text-brand motion-safe:animate-spin" aria-hidden="true" />
                         )}
-                        <span>{isPlaylistComplete ? 'Ready' : 'Processing'}</span>
+                        <span>
+                          {isPlaylistComplete
+                            ? 'Ready'
+                            : isPlaylistPartial
+                            ? 'Partial complete'
+                            : isPlaylistFailed
+                            ? 'Failed'
+                            : 'Processing'}
+                        </span>
                       </span>
                     </div>
 
@@ -826,21 +1328,27 @@ export default function PlaylistBatchPage() {
                       />
                     </div>
 
-                    {isPlaylistComplete && playlistJob.zipDownloadUrl && (
-                      <div className="p-4 rounded-md bg-surface-muted border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <p className="text-sm font-semibold text-content">
-                          Your verified playlist ZIP archive is ready.
-                        </p>
-                        <a
-                          href={playlistJob.zipDownloadUrl}
-                          download
-                          className="muxaro-btn-primary px-5 py-2.5 text-sm inline-flex items-center justify-center gap-2 whitespace-nowrap active:opacity-90 shrink-0"
-                        >
-                          <Download className="w-4 h-4" aria-hidden="true" />
-                          <span>Download all as ZIP</span>
-                        </a>
-                      </div>
-                    )}
+                    {packageZip &&
+                      playlistZipHref &&
+                      (isPlaylistComplete ||
+                        (isPlaylistPartial && playlistJob.completedItems > 0) ||
+                        !!playlistJob.zipDownloadUrl) && (
+                        <div className="p-4 rounded-md bg-surface-muted border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <p className="text-sm font-semibold text-content">
+                            {isPlaylistPartial
+                              ? `Partial archive ready (${playlistJob.completedItems} of ${playlistJob.totalItems} items).`
+                              : 'Your verified playlist ZIP archive is ready.'}
+                          </p>
+                          <a
+                            href={playlistZipHref}
+                            download
+                            className="muxaro-btn-primary px-5 py-2.5 text-sm inline-flex items-center justify-center gap-2 whitespace-nowrap active:opacity-90 shrink-0"
+                          >
+                            <Download className="w-4 h-4" aria-hidden="true" />
+                            <span>Download all as ZIP</span>
+                          </a>
+                        </div>
+                      )}
 
                     {derivedPlaylistItems.length > 0 && (
                       <div className="p-4 rounded-md bg-surface-elevated border border-line-subtle divide-y divide-line-subtle text-sm max-h-64 overflow-y-auto">

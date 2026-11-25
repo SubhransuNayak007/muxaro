@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
@@ -12,9 +12,11 @@ import {
   ShieldCheck,
   AlertCircle,
   RotateCcw,
+  Download,
+  Loader2,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
-import { ProcessingJob } from '@/lib/types';
+import { api, getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
+import { JobState, ProcessingJob } from '@/lib/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
@@ -31,21 +33,129 @@ interface BatchItem {
   id: string;
   url: string;
   format: string;
+  resolution: string;
   operation: 'extract_audio' | 'transcode_video';
+}
+
+interface BatchSessionSummary {
+  id: string;
+  title: string;
+  status: string;
+  totalItems: number;
+  completedItems: number;
+  failedItems: number;
+  progress: number;
+  zipDownloadUrl?: string | null;
+}
+
+const VIDEO_FORMATS = ['mp4', 'mkv', 'webm', 'mov', 'native'] as const;
+const AUDIO_FORMATS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'opus'] as const;
+const RESOLUTION_OPTIONS = ['source', '2160p', '1440p', '1080p', '720p', '480p'] as const;
+const TERMINAL_BATCH_STATUSES = new Set([
+  'COMPLETED',
+  'READY',
+  'PARTIAL_FAILURE',
+  'FAILED',
+  'CANCELLED',
+  'EXPIRED',
+]);
+
+function mapItemApiOperation(item: Pick<BatchItem, 'operation' | 'format'>) {
+  if (item.operation === 'extract_audio') return 'EXTRACT_AUDIO' as const;
+  if (item.format === 'native') return 'REMUX_STREAM_COPY' as const;
+  return 'TRANSCODE_VIDEO' as const;
+}
+
+function parseBatchError(
+  status: number,
+  json: Record<string, any> | null,
+  fallback: string
+): { message: string; isBackendDisconnected: boolean } {
+  const errCode = json?.error?.code || json?.code;
+  const isBackendDisconnected =
+    status === 503 || errCode === 'ERR_BACKEND_NOT_CONFIGURED';
+  if (isBackendDisconnected) {
+    return {
+      message:
+        json?.error?.message ||
+        json?.rawMessage ||
+        'Backend worker is not configured (ERR_BACKEND_NOT_CONFIGURED). Connect an execution server in Settings or configure API_INTERNAL_URL.',
+      isBackendDisconnected: true,
+    };
+  }
+  return {
+    message:
+      json?.error?.userMessage ||
+      json?.error?.message ||
+      json?.message ||
+      fallback,
+    isBackendDisconnected: false,
+  };
+}
+
+function toProcessingJob(raw: Record<string, any>, idx: number): ProcessingJob {
+  const id = String(raw?.id || raw?.jobId || `batch_job_${idx}`);
+  const rawStatus = String(raw?.status || 'QUEUED').toUpperCase();
+  const status = (rawStatus === 'COMPLETED' ? 'READY' : rawStatus) as JobState;
+  const targetFormat = String(raw?.targetFormat || 'mp4');
+  return {
+    id,
+    jobId: id,
+    batchId: raw?.batchId || undefined,
+    itemNumber: raw?.itemNumber ?? idx + 1,
+    sourceUrl: raw?.sourceUrl || undefined,
+    jobType:
+      raw?.operation === 'EXTRACT_AUDIO' ? 'extract_audio' : 'transcode_video',
+    operation: String(raw?.operation || 'TRANSCODE_VIDEO'),
+    targetFormat,
+    targetResolution: raw?.targetResolution || undefined,
+    streamCopy: Boolean(raw?.losslessPreserved ?? targetFormat === 'native'),
+    status,
+    progress: typeof raw?.progress === 'number' ? raw.progress : 0,
+    progressStage: String(raw?.stageMessage || raw?.stage || status),
+    inputTitle: String(raw?.inputTitle || raw?.title || `Item ${idx + 1}`),
+    downloadUrl: raw?.downloadUrl || raw?.artifact?.downloadUrl || undefined,
+    error:
+      raw?.error?.userMessage ||
+      raw?.error?.message ||
+      raw?.userMessage ||
+      undefined,
+    errorMessage:
+      raw?.error?.message || raw?.userMessage || undefined,
+    userMessage: raw?.userMessage || undefined,
+    createdAt: String(raw?.createdAt || new Date().toISOString()),
+    completedAt: raw?.completedAt || undefined,
+    expiresAt: raw?.expiresAt || undefined,
+  };
 }
 
 export default function BatchProcessingPage() {
   const [items, setItems] = useState<BatchItem[]>([]);
   const [newUrl, setNewUrl] = useState<string>('');
   const [defaultFormat, setDefaultFormat] = useState<string>('mp4');
+  const [defaultResolution, setDefaultResolution] = useState<string>('1080p');
   const [defaultOperation, setDefaultOperation] = useState<
     'extract_audio' | 'transcode_video'
   >('transcode_video');
   const [isQueueing, setIsQueueing] = useState<boolean>(false);
   const [activeJobs, setActiveJobs] = useState<ProcessingJob[]>([]);
+  const [batchSession, setBatchSession] = useState<BatchSessionSummary | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const normalizedInputPreview = normalizeMediaUrl(newUrl);
+
+  const handleOperationChange = (nextOp: 'extract_audio' | 'transcode_video') => {
+    setDefaultOperation(nextOp);
+    if (nextOp === 'extract_audio' && !AUDIO_FORMATS.includes(defaultFormat as any)) {
+      setDefaultFormat('mp3');
+    } else if (
+      nextOp === 'transcode_video' &&
+      !VIDEO_FORMATS.includes(defaultFormat as any)
+    ) {
+      setDefaultFormat('mp4');
+    }
+  };
 
   const handleAddItem = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,11 +170,13 @@ export default function BatchProcessingPage() {
         id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         url: normalized,
         format: defaultFormat,
+        resolution: defaultOperation === 'extract_audio' ? 'audio_only' : defaultResolution,
         operation: defaultOperation,
       },
     ]);
     setNewUrl('');
     setErrorMsg(null);
+    setBackendDisconnected(false);
   };
 
   const handleRemoveItem = (id: string) => {
@@ -75,34 +187,195 @@ export default function BatchProcessingPage() {
     if (items.length === 0) return;
     setIsQueueing(true);
     setErrorMsg(null);
+    setBackendDisconnected(false);
+    setBatchSession(null);
+
     try {
-      const createdJobs: ProcessingJob[] = [];
-      for (const item of items) {
-        const filename = item.url.split('/').pop() || 'Media file';
-        const job = await api.createJob({
-          sourceUrl: item.url,
-          jobType: item.operation,
-          operation:
-            item.operation === 'extract_audio'
-              ? 'EXTRACT_AUDIO'
-              : 'CONVERT_FORMAT',
-          targetFormat: item.format,
-          streamCopy: item.format === 'native',
-          title: filename,
-        });
-        createdJobs.push(job);
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
+      const idempotencyKey = `bat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const primaryOp = mapItemApiOperation(items[0]);
+      const primaryFormat = items[0].format || defaultFormat;
+      const primaryResolution =
+        items[0].operation === 'extract_audio' ? undefined : items[0].resolution;
+
+      const res = await fetch(`${apiBase}/batches`, {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({
+          title: `Batch (${items.length} ${items.length === 1 ? 'item' : 'items'})`,
+          operation: primaryOp,
+          targetFormat: primaryFormat,
+          targetResolution: primaryResolution,
+          streamCopy: primaryFormat === 'native',
+          idempotencyKey,
+          items: items.map((item) => ({
+            mediaUrl: item.url,
+            title: item.url.split('/').pop()?.split('?')[0] || 'Media file',
+            operation: mapItemApiOperation(item),
+            targetFormat: item.format,
+            targetResolution:
+              item.operation === 'extract_audio' ? undefined : item.resolution,
+            streamCopy: item.format === 'native',
+          })),
+        }),
+      });
+
+      const json = (await res.json().catch(() => null)) as Record<string, any> | null;
+
+      if (res.status === 404 || res.status === 405) {
+        const createdJobs: ProcessingJob[] = [];
+        for (const item of items) {
+          const filename = item.url.split('/').pop() || 'Media file';
+          const job = await api.createJob({
+            sourceUrl: item.url,
+            jobType: item.operation,
+            operation: mapItemApiOperation(item),
+            targetFormat: item.format,
+            targetResolution:
+              item.operation === 'extract_audio' ? undefined : item.resolution,
+            streamCopy: item.format === 'native',
+            title: filename,
+          });
+          createdJobs.push(job);
+        }
+        setActiveJobs(createdJobs);
+        return;
       }
-      setActiveJobs(createdJobs);
+
+      if (!res.ok || !json?.success || !json?.data) {
+        const parsed = parseBatchError(
+          res.status,
+          json,
+          `Could not start batch queue (HTTP ${res.status}).`
+        );
+        setBackendDisconnected(parsed.isBackendDisconnected);
+        throw new Error(parsed.message);
+      }
+
+      const d = json.data;
+      const batchId = String(d.batchId || d.id || '');
+      const childJobs = Array.isArray(d.jobs)
+        ? d.jobs.map((j: Record<string, any>, idx: number) => toProcessingJob(j, idx))
+        : [];
+      setActiveJobs(childJobs);
+      if (batchId) {
+        setBatchSession({
+          id: batchId,
+          title: String(d.title || `Batch (${items.length} items)`),
+          status: String(d.status || 'QUEUED').toUpperCase(),
+          totalItems: Number(d.totalItems) || items.length,
+          completedItems: Number(d.completedItems) || 0,
+          failedItems: Number(d.failedItems) || 0,
+          progress: typeof d.progress === 'number' ? d.progress : 0,
+          zipDownloadUrl: d.zipDownloadUrl || null,
+        });
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : 'Could not start batch queue. Check your links and try again.';
+      if (
+        message.includes('ERR_BACKEND_NOT_CONFIGURED') ||
+        message.includes('503')
+      ) {
+        setBackendDisconnected(true);
+      }
       setErrorMsg(message);
     } finally {
       setIsQueueing(false);
     }
   };
+
+  useEffect(() => {
+    if (!batchSession?.id) return;
+    if (TERMINAL_BATCH_STATUSES.has(batchSession.status.toUpperCase())) return;
+
+    const apiBase = getApiBaseUrl();
+    const poll = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      try {
+        const [summaryRes, jobsRes] = await Promise.all([
+          fetch(`${apiBase}/batches/${encodeURIComponent(batchSession.id)}`, {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          }),
+          fetch(`${apiBase}/batches/${encodeURIComponent(batchSession.id)}/jobs`, {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          }),
+        ]);
+
+        const summaryJson = (await summaryRes.json().catch(() => null)) as Record<string, any> | null;
+        if (!summaryRes.ok || !summaryJson?.success || !summaryJson?.data) {
+          if (
+            summaryRes.status === 503 ||
+            summaryRes.status === 403 ||
+            summaryRes.status === 404 ||
+            summaryJson?.code === 'ERR_BACKEND_NOT_CONFIGURED'
+          ) {
+            const parsed = parseBatchError(
+              summaryRes.status,
+              summaryJson,
+              `Batch status check failed (HTTP ${summaryRes.status}).`
+            );
+            setBackendDisconnected(parsed.isBackendDisconnected);
+            setErrorMsg(parsed.message);
+            setBatchSession((prev) => (prev ? { ...prev, status: 'FAILED' } : null));
+          }
+          return;
+        }
+
+        const d = summaryJson.data;
+        setBatchSession({
+          id: String(d.batchId || d.id || batchSession.id),
+          title: String(d.title || batchSession.title),
+          status: String(d.status || 'PROCESSING').toUpperCase(),
+          totalItems: Number(d.totalItems) || batchSession.totalItems,
+          completedItems: Number(d.completedItems) || 0,
+          failedItems: Number(d.failedItems) || 0,
+          progress: typeof d.progress === 'number' ? d.progress : batchSession.progress,
+          zipDownloadUrl: d.zipDownloadUrl || null,
+        });
+
+        const jobsJson = (await jobsRes.json().catch(() => null)) as Record<string, any> | null;
+        if (jobsRes.ok && jobsJson?.success && Array.isArray(jobsJson?.data?.jobs)) {
+          setActiveJobs(
+            jobsJson.data.jobs.map((j: Record<string, any>, idx: number) =>
+              toProcessingJob(j, idx)
+            )
+          );
+        }
+      } catch {
+        // Keep polling on transient client network interruption
+      }
+    };
+
+    const timer = setInterval(poll, 2000);
+    return () => clearInterval(timer);
+  }, [batchSession?.id, batchSession?.status, batchSession?.title, batchSession?.totalItems, batchSession?.progress]);
+
+  const batchZipHref = batchSession
+    ? batchSession.zipDownloadUrl ||
+      `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
+    : null;
+  const isBatchZipReady =
+    !!batchSession &&
+    (batchSession.status === 'COMPLETED' ||
+      batchSession.status === 'READY' ||
+      (batchSession.status === 'PARTIAL_FAILURE' && batchSession.completedItems > 0) ||
+      !!batchSession.zipDownloadUrl);
 
   return (
     <div className="w-full">
@@ -193,6 +466,84 @@ export default function BatchProcessingPage() {
                   />
                 </div>
               )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div>
+                  <label
+                    htmlFor="batch-default-op"
+                    className="block text-xs font-medium text-content-secondary mb-1.5"
+                  >
+                    Operation
+                  </label>
+                  <select
+                    id="batch-default-op"
+                    value={defaultOperation}
+                    onChange={(e) =>
+                      handleOperationChange(
+                        e.target.value as 'extract_audio' | 'transcode_video'
+                      )
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-surface border border-line text-content text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  >
+                    <option value="transcode_video">Convert video</option>
+                    <option value="extract_audio">Extract audio</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="batch-default-format"
+                    className="block text-xs font-medium text-content-secondary mb-1.5"
+                  >
+                    Target format
+                  </label>
+                  <select
+                    id="batch-default-format"
+                    value={defaultFormat}
+                    onChange={(e) => setDefaultFormat(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface border border-line text-content text-xs sm:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  >
+                    {(defaultOperation === 'extract_audio'
+                      ? AUDIO_FORMATS
+                      : VIDEO_FORMATS
+                    ).map((fmt) => (
+                      <option key={fmt} value={fmt}>
+                        {fmt === 'native' ? 'Native stream copy' : fmt.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="batch-default-resolution"
+                    className="block text-xs font-medium text-content-secondary mb-1.5"
+                  >
+                    Target resolution
+                  </label>
+                  <select
+                    id="batch-default-resolution"
+                    value={
+                      defaultOperation === 'extract_audio'
+                        ? 'audio_only'
+                        : defaultResolution
+                    }
+                    disabled={defaultOperation === 'extract_audio'}
+                    onChange={(e) => setDefaultResolution(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface border border-line text-content text-xs sm:text-sm disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  >
+                    {defaultOperation === 'extract_audio' ? (
+                      <option value="audio_only">Audio only</option>
+                    ) : (
+                      RESOLUTION_OPTIONS.map((resOpt) => (
+                        <option key={resOpt} value={resOpt}>
+                          {resOpt === 'source' ? 'Original source' : resOpt}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              </div>
             </form>
 
             {items.length === 0 ? (
@@ -234,6 +585,9 @@ export default function BatchProcessingPage() {
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-surface-elevated border border-line text-content-secondary">
                           {item.format.toUpperCase()}
+                          {item.operation === 'transcode_video' && item.resolution !== 'source'
+                            ? ` · ${item.resolution}`
+                            : ''}
                         </span>
                         <button
                           type="button"
@@ -259,15 +613,25 @@ export default function BatchProcessingPage() {
                   <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>{errorMsg}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleRunBatch}
-                  disabled={isQueueing || items.length === 0}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Retry</span>
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {backendDisconnected && (
+                    <Link
+                      href="/settings?tab=instances"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                    >
+                      Configure Backend
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleRunBatch}
+                    disabled={isQueueing || items.length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error bg-surface text-error text-xs font-semibold hover:bg-surface-elevated transition-colors active:opacity-90 disabled:opacity-50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Retry</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -287,8 +651,52 @@ export default function BatchProcessingPage() {
               </div>
             )}
 
+            {batchSession && (
+              <div className="mt-8 pt-6 border-t border-line">
+                <div className="p-4 sm:p-5 rounded-xl bg-surface border border-line space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-content">
+                        {batchSession.title}
+                      </p>
+                      <p className="text-xs text-content-secondary mt-0.5">
+                        {batchSession.completedItems} of {batchSession.totalItems} complete
+                        {batchSession.failedItems > 0
+                          ? ` (${batchSession.failedItems} failed)`
+                          : ''}
+                        {' '}— Status: {batchSession.status}
+                      </p>
+                    </div>
+                    {isBatchZipReady && batchZipHref ? (
+                      <a
+                        href={batchZipHref}
+                        download
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-brand-violet text-white text-xs sm:text-sm font-semibold hover:bg-brand-violet/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
+                      >
+                        <Download className="w-4 h-4" aria-hidden="true" />
+                        <span>Download batch ZIP archive</span>
+                      </a>
+                    ) : !TERMINAL_BATCH_STATUSES.has(batchSession.status) ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-violet">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+                        <span>Processing {batchSession.progress}%</span>
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-surface-elevated overflow-hidden">
+                    <div
+                      className="w-full h-full bg-brand-violet origin-left transition-transform duration-300"
+                      style={{
+                        transform: `scaleX(${Math.min(1, Math.max(0, batchSession.progress / 100))})`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeJobs.length > 0 && (
-              <div className="mt-8 pt-6 border-t border-line space-y-4">
+              <div className="mt-6 space-y-4">
                 <h3 className="text-sm font-bold text-content">Active batch progress</h3>
                 <div className="space-y-4">
                   {activeJobs.map((job) => (
@@ -299,6 +707,9 @@ export default function BatchProcessingPage() {
                         setActiveJobs((prev) =>
                           prev.map((j) => (j.id === updated.id ? updated : j))
                         );
+                      }}
+                      onDismiss={() => {
+                        setActiveJobs((prev) => prev.filter((j) => j.id !== job.id));
                       }}
                     />
                   ))}

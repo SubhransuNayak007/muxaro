@@ -112,8 +112,8 @@ describe('Media Engine - Transcoding, Stream Copy, and Audio Extraction', () => 
 
     // Verify output file integrity
     const verifyResult = await verifier.verify(outputPath, {
-      expectedFormat: 'm4a',
-      allowDurationDeviationSeconds: 0.5,
+      expectedContainer: 'm4a',
+      maxDurationDeviationSeconds: 0.5,
     });
     assert.strictEqual(verifyResult.valid, true);
   });

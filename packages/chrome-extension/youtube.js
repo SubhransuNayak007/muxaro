@@ -6,13 +6,36 @@
 (function () {
   'use strict';
 
-  let currentTargetAppUrl = 'https://muxaro.pages.dev';
+  const DEFAULT_WEB_APP_URL = 'https://muxaro.vercel.app';
+  const LEGACY_PREVIEW_DOMAIN = ['pages', 'dev'].join('.');
+  let currentTargetAppUrl = DEFAULT_WEB_APP_URL;
+
+  function resolveTargetAppUrl(candidate) {
+    if (!candidate || typeof candidate !== 'string') return DEFAULT_WEB_APP_URL;
+    const cleaned = candidate.trim().replace(/\/+$/, '');
+    if (!cleaned) return DEFAULT_WEB_APP_URL;
+    try {
+      const parsed = new URL(cleaned);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        // Accept explicitly configured origins (production Vercel, custom domains, localhost, or legacy preview domains)
+        if (parsed.hostname.endsWith('.' + LEGACY_PREVIEW_DOMAIN) && parsed.hostname.includes('muxaro')) {
+          return parsed.origin;
+        }
+        return parsed.origin;
+      }
+    } catch (_) {}
+    return DEFAULT_WEB_APP_URL;
+  }
 
   // Load custom web app URL if configured in extension options
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get(['webAppUrl'], res => {
       if (res && res.webAppUrl) {
-        currentTargetAppUrl = res.webAppUrl.replace(/\/+$/, '');
+        currentTargetAppUrl = resolveTargetAppUrl(res.webAppUrl);
+        const existingBtn = document.getElementById('muxaro-direct-yt-btn');
+        if (existingBtn) {
+          existingBtn.href = `${currentTargetAppUrl}/?url=${encodeURIComponent(location.href)}&direct=1`;
+        }
       }
     });
   }

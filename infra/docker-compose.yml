@@ -1,17 +1,17 @@
 # ==============================================================================
 # MUXARO Production-Grade Multi-Service Orchestration Environment
 # Services:
-#   - postgres:       PostgreSQL 16 with pgcrypto extension enabled
-#   - redis:          Redis 7 in-memory cache, rate limiter & BullMQ broker
-#   - minio:          MinIO high-performance S3/R2 emulation store
-#   - minio-init:     Automated bucket provisioning & lifecycle configuration
-#   - api:            Fastify 5 REST & SSE API Gateway
-#   - worker-analyse: BullMQ lane:analyse metadata extraction worker
-#   - worker-media:   BullMQ multi-lane (fast-io, transcode, batch) FFmpeg worker
-#   - prometheus:     Prometheus monitoring & metrics scraper
+#   - postgres:            PostgreSQL 16 with pgcrypto extension enabled
+#   - redis:               Redis 7 in-memory cache, rate limiter & BullMQ broker
+#   - minio:               MinIO high-performance S3/R2 emulation store
+#   - minio-init:          Automated bucket provisioning & lifecycle configuration
+#   - bgutil-pot-provider: YouTube PO Token HTTP sidecar (BotGuard evasion)
+#   - api:                 Fastify 5 REST & SSE API Gateway
+#   - worker-analyse:      BullMQ lane:analyse metadata extraction worker
+#   - worker-media:        BullMQ multi-lane (fast-io, transcode, batch) FFmpeg worker
+#   - media-worker:        Stateless HTTP FFmpeg/yt-dlp/Deno media worker
+#   - prometheus:          Prometheus monitoring & metrics scraper
 # ==============================================================================
-
-version: '3.9'
 
 networks:
   muxaro-net:
@@ -66,10 +66,10 @@ services:
     container_name: muxaro-redis
     restart: unless-stopped
     command: >
-      redis-server 
-      --appendonly yes 
-      --requirepass ${REDIS_PASSWORD:-muxaro_redis_secret} 
-      --maxmemory 512mb 
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-muxaro_redis_secret}
+      --maxmemory 512mb
       --maxmemory-policy volatile-lru
     volumes:
       - redis_data:/data
@@ -129,6 +129,25 @@ services:
       - muxaro-net
 
   # ----------------------------------------------------------------------------
+  # 4b. YouTube PO-Token Provider Sidecar (bgutil-ytdlp-pot-provider)
+  # ----------------------------------------------------------------------------
+  bgutil-pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: muxaro-bgutil-pot-provider
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${POT_PROVIDER_PORT:-4416}:4416"
+    networks:
+      - muxaro-net
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4416/ping').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
   # 5. API Tier: Fastify 5 REST & SSE Gateway
   # ----------------------------------------------------------------------------
   api:
@@ -143,6 +162,8 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      bgutil-pot-provider:
         condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
@@ -159,15 +180,25 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       DOWNLOAD_SIGNING_SECRET: ${DOWNLOAD_SIGNING_SECRET:-muxaro_dev_download_signing_secret_hmac_sha256}
       DOWNLOAD_WORKER_URL: ${DOWNLOAD_WORKER_URL:-http://localhost:8787}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      MEDIA_WORKER_URL: ${MEDIA_WORKER_URL:-http://media-worker:8080}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000,https://muxaro.vercel.app}
       RATE_LIMIT_ENABLED: "true"
       TRUST_PROXY: "true"
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+      YTDLP_PATH: /usr/local/bin/yt-dlp
+      DENO_PATH: /usr/local/bin/deno
+      YTDLP_JS_RUNTIMES: deno,node
+      POT_PROVIDER_URL: ${POT_PROVIDER_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_PO_TOKEN_BASE_URL: ${YTDLP_PO_TOKEN_BASE_URL:-http://bgutil-pot-provider:4416}
+      BGUTIL_BASE_URL: ${BGUTIL_BASE_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_BGUTIL_URL: ${YTDLP_BGUTIL_URL:-http://bgutil-pot-provider:4416}
     ports:
       - "${API_PORT:-4000}:4000"
     networks:
       - muxaro-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4000/health || curl -fsS http://127.0.0.1:4000/v1/status || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4000/api/v1/health || curl -fsS http://127.0.0.1:4000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -187,6 +218,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      bgutil-pot-provider:
+        condition: service_healthy
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 5001
@@ -195,6 +228,10 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-muxaro_redis_secret}@redis:6379/0
       BULLMQ_CONCURRENCY: 30
       LOG_LEVEL: info
+      POT_PROVIDER_URL: ${POT_PROVIDER_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_PO_TOKEN_BASE_URL: ${YTDLP_PO_TOKEN_BASE_URL:-http://bgutil-pot-provider:4416}
+      BGUTIL_BASE_URL: ${BGUTIL_BASE_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_BGUTIL_URL: ${YTDLP_BGUTIL_URL:-http://bgutil-pot-provider:4416}
     ports:
       - "${WORKER_ANALYSE_PORT:-5001}:5001"
     networks:
@@ -222,6 +259,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      bgutil-pot-provider:
+        condition: service_healthy
     volumes:
       - scratch_data:/tmp/muxaro-scratch
     environment:
@@ -242,6 +281,15 @@ services:
       MAX_CONCURRENT_JOBS: 4
       JOB_TIMEOUT_SECONDS: 300
       LOG_LEVEL: info
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+      YTDLP_PATH: /usr/local/bin/yt-dlp
+      DENO_PATH: /usr/local/bin/deno
+      YTDLP_JS_RUNTIMES: deno,node
+      POT_PROVIDER_URL: ${POT_PROVIDER_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_PO_TOKEN_BASE_URL: ${YTDLP_PO_TOKEN_BASE_URL:-http://bgutil-pot-provider:4416}
+      BGUTIL_BASE_URL: ${BGUTIL_BASE_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_BGUTIL_URL: ${YTDLP_BGUTIL_URL:-http://bgutil-pot-provider:4416}
     ports:
       - "${WORKER_MEDIA_PORT:-5000}:5000"
     networks:
@@ -249,6 +297,47 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/health || exit 1"]
       interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # 7b. Stateless HTTP Media Worker (FFmpeg + yt-dlp nightly + Deno + bgutil)
+  # ----------------------------------------------------------------------------
+  media-worker:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.worker
+    container_name: muxaro-media-worker
+    restart: unless-stopped
+    depends_on:
+      bgutil-pot-provider:
+        condition: service_healthy
+    volumes:
+      - scratch_data:/tmp/muxaro-scratch
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      HOST: 0.0.0.0
+      SCRATCH_DIR: /tmp/muxaro-scratch
+      MAX_CONCURRENT_JOBS: 2
+      JOB_TIMEOUT_SECONDS: 540
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
+      YTDLP_PATH: /usr/local/bin/yt-dlp
+      DENO_PATH: /usr/local/bin/deno
+      YTDLP_JS_RUNTIMES: deno,node
+      POT_PROVIDER_URL: ${POT_PROVIDER_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_PO_TOKEN_BASE_URL: ${YTDLP_PO_TOKEN_BASE_URL:-http://bgutil-pot-provider:4416}
+      BGUTIL_BASE_URL: ${BGUTIL_BASE_URL:-http://bgutil-pot-provider:4416}
+      YTDLP_BGUTIL_URL: ${YTDLP_BGUTIL_URL:-http://bgutil-pot-provider:4416}
+    ports:
+      - "${MEDIA_WORKER_HTTP_PORT:-8080}:8080"
+    networks:
+      - muxaro-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s

@@ -7,7 +7,7 @@
  * - Integrated Eco Mode toggle (energy savings & carbon reduction)
  * - Dual input: URL inspection or 4GB Resumable Multipart Local Upload
  * - Real-time SSE stage & progress tracking with ETA
- * - Conforms to Hallmark design standards (tokenized, no transition:all)
+ * - Conforms to Hallmark design standards (tokenized, no blanket all-property transitions)
  */
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
@@ -30,15 +30,28 @@ import {
   Layers,
   ArrowRight,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
+import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
 import { useEcoStore } from '@/lib/eco-store';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
+import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
+import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
 
 export type VideoContainer = 'mp4' | 'mkv' | 'webm' | 'mov';
 export type VideoCodec = 'copy' | 'h264' | 'hevc' | 'vp9' | 'av1';
 export type Resolution = 'source' | '4320p' | '2160p' | '1440p' | '1080p' | '720p' | '480p';
+
+// Keep proxied multipart chunks comfortably under Vercel's 4.5 MB request body ceiling
+const SAFE_CHUNK_SIZE_BYTES = Math.floor(3.5 * 1024 * 1024);
+
+function isBackendDisconnectedMessage(message: string): boolean {
+  return (
+    message.includes('ERR_BACKEND_NOT_CONFIGURED') ||
+    message.includes('503') ||
+    message.toLowerCase().includes('backend not configured')
+  );
+}
 
 export function ConvertTool() {
   const { settings: ecoSettings, toggleEco, recordSavedJob } = useEcoStore();
@@ -61,12 +74,27 @@ export function ConvertTool() {
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Local Browser FFmpeg WASM Fallback State
+  const [isLocalProcessing, setIsLocalProcessing] = useState<boolean>(false);
+  const [localProgress, setLocalProgress] = useState<FFmpegProgress | null>(null);
+  const [localResult, setLocalResult] = useState<FFmpegTaskResult | null>(null);
+
   // Job Submission & Streaming
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const jobStream = useJobStream(submittedJobId);
+
+  // Clean up local object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (localResult?.url) {
+        URL.revokeObjectURL(localResult.url);
+      }
+    };
+  }, [localResult?.url]);
 
   // When job succeeds and was stream copy, record eco savings
   useEffect(() => {
@@ -77,7 +105,6 @@ export function ConvertTool() {
 
   // Stream Copy / Lossless Remux Feasibility Detection
   const remuxFeasibility = useMemo(() => {
-    // If Eco Mode is on and target container is MP4, MKV, or MOV, stream copy is lossless and recommended
     if (targetContainer === 'mp4' || targetContainer === 'mkv' || targetContainer === 'mov') {
       return {
         feasible: true,
@@ -108,34 +135,57 @@ export function ConvertTool() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    uploader?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
     setSelectedFile(file);
     setUploadedAssetId(null);
+    setUploadStats(null);
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
-    // Initial uploader instantiation
     const instance = new ResumableMultipartUploader(file, {
+      apiBase: getApiBaseUrl(),
+      chunkSize: SAFE_CHUNK_SIZE_BYTES,
       onProgress: (stats) => {
         setUploadStats(stats);
       },
       onError: (err) => {
-        setErrorMessage(err.message || 'File upload failed');
+        const msg = err.message || 'File upload failed';
+        setErrorMessage(msg);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
         setIsUploading(false);
       },
     });
     setUploader(instance);
   };
 
+  const resolveUploadedId = (manifest: Record<string, any> | null | undefined): string => {
+    const id =
+      manifest?.uploadSessionId ||
+      manifest?.assetId ||
+      manifest?.uploadId ||
+      manifest?.id;
+    if (!id || typeof id !== 'string') {
+      throw new Error('Upload completed without a server session or asset ID.');
+    }
+    return id;
+  };
+
   const startUpload = async () => {
     if (!uploader) return;
     setIsUploading(true);
     setErrorMessage(null);
+    setBackendDisconnected(false);
     try {
       const manifest = await uploader.start();
-      setUploadedAssetId(manifest.assetId || manifest.id || 'uploaded_asset');
+      setUploadedAssetId(resolveUploadedId(manifest));
       setIsUploading(false);
     } catch (err: any) {
-      if (err.message !== 'Upload paused or cancelled.') {
-        setErrorMessage(err.message || 'Failed to upload media.');
+      const msg = err?.message || 'Failed to upload media.';
+      if (msg !== 'Upload paused or cancelled.') {
+        setErrorMessage(msg);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
       }
       setIsUploading(false);
     }
@@ -145,14 +195,56 @@ export function ConvertTool() {
     if (!uploader) return;
     if (uploadStats?.state === 'uploading') {
       await uploader.pause();
+      setIsUploading(false);
     } else if (uploadStats?.state === 'paused') {
-      uploader.resume();
+      setIsUploading(true);
+      try {
+        const manifest = await uploader.resume();
+        setUploadedAssetId(resolveUploadedId(manifest));
+        setIsUploading(false);
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to resume upload.';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
+        }
+        setIsUploading(false);
+      }
+    }
+  };
+
+  const runLocalFfmpegConvert = async () => {
+    if (!selectedFile) return;
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setErrorMessage(null);
+    setIsLocalProcessing(true);
+    setLocalProgress({ ratio: 0, percent: 0, message: 'Initializing FFmpeg Web Worker…' });
+    try {
+      const client = FFmpegWorkerClient.getInstance();
+      const result = await client.convert({
+        file: selectedFile,
+        fileName: selectedFile.name,
+        targetContainer,
+        streamCopy: videoCodec === 'copy',
+        videoCodec: videoCodec === 'copy' ? undefined : videoCodec,
+        onProgress: (prog) => setLocalProgress(prog),
+      });
+      setLocalResult(result);
+      if (result.isStreamCopy) recordSavedJob(120);
+    } catch (err: any) {
+      setErrorMessage(
+        err?.message || 'Local FFmpeg WASM conversion failed for this file.'
+      );
+    } finally {
+      setIsLocalProcessing(false);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
     if (inputMode === 'url') {
       const trimmed = normalizeMediaUrl(urlInput);
@@ -160,11 +252,9 @@ export function ConvertTool() {
         setErrorMessage('Please enter a valid media link (YouTube, Vimeo, SoundCloud, or direct video URL).');
         return;
       }
-    } else {
-      if (!uploadedAssetId) {
-        setErrorMessage('Please upload and inspect your local video file before starting conversion.');
-        return;
-      }
+    } else if (!uploadedAssetId) {
+      setErrorMessage('Please upload your local video file before starting server conversion, or convert locally in browser.');
+      return;
     }
 
     setIsSubmitting(true);
@@ -175,18 +265,27 @@ export function ConvertTool() {
       const job = await api.createJob({
         sourceUrl: inputMode === 'url' ? normalizeMediaUrl(urlInput) : undefined,
         mediaAssetId: inputMode === 'file' ? uploadedAssetId! : undefined,
+        uploadSessionId: inputMode === 'file' ? uploadedAssetId! : undefined,
         jobType: 'transcode_video',
         operation,
         targetFormat: targetContainer,
         targetVideoCodec: videoCodec === 'copy' ? undefined : videoCodec,
         targetResolution: resolution === 'source' ? undefined : resolution,
-        streamCopy: videoCodec === 'copy',
+        streamCopy: isCopy,
+        ecoMode: ecoSettings.enabled,
+        qualityPreset,
+        title: inputMode === 'file' && selectedFile ? selectedFile.name : undefined,
         idempotencyKey: `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       });
 
       setSubmittedJobId(job.jobId || job.id);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to initialize conversion job. Please try again.');
+    } catch (err: unknown) {
+      const msg = extractDisplayError(
+        err,
+        'Failed to initialize conversion job. Please try again.'
+      );
+      setErrorMessage(msg);
+      setBackendDisconnected(isBackendDisconnectedMessage(msg));
     } finally {
       setIsSubmitting(false);
     }
@@ -194,14 +293,26 @@ export function ConvertTool() {
 
   const handleReset = () => {
     jobStream.reset();
+    uploader?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setLocalProgress(null);
+    setIsLocalProcessing(false);
     setSubmittedJobId(null);
     setUrlInput('');
     setSelectedFile(null);
     setUploadedAssetId(null);
     setUploadStats(null);
     setUploader(null);
+    setIsUploading(false);
     setErrorMessage(null);
+    setBackendDisconnected(false);
   };
+
+  const jobDownloadHref = submittedJobId
+    ? jobStream.downloadUrl ||
+      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+    : null;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -241,7 +352,39 @@ export function ConvertTool() {
       </div>
 
       {/* Main Conversion Panel */}
-      {!submittedJobId ? (
+      {localResult ? (
+        <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-5">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
+            <div>
+              <h3 className="text-base font-bold text-[var(--muxaro-text-primary)]">
+                Local Browser Conversion Complete
+              </h3>
+              <p className="text-xs text-[var(--muxaro-text-secondary)]">
+                Processed in-browser via FFmpeg Web Worker ({localResult.isStreamCopy ? 'lossless remux' : 'transcode'}).
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={localResult.url}
+              download={localResult.fileName}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download {localResult.fileName}</span>
+            </a>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-semibold text-[var(--muxaro-text-secondary)] hover:bg-[var(--muxaro-bg-elevated)]"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Convert Another Video</span>
+            </button>
+          </div>
+        </div>
+      ) : !submittedJobId ? (
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Source Input Tabs */}
           <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-5">
@@ -279,7 +422,11 @@ export function ConvertTool() {
                 </label>
                 <div className="relative">
                   <input
-                    type="url"
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
                     placeholder="Paste video or direct media link…"
@@ -289,6 +436,7 @@ export function ConvertTool() {
                     <button
                       type="button"
                       onClick={() => setUrlInput('')}
+                      aria-label="Clear URL"
                       className="absolute right-3 top-3 text-[var(--muxaro-text-tertiary)] hover:text-[var(--muxaro-text-primary)]"
                     >
                       <X className="w-4 h-4" />
@@ -316,16 +464,16 @@ export function ConvertTool() {
                       Click to choose video or drag file here
                     </p>
                     <p className="text-xs text-[var(--muxaro-text-tertiary)] mt-1">
-                      Resumable chunked upload handles up to 4GB files with zero buffer loss
+                      Resumable chunked upload (3.5 MB parts) or local browser FFmpeg fallback
                     </p>
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Film className="w-5 h-5 text-[var(--muxaro-indigo)]" />
-                        <div>
-                          <div className="text-sm font-semibold text-[var(--muxaro-text-primary)]">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Film className="w-5 h-5 text-[var(--muxaro-indigo)] shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-[var(--muxaro-text-primary)] truncate">
                             {selectedFile.name}
                           </div>
                           <div className="text-xs text-[var(--muxaro-text-tertiary)]">
@@ -335,8 +483,8 @@ export function ConvertTool() {
                       </div>
 
                       {!uploadedAssetId && (
-                        <div className="flex items-center gap-2">
-                          {isUploading ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isUploading || uploadStats?.state === 'paused' ? (
                             <button
                               type="button"
                               onClick={handlePauseResumeUpload}
@@ -363,7 +511,19 @@ export function ConvertTool() {
                           )}
                           <button
                             type="button"
+                            onClick={runLocalFfmpegConvert}
+                            disabled={isLocalProcessing}
+                            className="px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] text-xs font-semibold text-[var(--muxaro-text-primary)] hover:bg-[var(--muxaro-bg-elevated)] disabled:opacity-50"
+                          >
+                            {isLocalProcessing ? 'Processing Locally…' : 'Process in Browser'}
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Remove selected file"
                             onClick={() => {
+                              uploader?.cancel().catch(() => {});
+                              setUploader(null);
+                              setIsUploading(false);
                               setSelectedFile(null);
                               setUploadedAssetId(null);
                               setUploadStats(null);
@@ -382,7 +542,22 @@ export function ConvertTool() {
                       )}
                     </div>
 
-                    {uploadStats && !uploadedAssetId && (
+                    {isLocalProcessing && localProgress && (
+                      <div className="space-y-1.5 pt-2">
+                        <div className="flex justify-between text-xs text-[var(--muxaro-text-secondary)]">
+                          <span>{localProgress.message || 'Running local FFmpeg worker…'}</span>
+                          <span>{Math.round(localProgress.percent)}%</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className="w-full h-full bg-emerald-500 origin-left transition-transform duration-200"
+                            style={{ transform: `scaleX(${Math.min(1, Math.max(0, localProgress.percent / 100))})` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {uploadStats && !uploadedAssetId && !isLocalProcessing && (
                       <div className="space-y-1.5 pt-2">
                         <div className="flex justify-between text-xs text-[var(--muxaro-text-secondary)]">
                           <span>
@@ -396,8 +571,8 @@ export function ConvertTool() {
                         </div>
                         <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-[var(--muxaro-indigo)] transition-all duration-200"
-                            style={{ width: `${uploadStats.percent}%` }}
+                            className="w-full h-full bg-[var(--muxaro-indigo)] origin-left transition-transform duration-200"
+                            style={{ transform: `scaleX(${Math.min(1, Math.max(0, uploadStats.percent / 100))})` }}
                           />
                         </div>
                       </div>
@@ -547,16 +722,41 @@ export function ConvertTool() {
 
           {/* Error Message */}
           {errorMessage && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
+            <div
+              role="alert"
+              className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex flex-wrap items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {backendDisconnected && selectedFile && (
+                  <button
+                    type="button"
+                    onClick={runLocalFfmpegConvert}
+                    disabled={isLocalProcessing}
+                    className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                  >
+                    Process Locally (FFmpeg WASM)
+                  </button>
+                )}
+                {backendDisconnected && (
+                  <Link
+                    href="/settings?tab=instances"
+                    className="px-3 py-1 rounded-lg border border-red-500/40 text-xs font-semibold hover:bg-red-500/10"
+                  >
+                    Configure Backend
+                  </Link>
+                )}
+              </div>
             </div>
           )}
 
           {/* Submit Action Button */}
           <button
             type="submit"
-            disabled={isSubmitting || (inputMode === 'file' && !uploadedAssetId)}
+            disabled={isSubmitting || isLocalProcessing || (inputMode === 'file' && !uploadedAssetId)}
             className="w-full py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
@@ -613,35 +813,44 @@ export function ConvertTool() {
 
             <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
               <div
-                className={`h-full transition-all duration-300 ${
+                className={`w-full h-full origin-left transition-transform duration-300 ${
                   jobStream.status === 'FAILED'
                     ? 'bg-red-500'
                     : jobStream.status === 'READY'
                     ? 'bg-emerald-500'
                     : 'bg-[var(--muxaro-indigo)]'
                 }`}
-                style={{ width: `${jobStream.progress}%` }}
+                style={{ transform: `scaleX(${Math.min(1, Math.max(0, jobStream.progress / 100))})` }}
               />
             </div>
           </div>
 
           {/* Error Banner */}
           {jobStream.error && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium space-y-1">
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium space-y-2">
               <div className="font-bold">Conversion Failed: {jobStream.error.code}</div>
               <div>{jobStream.error.userMessage || jobStream.error.message}</div>
-              <button
-                type="button"
-                onClick={jobStream.retry}
-                className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs font-semibold"
-              >
-                Retry Job
-              </button>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={jobStream.retry}
+                  className="px-3 py-1 bg-red-600 text-white rounded text-xs font-semibold"
+                >
+                  Retry Job
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-3 py-1 rounded border border-[var(--muxaro-border)] text-xs font-semibold"
+                >
+                  Start Over
+                </button>
+              </div>
             </div>
           )}
 
           {/* Download & Actions when Ready */}
-          {jobStream.status === 'READY' && jobStream.downloadUrl && (
+          {jobStream.status === 'READY' && jobDownloadHref && (
             <div className="p-6 rounded-xl bg-emerald-500/10 border border-emerald-500/30 space-y-4">
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
@@ -657,7 +866,7 @@ export function ConvertTool() {
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <a
-                  href={jobStream.downloadUrl}
+                  href={jobDownloadHref}
                   download
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
                 >

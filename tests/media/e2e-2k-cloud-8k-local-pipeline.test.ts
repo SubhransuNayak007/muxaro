@@ -335,13 +335,29 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       const strategy = selectTurboFlowStrategy({
         operation: 'MERGE_AUDIO_VIDEO',
         sourceAsset: {
+          assetId: 'asset_8k_test_1',
+          url: 'https://example.com/8k-sample.mkv',
+          title: '8K Sample Video',
           container: 'mkv',
           durationSeconds: 60,
           fileSizeBytes: 2_000_000_000,
           streams: [
-            { id: '1', type: 'VIDEO', codec: 'h264', width: 7680, height: 4320, bitrateKbps: 45000 },
-            { id: '2', type: 'AUDIO', codec: 'aac', channels: 2, bitrateKbps: 192 },
+            { index: 0, type: 'VIDEO', codec: 'h264', width: 7680, height: 4320, bitrate: 45000 },
+            { index: 1, type: 'AUDIO', codec: 'aac', channels: 2, bitrate: 192 },
           ],
+          availableFormats: {
+            videoResolutions: ['4320p'],
+            audioFormats: ['aac'],
+          },
+          rightsCheck: {
+            isPermitted: true,
+            policyCode: 'DIRECT_MEDIA_PERMITTED',
+            canExtractStreams: true,
+            canPreview: true,
+            reason: 'Direct test media',
+            warnings: [],
+          },
+          inspectedAt: new Date().toISOString(),
         },
         targetFormat: 'mkv',
         targetResolution: '8K',
@@ -404,12 +420,13 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
 
       await completionPromise;
 
-      assert.ok(finalJob, 'Final ready job must be captured');
-      assert.strictEqual(finalJob!.status, 'ready');
-      assert.strictEqual(finalJob!.progress, 100);
-      assert.ok(finalJob!.downloadUrl, 'Ready job must carry downloadUrl');
-      assert.ok(finalJob!.artifact, 'Ready job must carry artifact metadata');
-      assert.strictEqual(finalJob!.artifact?.format, 'mp3');
+      const resolvedJob = finalJob as JobRecord | null;
+      assert.ok(resolvedJob, 'Final ready job must be captured');
+      assert.strictEqual(resolvedJob.status, 'ready');
+      assert.strictEqual(resolvedJob.progress, 100);
+      assert.ok(resolvedJob.downloadUrl, 'Ready job must carry downloadUrl');
+      assert.ok(resolvedJob.artifact, 'Ready job must carry artifact metadata');
+      assert.strictEqual(resolvedJob.artifact?.format, 'mp3');
     });
 
     it('should format SSE stream frames adhering to text/event-stream specification', () => {
@@ -454,7 +471,7 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       const tier = 'free';
 
       // 1. Check initial quota eligibility
-      const canExec = await quotaManager.canExecute(userId, tier, 'video_download');
+      const canExec = await quotaManager.canExecute(userId, tier, 'VIDEO_DOWNLOAD');
       assert.strictEqual(canExec.allowed, true);
       assert.ok(canExec.remaining > 0);
       const initialRemaining = canExec.remaining;
@@ -463,7 +480,7 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       const reservation = await quotaManager.reserveQuota({
         userId,
         userTier: tier,
-        jobType: 'video_download',
+        jobType: 'VIDEO_DOWNLOAD',
         jobId: 'job_quota_e2e_1',
         itemCount: 1,
       });
@@ -473,12 +490,12 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       assert.strictEqual(reservation.jobId, 'job_quota_e2e_1');
 
       // 3. Confirm remaining quota decrements
-      const afterReserve = await quotaManager.canExecute(userId, tier, 'video_download');
+      const afterReserve = await quotaManager.canExecute(userId, tier, 'VIDEO_DOWNLOAD');
       assert.strictEqual(afterReserve.remaining, initialRemaining - 1);
 
       // 4. Test rollback on job cancellation / failure
       await quotaManager.rollbackQuota(reservation.reservationId, 'JOB_CANCELLED');
-      const afterRollback = await quotaManager.canExecute(userId, tier, 'video_download');
+      const afterRollback = await quotaManager.canExecute(userId, tier, 'VIDEO_DOWNLOAD');
       assert.strictEqual(afterRollback.remaining, initialRemaining, 'Remaining quota must be restored upon release');
     });
 
@@ -488,13 +505,11 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       // Override tier limits with small limit of 2 for testing
       const quotaManager = new QuotaReservationManager(store, ledger, {
         tierOverrides: {
-          guest: {
+          free: {
             videoDailyLimit: 2,
             playlistDailyLimit: 0,
             maxConcurrentJobs: 1,
             maxPlaylistItems: 0,
-            maxVideoDurationMinutes: 10,
-            monthlyCreditAllowance: 2,
           },
         },
       });
@@ -502,14 +517,14 @@ describe('MUXARO E2E Pipeline - 2K Cloud & 8K Local Processing', () => {
       const guestId = `usr_guest_exhaust_${Date.now()}`;
 
       // Reserve 2 allowed jobs and commit them
-      const res1 = await quotaManager.reserveQuota({ userId: guestId, userTier: 'guest', jobType: 'video_download', jobId: 'job_g1' });
+      const res1 = await quotaManager.reserveQuota({ userId: guestId, userTier: 'free', jobType: 'VIDEO_DOWNLOAD', jobId: 'job_g1' });
       await quotaManager.commitQuota(res1.reservationId);
 
-      const res2 = await quotaManager.reserveQuota({ userId: guestId, userTier: 'guest', jobType: 'video_download', jobId: 'job_g2' });
+      const res2 = await quotaManager.reserveQuota({ userId: guestId, userTier: 'free', jobType: 'VIDEO_DOWNLOAD', jobId: 'job_g2' });
       await quotaManager.commitQuota(res2.reservationId);
 
       // 3rd job must be denied
-      const check3 = await quotaManager.canExecute(guestId, 'guest', 'video_download');
+      const check3 = await quotaManager.canExecute(guestId, 'free', 'VIDEO_DOWNLOAD');
       assert.strictEqual(check3.allowed, false);
       assert.strictEqual(check3.code, 'QUOTA_EXCEEDED');
       assert.strictEqual(check3.remaining, 0);

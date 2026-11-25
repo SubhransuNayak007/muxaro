@@ -48,13 +48,13 @@ spec:
             - name: RATE_LIMIT_ENABLED
               value: "true"
             - name: CORS_ORIGIN
-              value: "https://muxaro.app"
+              value: "FRONTEND_SITE_URL"
             - name: SITE_URL
-              value: "https://muxaro.app"
+              value: "FRONTEND_SITE_URL"
             - name: FRONTEND_URL
-              value: "https://muxaro.app"
+              value: "FRONTEND_SITE_URL"
             - name: BASE_URL
-              value: "https://api.muxaro.app"
+              value: "API_PUBLIC_URL"
             - name: WORKER_CONCURRENCY
               value: "2"
             - name: MAX_PAYLOAD_BYTES
@@ -117,7 +117,7 @@ spec:
                   name: muxaro-google-client-secret
                   key: latest
             - name: GOOGLE_REDIRECT_URI
-              value: "https://api.muxaro.app/api/v1/auth/google/callback"
+              value: "API_PUBLIC_URL/api/v1/auth/google/callback"
             - name: MUXARO_ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:

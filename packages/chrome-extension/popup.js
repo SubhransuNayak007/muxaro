@@ -2,6 +2,8 @@
  * MUXARO Direct Bridge - Extension Popup Controller
  */
 
+const DEFAULT_WEB_APP_URL = 'https://muxaro.vercel.app';
+
 document.addEventListener('DOMContentLoaded', async () => {
   const extVersionEl = document.getElementById('ext-version');
   const statStreamsEl = document.getElementById('stat-streams');
@@ -85,7 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 3. Save Settings
   btnSaveSettings.addEventListener('click', () => {
-    const targetUrl = (webAppUrlInput.value || 'https://muxaro.pages.dev').trim();
+    const targetUrl = (webAppUrlInput.value || DEFAULT_WEB_APP_URL).trim();
     chrome.runtime.sendMessage(
       {
         action: 'UPDATE_SETTINGS',
@@ -99,7 +101,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 4. Open MUXARO Web App
   btnOpenApp.addEventListener('click', () => {
-    const targetUrl = (webAppUrlInput.value || 'https://muxaro.pages.dev').trim();
+    const targetUrl = (webAppUrlInput.value || DEFAULT_WEB_APP_URL).trim();
     chrome.tabs.create({ url: targetUrl });
   });
 

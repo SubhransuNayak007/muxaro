@@ -11,29 +11,43 @@
  * - Strict Hallmark design tokens & accessible layout
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import {
   Layers,
   Film,
   Music,
-  Sliders,
-  Volume2,
-  Clock,
   UploadCloud,
-  Link2,
   CheckCircle2,
   AlertCircle,
   Download,
   RotateCcw,
   ArrowRight,
   X,
+  Pause,
   Play,
 } from 'lucide-react';
-import { api } from '@/lib/api-client';
+import {
+  api,
+  extractDisplayError,
+  getApiBaseUrl,
+  readCsrfTokenFromCookie,
+} from '@/lib/api-client';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
+import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
+import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
 import { normalizeMediaUrl } from '@/lib/url-utils';
+
+const SAFE_CHUNK_SIZE_BYTES = Math.floor(3.5 * 1024 * 1024);
+
+function isBackendDisconnectedMessage(message: string): boolean {
+  return (
+    message.includes('ERR_BACKEND_NOT_CONFIGURED') ||
+    message.includes('503') ||
+    message.toLowerCase().includes('backend not configured')
+  );
+}
 
 export function MergeTool() {
   // Video Source Track
@@ -44,6 +58,7 @@ export function MergeTool() {
   const [videoUploadStats, setVideoUploadStats] = useState<MultipartUploadStats | null>(null);
   const [isVideoUploading, setIsVideoUploading] = useState<boolean>(false);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const videoUploaderRef = useRef<ResumableMultipartUploader | null>(null);
 
   // Audio Source Track
   const [audioMode, setAudioMode] = useState<'url' | 'file'>('url');
@@ -53,6 +68,7 @@ export function MergeTool() {
   const [audioUploadStats, setAudioUploadStats] = useState<MultipartUploadStats | null>(null);
   const [isAudioUploading, setIsAudioUploading] = useState<boolean>(false);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const audioUploaderRef = useRef<ResumableMultipartUploader | null>(null);
 
   // Sync and Processing Parameters
   const [audioOffsetMs, setAudioOffsetMs] = useState<number>(0);
@@ -60,73 +76,167 @@ export function MergeTool() {
   const [targetFormat, setTargetFormat] = useState<'mp4' | 'mkv' | 'webm'>('mp4');
   const [preserveVideoStream, setPreserveVideoStream] = useState<boolean>(true);
 
+  // Local Browser FFmpeg WASM Fallback State
+  const [isLocalProcessing, setIsLocalProcessing] = useState<boolean>(false);
+  const [localProgress, setLocalProgress] = useState<FFmpegProgress | null>(null);
+  const [localResult, setLocalResult] = useState<FFmpegTaskResult | null>(null);
+
   // Job Submission & Streaming
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const jobStream = useJobStream(submittedJobId);
+
+  useEffect(() => {
+    return () => {
+      if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    };
+  }, [localResult?.url]);
+
+  const resolveUploadedId = (manifest: Record<string, any> | null | undefined): string => {
+    const id =
+      manifest?.uploadSessionId ||
+      manifest?.assetId ||
+      manifest?.uploadId ||
+      manifest?.id;
+    if (!id || typeof id !== 'string') {
+      throw new Error('Upload finished without a server session or asset ID.');
+    }
+    return id;
+  };
 
   // Video File Upload Handler
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    videoUploaderRef.current?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
     setVideoFile(file);
     setVideoAssetId(null);
+    setVideoUploadStats(null);
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
     const instance = new ResumableMultipartUploader(file, {
+      apiBase: getApiBaseUrl(),
+      chunkSize: SAFE_CHUNK_SIZE_BYTES,
       onProgress: (stats) => setVideoUploadStats(stats),
       onError: (err) => {
-        setErrorMessage(`Video upload error: ${err.message}`);
+        const msg = err.message || 'Video upload failed';
+        setErrorMessage(`Video upload error: ${msg}`);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
         setIsVideoUploading(false);
       },
     });
+    videoUploaderRef.current = instance;
 
     setIsVideoUploading(true);
     instance
       .start()
       .then((res) => {
-        setVideoAssetId(res.assetId || res.id || 'video_asset');
+        setVideoAssetId(resolveUploadedId(res));
         setIsVideoUploading(false);
       })
       .catch((err) => {
-        if (err.message !== 'Upload paused or cancelled.') {
-          setErrorMessage(err.message);
+        const msg = err?.message || 'Video upload failed';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
         }
         setIsVideoUploading(false);
       });
+  };
+
+  const handleVideoPauseResume = async () => {
+    const inst = videoUploaderRef.current;
+    if (!inst) return;
+    if (videoUploadStats?.state === 'uploading') {
+      await inst.pause();
+      setIsVideoUploading(false);
+    } else if (videoUploadStats?.state === 'paused') {
+      setIsVideoUploading(true);
+      try {
+        const res = await inst.resume();
+        setVideoAssetId(resolveUploadedId(res));
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to resume video upload.';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
+        }
+      } finally {
+        setIsVideoUploading(false);
+      }
+    }
   };
 
   // Audio File Upload Handler
   const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    audioUploaderRef.current?.cancel().catch(() => {});
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
     setAudioFile(file);
     setAudioAssetId(null);
+    setAudioUploadStats(null);
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
     const instance = new ResumableMultipartUploader(file, {
+      apiBase: getApiBaseUrl(),
+      chunkSize: SAFE_CHUNK_SIZE_BYTES,
       onProgress: (stats) => setAudioUploadStats(stats),
       onError: (err) => {
-        setErrorMessage(`Audio upload error: ${err.message}`);
+        const msg = err.message || 'Audio upload failed';
+        setErrorMessage(`Audio upload error: ${msg}`);
+        setBackendDisconnected(isBackendDisconnectedMessage(msg));
         setIsAudioUploading(false);
       },
     });
+    audioUploaderRef.current = instance;
 
     setIsAudioUploading(true);
     instance
       .start()
       .then((res) => {
-        setAudioAssetId(res.assetId || res.id || 'audio_asset');
+        setAudioAssetId(resolveUploadedId(res));
         setIsAudioUploading(false);
       })
       .catch((err) => {
-        if (err.message !== 'Upload paused or cancelled.') {
-          setErrorMessage(err.message);
+        const msg = err?.message || 'Audio upload failed';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
         }
         setIsAudioUploading(false);
       });
+  };
+
+  const handleAudioPauseResume = async () => {
+    const inst = audioUploaderRef.current;
+    if (!inst) return;
+    if (audioUploadStats?.state === 'uploading') {
+      await inst.pause();
+      setIsAudioUploading(false);
+    } else if (audioUploadStats?.state === 'paused') {
+      setIsAudioUploading(true);
+      try {
+        const res = await inst.resume();
+        setAudioAssetId(resolveUploadedId(res));
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to resume audio upload.';
+        if (msg !== 'Upload paused or cancelled.') {
+          setErrorMessage(msg);
+          setBackendDisconnected(isBackendDisconnectedMessage(msg));
+        }
+      } finally {
+        setIsAudioUploading(false);
+      }
+    }
   };
 
   // Nudge audio sync offset by delta ms
@@ -134,64 +244,151 @@ export function MergeTool() {
     setAudioOffsetMs((prev) => Math.min(5000, Math.max(-5000, prev + delta)));
   };
 
+  const runLocalFfmpegMerge = async () => {
+    if (!videoFile || !audioFile) return;
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setErrorMessage(null);
+    setIsLocalProcessing(true);
+    setLocalProgress({ ratio: 0, percent: 0, message: 'Initializing FFmpeg Web Worker…' });
+    try {
+      const client = FFmpegWorkerClient.getInstance();
+      const result = await client.merge({
+        videoFile,
+        videoFileName: videoFile.name,
+        audioFile,
+        audioFileName: audioFile.name,
+        targetContainer: targetFormat,
+        streamCopy: preserveVideoStream,
+        audioDelayMs: audioOffsetMs,
+        onProgress: (prog) => setLocalProgress(prog),
+      });
+      setLocalResult(result);
+    } catch (err: any) {
+      setErrorMessage(
+        err?.message || 'Local FFmpeg WASM audio/video merge failed.'
+      );
+    } finally {
+      setIsLocalProcessing(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setBackendDisconnected(false);
 
-    const hasVideo = videoMode === 'url' ? !!normalizeMediaUrl(videoUrl) : !!videoAssetId;
-    const hasAudio = audioMode === 'url' ? !!normalizeMediaUrl(audioUrl) : !!audioAssetId;
+    const normalizedVideo = videoMode === 'url' ? normalizeMediaUrl(videoUrl) : null;
+    const normalizedAudio = audioMode === 'url' ? normalizeMediaUrl(audioUrl) : null;
 
-    if (!hasVideo) {
-      setErrorMessage('Please provide a valid video track (URL or uploaded file).');
+    if (videoMode === 'url' && !normalizedVideo) {
+      setErrorMessage('Please provide a valid video URL.');
       return;
     }
-    if (!hasAudio) {
-      setErrorMessage('Please provide a valid audio track (URL or uploaded file).');
+    if (videoMode === 'file' && !videoAssetId) {
+      setErrorMessage('Please wait for your video upload to finish, or use local FFmpeg merge with local files.');
+      return;
+    }
+    if (audioMode === 'url' && !normalizedAudio) {
+      setErrorMessage('Please provide a valid audio URL.');
+      return;
+    }
+    if (audioMode === 'file' && !audioAssetId) {
+      setErrorMessage('Please wait for your audio upload to finish, or use local FFmpeg merge with local files.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // First attempt dedicated /tools/merge route
-      const token = typeof window !== 'undefined' ? localStorage.getItem('muxaro_auth_token') : null;
+      const apiBase = getApiBaseUrl();
+      const csrf = readCsrfTokenFromCookie();
+      const token =
+        typeof window !== 'undefined' ? localStorage.getItem('muxaro_auth_token') : null;
+      const idempotencyKey = `merge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
       const payload = {
-        videoUrl: videoMode === 'url' ? normalizeMediaUrl(videoUrl) : undefined,
-        videoAssetId: videoMode === 'file' ? videoAssetId : undefined,
-        audioUrl: audioMode === 'url' ? normalizeMediaUrl(audioUrl) : undefined,
-        audioAssetId: audioMode === 'file' ? audioAssetId : undefined,
+        videoUrl: normalizedVideo || undefined,
+        videoAssetId: videoMode === 'file' ? videoAssetId! : undefined,
+        videoSessionId: videoMode === 'file' ? videoAssetId! : undefined,
+        audioUrl: normalizedAudio || undefined,
+        audioAssetId: audioMode === 'file' ? audioAssetId! : undefined,
+        audioSessionId: audioMode === 'file' ? audioAssetId! : undefined,
         targetFormat,
         audioOffsetMs,
         normalizeLoudness: normalizeVolume,
         preserveVideoStream,
-        idempotencyKey: `merge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        streamCopy: preserveVideoStream,
+        idempotencyKey,
       };
 
-      const res = await fetch('/api/v1/tools/merge', {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+
+      const res = await fetch(`${apiBase}/tools/merge`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        credentials: 'include',
+        headers,
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const body = await res.json();
-        setSubmittedJobId(body.data?.jobId || body.jobId);
-      } else {
-        // Fallback to standard jobs endpoint
+      const body = (await res.json().catch(() => null)) as Record<string, any> | null;
+
+      if (res.status === 503 || body?.code === 'ERR_BACKEND_NOT_CONFIGURED' || body?.error?.code === 'ERR_BACKEND_NOT_CONFIGURED') {
+        setBackendDisconnected(true);
+        throw new Error(
+          body?.error?.message ||
+            body?.rawMessage ||
+            'Backend worker is not configured (ERR_BACKEND_NOT_CONFIGURED). Connect a backend node in Settings or configure API_INTERNAL_URL.'
+        );
+      }
+
+      if (res.ok && body?.success !== false) {
+        const jobId = body?.data?.jobId || body?.data?.id || body?.jobId || body?.id;
+        if (jobId) {
+          setSubmittedJobId(String(jobId));
+          return;
+        }
+      }
+
+      if (res.status === 404 || res.status === 405) {
         const job = await api.createJob({
-          sourceUrl: videoMode === 'url' ? normalizeMediaUrl(videoUrl) : undefined,
+          sourceUrl: normalizedVideo || undefined,
           mediaAssetId: videoMode === 'file' ? videoAssetId! : undefined,
+          uploadSessionId: videoMode === 'file' ? videoAssetId! : undefined,
+          audioUrl: normalizedAudio || undefined,
+          audioAssetId: audioMode === 'file' ? audioAssetId! : undefined,
+          secondaryAudioUrl: normalizedAudio || undefined,
+          secondaryAudioSessionId: audioMode === 'file' ? audioAssetId! : undefined,
           jobType: 'merge_av',
           operation: 'MERGE_AUDIO_VIDEO',
           targetFormat,
-          idempotencyKey: payload.idempotencyKey,
+          audioDelayMs: audioOffsetMs,
+          audioOffsetMs,
+          normalizeLoudness: normalizeVolume,
+          streamCopy: preserveVideoStream,
+          idempotencyKey,
         });
         setSubmittedJobId(job.jobId || job.id);
+        return;
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to submit merge job.');
+
+      throw new Error(
+        body?.error?.userMessage ||
+          body?.error?.message ||
+          body?.message ||
+          `Failed to start merge job (HTTP ${res.status}).`
+      );
+    } catch (err: unknown) {
+      const msg = extractDisplayError(err, 'Failed to submit merge job.');
+      setErrorMessage(msg);
+      if (isBackendDisconnectedMessage(msg)) {
+        setBackendDisconnected(true);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -199,6 +396,14 @@ export function MergeTool() {
 
   const handleReset = () => {
     jobStream.reset();
+    videoUploaderRef.current?.cancel().catch(() => {});
+    audioUploaderRef.current?.cancel().catch(() => {});
+    videoUploaderRef.current = null;
+    audioUploaderRef.current = null;
+    if (localResult?.url) URL.revokeObjectURL(localResult.url);
+    setLocalResult(null);
+    setLocalProgress(null);
+    setIsLocalProcessing(false);
     setSubmittedJobId(null);
     setVideoUrl('');
     setAudioUrl('');
@@ -206,9 +411,19 @@ export function MergeTool() {
     setAudioFile(null);
     setVideoAssetId(null);
     setAudioAssetId(null);
+    setVideoUploadStats(null);
+    setAudioUploadStats(null);
+    setIsVideoUploading(false);
+    setIsAudioUploading(false);
     setAudioOffsetMs(0);
     setErrorMessage(null);
+    setBackendDisconnected(false);
   };
+
+  const jobDownloadHref = submittedJobId
+    ? jobStream.downloadUrl ||
+      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+    : null;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -227,7 +442,39 @@ export function MergeTool() {
         </p>
       </div>
 
-      {!submittedJobId ? (
+      {localResult ? (
+        <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-5">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
+            <div>
+              <h3 className="text-base font-bold text-[var(--muxaro-text-primary)]">
+                Local Browser Merge Complete
+              </h3>
+              <p className="text-xs text-[var(--muxaro-text-secondary)]">
+                Audio synchronized ({audioOffsetMs}ms) and multiplexed locally via FFmpeg Web Worker.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={localResult.url}
+              download={localResult.fileName}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
+            >
+              <Download className="w-4 h-4" />
+              <span>Download {localResult.fileName}</span>
+            </a>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-semibold text-[var(--muxaro-text-secondary)] hover:bg-[var(--muxaro-bg-elevated)]"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Merge Another Pair</span>
+            </button>
+          </div>
+        </div>
+      ) : !submittedJobId ? (
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Dual Inputs Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -265,13 +512,29 @@ export function MergeTool() {
               </div>
 
               {videoMode === 'url' ? (
-                <input
-                  type="url"
-                  value={videoUrl}
-                  onChange={(e) => setVideoUrl(e.target.value)}
-                  placeholder="Paste video URL…"
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={videoUrl}
+                    onChange={(e) => setVideoUrl(e.target.value)}
+                    placeholder="Paste video URL…"
+                    className="w-full px-3 py-2.5 pr-8 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  />
+                  {videoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setVideoUrl('')}
+                      aria-label="Clear video URL"
+                      className="absolute right-2.5 top-2.5 text-[var(--muxaro-text-tertiary)] hover:text-[var(--muxaro-text-primary)]"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div>
                   <input
@@ -292,13 +555,54 @@ export function MergeTool() {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-xs p-3 rounded-lg bg-[var(--muxaro-bg-base)] border border-[var(--muxaro-border)] space-y-1">
-                      <div className="font-semibold text-[var(--muxaro-text-primary)] truncate">
-                        {videoFile.name}
+                    <div className="text-xs p-3 rounded-lg bg-[var(--muxaro-bg-base)] border border-[var(--muxaro-border)] space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-[var(--muxaro-text-primary)] truncate">
+                          {videoFile.name}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {!videoAssetId && (isVideoUploading || videoUploadStats?.state === 'paused') && (
+                            <button
+                              type="button"
+                              onClick={handleVideoPauseResume}
+                              className="p-1 rounded border border-[var(--muxaro-border)] text-[var(--muxaro-text-secondary)]"
+                              aria-label={videoUploadStats?.state === 'uploading' ? 'Pause video upload' : 'Resume video upload'}
+                            >
+                              {videoUploadStats?.state === 'uploading' ? (
+                                <Pause className="w-3 h-3" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              videoUploaderRef.current?.cancel().catch(() => {});
+                              videoUploaderRef.current = null;
+                              setIsVideoUploading(false);
+                              setVideoFile(null);
+                              setVideoAssetId(null);
+                              setVideoUploadStats(null);
+                            }}
+                            aria-label="Remove video file"
+                            className="p-1 text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       {isVideoUploading && videoUploadStats && (
-                        <div className="text-slate-500">
-                          Uploading: {videoUploadStats.percent}% • {videoUploadStats.mbps} MB/s
+                        <div className="space-y-1">
+                          <div className="text-slate-500">
+                            Uploading: {videoUploadStats.percent}% • {videoUploadStats.mbps} MB/s
+                          </div>
+                          <div className="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className="w-full h-full bg-[var(--muxaro-indigo)] origin-left transition-transform duration-200"
+                              style={{ transform: `scaleX(${Math.min(1, Math.max(0, videoUploadStats.percent / 100))})` }}
+                            />
+                          </div>
                         </div>
                       )}
                       {videoAssetId && (
@@ -346,13 +650,29 @@ export function MergeTool() {
               </div>
 
               {audioMode === 'url' ? (
-                <input
-                  type="url"
-                  value={audioUrl}
-                  onChange={(e) => setAudioUrl(e.target.value)}
-                  placeholder="Paste audio URL…"
-                  className="w-full px-3 py-2.5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="url"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={audioUrl}
+                    onChange={(e) => setAudioUrl(e.target.value)}
+                    placeholder="Paste audio URL…"
+                    className="w-full px-3 py-2.5 pr-8 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] placeholder-[var(--muxaro-text-tertiary)] placeholder:truncate truncate focus:border-[var(--muxaro-border-focus)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet transition-colors"
+                  />
+                  {audioUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setAudioUrl('')}
+                      aria-label="Clear audio URL"
+                      className="absolute right-2.5 top-2.5 text-[var(--muxaro-text-tertiary)] hover:text-[var(--muxaro-text-primary)]"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div>
                   <input
@@ -373,13 +693,54 @@ export function MergeTool() {
                       </div>
                     </div>
                   ) : (
-                    <div className="text-xs p-3 rounded-lg bg-[var(--muxaro-bg-base)] border border-[var(--muxaro-border)] space-y-1">
-                      <div className="font-semibold text-[var(--muxaro-text-primary)] truncate">
-                        {audioFile.name}
+                    <div className="text-xs p-3 rounded-lg bg-[var(--muxaro-bg-base)] border border-[var(--muxaro-border)] space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-semibold text-[var(--muxaro-text-primary)] truncate">
+                          {audioFile.name}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {!audioAssetId && (isAudioUploading || audioUploadStats?.state === 'paused') && (
+                            <button
+                              type="button"
+                              onClick={handleAudioPauseResume}
+                              className="p-1 rounded border border-[var(--muxaro-border)] text-[var(--muxaro-text-secondary)]"
+                              aria-label={audioUploadStats?.state === 'uploading' ? 'Pause audio upload' : 'Resume audio upload'}
+                            >
+                              {audioUploadStats?.state === 'uploading' ? (
+                                <Pause className="w-3 h-3" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              audioUploaderRef.current?.cancel().catch(() => {});
+                              audioUploaderRef.current = null;
+                              setIsAudioUploading(false);
+                              setAudioFile(null);
+                              setAudioAssetId(null);
+                              setAudioUploadStats(null);
+                            }}
+                            aria-label="Remove audio file"
+                            className="p-1 text-slate-400 hover:text-slate-600"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       {isAudioUploading && audioUploadStats && (
-                        <div className="text-slate-500">
-                          Uploading: {audioUploadStats.percent}% • {audioUploadStats.mbps} MB/s
+                        <div className="space-y-1">
+                          <div className="text-slate-500">
+                            Uploading: {audioUploadStats.percent}% • {audioUploadStats.mbps} MB/s
+                          </div>
+                          <div className="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className="w-full h-full bg-emerald-500 origin-left transition-transform duration-200"
+                              style={{ transform: `scaleX(${Math.min(1, Math.max(0, audioUploadStats.percent / 100))})` }}
+                            />
+                          </div>
                         </div>
                       )}
                       {audioAssetId && (
@@ -396,9 +757,27 @@ export function MergeTool() {
 
           {/* Sync Calibration & Output Settings */}
           <div className="muxaro-card p-6 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl shadow-[var(--muxaro-shadow-card)] space-y-6">
-            <h2 className="text-base font-bold text-[var(--muxaro-text-primary)]">
-              Audio Synchronization & Calibration
-            </h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-base font-bold text-[var(--muxaro-text-primary)]">
+                Audio Synchronization & Calibration
+              </h2>
+              <div className="flex items-center gap-1.5">
+                {(['mp4', 'mkv', 'webm'] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() => setTargetFormat(fmt)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs font-semibold uppercase transition-colors ${
+                      targetFormat === fmt
+                        ? 'border-[var(--muxaro-indigo)] bg-[var(--muxaro-tag-pill-bg)] text-[var(--muxaro-indigo)]'
+                        : 'border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-[var(--muxaro-text-secondary)]'
+                    }`}
+                  >
+                    .{fmt}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Offset Slider & Nudge Buttons */}
             <div className="p-4 rounded-xl bg-[var(--muxaro-bg-base)] border border-[var(--muxaro-border)] space-y-3">
@@ -509,27 +888,80 @@ export function MergeTool() {
             </div>
           </div>
 
-          {errorMessage && (
-            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMessage}</span>
+          {isLocalProcessing && localProgress && (
+            <div className="p-4 rounded-xl bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] space-y-2">
+              <div className="flex justify-between text-xs text-[var(--muxaro-text-secondary)]">
+                <span>{localProgress.message || 'Merging tracks locally in browser…'}</span>
+                <span>{Math.round(localProgress.percent)}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="w-full h-full bg-emerald-500 origin-left transition-transform duration-200"
+                  style={{ transform: `scaleX(${Math.min(1, Math.max(0, localProgress.percent / 100))})` }}
+                />
+              </div>
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting || isVideoUploading || isAudioUploading}
-            className="w-full py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isSubmitting ? (
-              <span>Submitting Multiplexing Job…</span>
-            ) : (
-              <>
-                <span>Merge Video & Audio Tracks</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
+          {errorMessage && (
+            <div
+              role="alert"
+              className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium flex flex-wrap items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {backendDisconnected && videoFile && audioFile && (
+                  <button
+                    type="button"
+                    onClick={runLocalFfmpegMerge}
+                    disabled={isLocalProcessing}
+                    className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700"
+                  >
+                    Merge Locally (FFmpeg WASM)
+                  </button>
+                )}
+                {backendDisconnected && (
+                  <Link
+                    href="/settings?tab=instances"
+                    className="px-3 py-1 rounded-lg border border-red-500/40 text-xs font-semibold hover:bg-red-500/10"
+                  >
+                    Configure Backend
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={isSubmitting || isLocalProcessing || isVideoUploading || isAudioUploading}
+              className="flex-1 py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? (
+                <span>Submitting Multiplexing Job…</span>
+              ) : (
+                <>
+                  <span>Merge Video & Audio Tracks</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+
+            {videoFile && audioFile && (
+              <button
+                type="button"
+                onClick={runLocalFfmpegMerge}
+                disabled={isLocalProcessing}
+                className="py-3.5 px-5 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-semibold text-[var(--muxaro-text-primary)] hover:bg-[var(--muxaro-bg-elevated)] disabled:opacity-50"
+              >
+                {isLocalProcessing ? 'Merging Locally…' : 'Process in Browser'}
+              </button>
             )}
-          </button>
+          </div>
         </form>
       ) : (
         /* Real-Time Multiplexing Stream */
@@ -541,7 +973,7 @@ export function MergeTool() {
               </span>
               <div>
                 <h3 className="text-base font-bold text-[var(--muxaro-text-primary)]">
-                  Multiplexing Audio & Video
+                  Multiplexing Audio & Video (.{targetFormat.toUpperCase()})
                 </h3>
                 <p className="text-xs text-[var(--muxaro-text-secondary)] font-mono">
                   {submittedJobId}
@@ -574,19 +1006,42 @@ export function MergeTool() {
 
             <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
               <div
-                className={`h-full transition-all duration-300 ${
+                className={`w-full h-full origin-left transition-transform duration-300 ${
                   jobStream.status === 'FAILED'
                     ? 'bg-red-500'
                     : jobStream.status === 'READY'
                     ? 'bg-emerald-500'
                     : 'bg-[var(--muxaro-indigo)]'
                 }`}
-                style={{ width: `${jobStream.progress}%` }}
+                style={{ transform: `scaleX(${Math.min(1, Math.max(0, jobStream.progress / 100))})` }}
               />
             </div>
           </div>
 
-          {jobStream.status === 'READY' && jobStream.downloadUrl && (
+          {jobStream.error && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-medium space-y-2">
+              <div className="font-bold">Merge Failed: {jobStream.error.code}</div>
+              <div>{jobStream.error.userMessage || jobStream.error.message}</div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={jobStream.retry}
+                  className="px-3 py-1 bg-red-600 text-white rounded text-xs font-semibold"
+                >
+                  Retry Job
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-3 py-1 rounded border border-[var(--muxaro-border)] text-xs font-semibold"
+                >
+                  Start Over
+                </button>
+              </div>
+            </div>
+          )}
+
+          {jobStream.status === 'READY' && jobDownloadHref && (
             <div className="p-6 rounded-xl bg-emerald-500/10 border border-emerald-500/30 space-y-4">
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
@@ -602,7 +1057,7 @@ export function MergeTool() {
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <a
-                  href={jobStream.downloadUrl}
+                  href={jobDownloadHref}
                   download
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
                 >
@@ -624,6 +1079,18 @@ export function MergeTool() {
                   <span>Merge Another Pair</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {!jobStream.isTerminal && (
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={jobStream.cancel}
+                className="text-xs text-red-500 hover:text-red-700 font-semibold"
+              >
+                Cancel Merge
+              </button>
             </div>
           )}
         </div>
