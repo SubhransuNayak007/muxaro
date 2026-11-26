@@ -236,7 +236,7 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
         }
       });
 
-      es.addEventListener('complete', (e: MessageEvent) => {
+      const handleCompleteEvent = (e: MessageEvent) => {
         try {
           const parsed = JSON.parse(e.data);
           handleProgressEvent(parsed);
@@ -246,7 +246,10 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
         }
         setIsTerminal(true);
         cleanupStream();
-      });
+      };
+
+      es.addEventListener('complete', handleCompleteEvent);
+      es.addEventListener('done', handleCompleteEvent);
 
       es.addEventListener('error', (e: any) => {
         setIsConnected(false);
@@ -328,9 +331,10 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
   const cancel = useCallback(async (): Promise<boolean> => {
     if (!jobId) return false;
     try {
-      const apiBase = (process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+      const apiBase = getApiBaseUrl().replace(/\/+$/, '');
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
@@ -348,9 +352,10 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
   const retry = useCallback(async (): Promise<boolean> => {
     if (!jobId) return false;
     try {
-      const apiBase = (process.env.NEXT_PUBLIC_API_URL || '/api/v1').replace(/\/+$/, '');
+      const apiBase = getApiBaseUrl().replace(/\/+$/, '');
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/retry`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {

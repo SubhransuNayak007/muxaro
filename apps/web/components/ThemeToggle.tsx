@@ -96,7 +96,7 @@ export function ThemeToggle({ className = '' }: ThemeToggleProps) {
       title={label}
       aria-label={label}
       aria-pressed={isDark}
-      className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${className}`}
+      className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-lg border border-line bg-surface hover:bg-surface-muted text-content-secondary hover:text-content transition-colors active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface ${className}`}
     >
       {mounted && isDark ? (
         <Sun className="w-4 h-4 text-warning" aria-hidden="true" />

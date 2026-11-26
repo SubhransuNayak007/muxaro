@@ -307,8 +307,8 @@ class CircuitBreaker {
       actionableFeedback = 'Hourly processing allowance reached for this session.';
       userAdvice = 'Please wait 60 seconds or sign in for higher throughput limits.';
     } else if (isTimeout) {
-      actionableFeedback = 'The request timed out waiting for media processing nodes.';
-      userAdvice = 'High server load detected. Click Retry to re-submit with exponential backoff.';
+      actionableFeedback = 'Media analysis timed out before the host responded.';
+      userAdvice = 'Click Retry to try again, or use MUXARO Direct on desktop.';
     } else if (isServerError) {
       actionableFeedback =
         rawMsg && rawMsg !== 'Service Unavailable' && !rawMsg.startsWith('Request failed')
@@ -366,22 +366,22 @@ class CircuitBreaker {
    */
   public getDegradedQuota(): EntitlementsUsage & { degraded: true } {
     return {
-      individualVideosRemaining: 10,
-      individualVideosLimit: 10,
-      playlistJobsRemaining: 0,
-      playlistJobsLimit: 0,
+      individualVideosRemaining: 100,
+      individualVideosLimit: 100,
+      playlistJobsRemaining: 20,
+      playlistJobsLimit: 20,
       rollingWindowHours: 24,
       resetCountdownSeconds: 0,
       nextResetIso: '',
-      baseLimit: 10,
+      baseLimit: 100,
       baseUsed: 0,
-      baseRemaining: 10,
+      baseRemaining: 100,
       extraCreditsEarned: 0,
       extraCreditsRemaining: 0,
       extraCreditsExpiresAt: null,
-      totalAvailableIndividual: 10,
+      totalAvailableIndividual: 100,
       rewardedAdsUsedToday: 0,
-      rewardedAdsDailyCap: 3,
+      rewardedAdsDailyCap: 0,
       tier: 'guest',
       degraded: true,
     };
@@ -421,15 +421,15 @@ class CircuitBreaker {
       status: 'DEGRADED',
       apiLatencyMs: 0,
       queueDepth: 0,
-      activeMediaWorkers: 1,
-      cpuLoadPercent: 12,
-      uptimePercent: 99.98,
-      errorRate24hPercent: 0.05,
-      totalProcessed24h: 14820,
+      activeMediaWorkers: 0,
+      cpuLoadPercent: 0,
+      uptimePercent: 0,
+      errorRate24hPercent: 0,
+      totalProcessed24h: 0,
       queueClasses: {
-        instant: { depth: 0, activeWorkers: 1, maxWorkers: 4, name: 'Instant conversion' },
-        smart: { depth: 0, activeWorkers: 1, maxWorkers: 4, name: 'Smart transcode' },
-        power: { depth: 0, activeWorkers: 0, maxWorkers: 2, name: 'Power batch' },
+        instant: { depth: 0, activeWorkers: 0, maxWorkers: 0, name: 'Instant conversion' },
+        smart: { depth: 0, activeWorkers: 0, maxWorkers: 0, name: 'Smart transcode' },
+        power: { depth: 0, activeWorkers: 0, maxWorkers: 0, name: 'Power batch' },
       },
       degraded: true,
     };

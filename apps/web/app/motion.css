@@ -279,8 +279,20 @@
 }
 
 /* -------------------------------------------------------------------------- */
-/* 5. Accessible Reduced Motion Override                                      */
+/* 5. Eco / Lightweight Mode & Accessible Reduced Motion Override             */
 /* -------------------------------------------------------------------------- */
+
+html[data-lightweight="true"] .motion-reveal-item,
+html[data-lightweight="true"] .motion-reveal-block,
+html[data-lightweight="true"] .motion-fade-up,
+html[data-lightweight="true"] .motion-hairline,
+html[data-lightweight="true"] .tactile-segmented-indicator {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  will-change: auto !important;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

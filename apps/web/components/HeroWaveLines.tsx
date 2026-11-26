@@ -1,19 +1,29 @@
+'use client';
+
 import React from 'react';
+import { useDeviceMode } from '@/lib/device-mode';
 
 /**
  * HeroWaveLines
- * 
- * Minimalist, elegant architectural wave lines inspired by the Violet landing page.
- * Pure vector SVG with subtle 1px strokes, completely static, zero CPU load, zero particles.
+ *
+ * Minimalist architectural contour hairlines using foreground token strokes.
+ * Renders nothing in Eco / Lightweight mode to eliminate SVG paint overhead.
  */
 export default function HeroWaveLines() {
+  const { lightweight } = useDeviceMode();
+
+  if (lightweight) {
+    return null;
+  }
+
   return (
     <div
+      data-eco-hide="true"
       className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0"
       aria-hidden="true"
     >
       <svg
-        className="w-full h-full object-cover opacity-45 dark:opacity-15"
+        className="w-full h-full object-cover text-content opacity-[0.07] dark:opacity-[0.09]"
         viewBox="0 0 1440 480"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
@@ -46,9 +56,9 @@ export default function HeroWaveLines() {
         />
         <defs>
           <linearGradient id="wave-gradient" x1="0" y1="0" x2="1440" y2="0" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#6558F5" stopOpacity="0.08" />
-            <stop offset="50%" stopColor="#6558F5" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="#31C4DF" stopOpacity="0.15" />
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.15" />
+            <stop offset="50%" stopColor="currentColor" stopOpacity="0.7" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0.2" />
           </linearGradient>
         </defs>
       </svg>

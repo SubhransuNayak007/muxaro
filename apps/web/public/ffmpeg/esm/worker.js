@@ -4,17 +4,37 @@
 import { CORE_URL, FFMessageType } from "./const.js";
 import { ERROR_UNKNOWN_MESSAGE_TYPE, ERROR_NOT_LOADED, ERROR_IMPORT_FAILURE, } from "./errors.js";
 let ffmpeg;
+const ALLOWED_FFMPEG_PREFIXES = [
+    'https://unpkg.com/@ffmpeg/',
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/',
+];
+const sanitizeWorkerAssetUrl = (candidate) => {
+    const raw = typeof candidate === 'string' ? candidate.trim() : '';
+    if (!raw)
+        throw ERROR_IMPORT_FAILURE;
+    if (raw.startsWith('blob:'))
+        return raw;
+    const baseOrigin = self.location?.origin || 'http://localhost';
+    const parsed = new URL(raw, baseOrigin);
+    if (parsed.origin === baseOrigin && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
+        return parsed.href;
+    }
+    if (parsed.protocol === 'https:' && ALLOWED_FFMPEG_PREFIXES.some((p) => parsed.href.startsWith(p))) {
+        return parsed.href;
+    }
+    throw ERROR_IMPORT_FAILURE;
+};
 const load = async ({ coreURL: _coreURL, wasmURL: _wasmURL, workerURL: _workerURL, }) => {
     const first = !ffmpeg;
+    const safeCoreInput = sanitizeWorkerAssetUrl(_coreURL || CORE_URL);
     try {
-        if (!_coreURL)
-            _coreURL = CORE_URL;
+        _coreURL = safeCoreInput;
         // when web worker type is `classic`.
         importScripts(_coreURL);
     }
     catch {
         if (!_coreURL || _coreURL === CORE_URL)
-            _coreURL = CORE_URL.replace('/umd/', '/esm/');
+            _coreURL = sanitizeWorkerAssetUrl(CORE_URL.replace('/umd/', '/esm/'));
         // when web worker type is `module`.
         self.createFFmpegCore = (await import(
         /* @vite-ignore */ _coreURL)).default;
@@ -23,9 +43,9 @@ const load = async ({ coreURL: _coreURL, wasmURL: _wasmURL, workerURL: _workerUR
         }
     }
     const coreURL = _coreURL;
-    const wasmURL = _wasmURL ? _wasmURL : _coreURL.replace(/.js$/g, ".wasm");
+    const wasmURL = _wasmURL ? sanitizeWorkerAssetUrl(_wasmURL) : _coreURL.replace(/.js$/g, ".wasm");
     const workerURL = _workerURL
-        ? _workerURL
+        ? sanitizeWorkerAssetUrl(_workerURL)
         : _coreURL.replace(/.js$/g, ".worker.js");
     ffmpeg = await self.createFFmpegCore({
         // Fix `Overload resolution failed.` when using multi-threaded ffmpeg-core.
@@ -99,7 +119,14 @@ const unmount = ({ mountPoint }) => {
     ffmpeg.FS.unmount(mountPoint);
     return true;
 };
-self.onmessage = async ({ data: { id, type, data: _data }, }) => {
+self.onmessage = async (event) => {
+    if (event.origin && self.location?.origin && event.origin !== self.location.origin) {
+        return;
+    }
+    if (!event.data || typeof event.data !== 'object') {
+        return;
+    }
+    const { id, type, data: _data } = event.data;
     const trans = [];
     let data;
     try {

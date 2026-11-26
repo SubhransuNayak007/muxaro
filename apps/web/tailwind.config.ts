@@ -10,6 +10,7 @@ const config: Config = {
   ],
   theme: {
     screens: {
+      xs: "440px",
       sm: "640px",
       md: "768px",
       lg: "1024px",
@@ -21,6 +22,8 @@ const config: Config = {
         // MUXARO Brand Core Palette
         brand: {
           DEFAULT: "var(--muxaro-indigo)",
+          hover: "var(--muxaro-accent-hover)",
+          fg: "var(--muxaro-btn-fg)",
           violet: "var(--muxaro-indigo)",
           indigo: "var(--muxaro-indigo)",
           blue: "var(--muxaro-blue)",
@@ -53,8 +56,11 @@ const config: Config = {
         
         // Borders & Rules
         border: "var(--muxaro-border)",
+        focus: "var(--muxaro-border-focus)",
         line: {
           DEFAULT: "var(--muxaro-border)",
+          hover: "var(--muxaro-border-hover)",
+          focus: "var(--muxaro-border-focus)",
           subtle: "var(--muxaro-border-subtle)",
         },
         
@@ -88,9 +94,10 @@ const config: Config = {
         indigo: "var(--muxaro-indigo)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
-        display: ["var(--font-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "monospace"],
+        sans: ["var(--font-body)", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        serif: ["var(--font-display)", "Georgia", "serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
+        mono: ["var(--font-outlier)", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       borderRadius: {
         sm: "6px",
@@ -121,7 +128,7 @@ const config: Config = {
         "muxaro-aurora-static": "var(--muxaro-aurora-static)",
       },
       maxWidth: {
-        sheet: "1280px",
+        sheet: "1312px",
       },
     },
   },

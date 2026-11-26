@@ -14,10 +14,11 @@
  */
 
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { sanitizeFilename } from './security-validator.ts';
+import { sanitizeFilename, validateMediaUrl } from './security-validator.ts';
 import { muxMedia, extractAudio, transcodeVideo } from './ffmpeg-muxer.ts';
 import { parseResolutionHeight } from './format-normalizer.ts';
 import { isBotBlockMessage } from './extractor-ytdlp.ts';
@@ -86,24 +87,20 @@ export type JobSubscriber = (job: JobRecord) => void;
 
 // Resolve safe outputs directory (60m retention)
 function resolveOutputsDir(): string {
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || Boolean(process.env.LAMBDA_TASK_ROOT)) {
-    const tmpOutputs = path.join(os.tmpdir(), 'muxaro-outputs-60m');
+  const localProjectDir = path.resolve('storage/outputs/60m');
+  if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME && !process.env.LAMBDA_TASK_ROOT) {
     try {
-      fs.mkdirSync(tmpOutputs, { recursive: true });
-    } catch {}
-    return tmpOutputs;
+      fs.mkdirSync(localProjectDir, { recursive: true, mode: 0o700 });
+      return localProjectDir;
+    } catch {
+      // Fall through to secure per-process temp directory
+    }
   }
 
-  const localProjectDir = path.resolve('storage/outputs/60m');
   try {
-    fs.mkdirSync(localProjectDir, { recursive: true });
-    return localProjectDir;
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'muxaro-outputs-'));
   } catch {
-    const tmpOutputs = path.join(os.tmpdir(), 'muxaro-outputs-60m');
-    try {
-      fs.mkdirSync(tmpOutputs, { recursive: true });
-    } catch {}
-    return tmpOutputs;
+    return localProjectDir;
   }
 }
 
@@ -119,8 +116,30 @@ function isServerless(): boolean {
   );
 }
 
+function isSafeJobId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{3,96}$/.test(id);
+}
+
+function isAllowedLocalInputPath(candidate: string): boolean {
+  if (!candidate || /^https?:\/\//i.test(candidate)) return false;
+  try {
+    const resolved = path.resolve(candidate);
+    const tmpBase = path.resolve(os.tmpdir());
+    const outBase = path.resolve(OUTPUTS_DIR);
+    return (
+      (resolved.startsWith(tmpBase + path.sep) || resolved.startsWith(outBase + path.sep)) &&
+      fs.existsSync(resolved)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Path of the per-job metadata JSON sidecar file */
 function jobMetaPath(id: string): string {
+  if (!isSafeJobId(id)) {
+    throw new Error('Invalid job identifier.');
+  }
   return path.join(OUTPUTS_DIR, `job_meta_${id}.json`);
 }
 
@@ -128,12 +147,17 @@ function jobMetaPath(id: string): string {
 function persistJob(job: JobRecord): void {
   try {
     const target = jobMetaPath(job.id);
-    const tmp = `${target}.${Date.now()}.${Math.random().toString(36).slice(2, 6)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(job, null, 2), 'utf8');
+    const tmp = `${target}.${crypto.randomUUID()}.tmp`;
+    const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(job, null, 2), 'utf8');
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmp, target);
   } catch {
     try {
-      fs.writeFileSync(jobMetaPath(job.id), JSON.stringify(job, null, 2), 'utf8');
+      fs.writeFileSync(jobMetaPath(job.id), JSON.stringify(job, null, 2), { encoding: 'utf8', mode: 0o600 });
     } catch {}
   }
 }
@@ -317,6 +341,7 @@ class JobManager {
    */
   private reconstructJobIfArtifactExists(id: string): JobRecord | undefined {
     try {
+      if (!isSafeJobId(id)) return undefined;
       if (!fs.existsSync(OUTPUTS_DIR)) return undefined;
       const files = fs.readdirSync(OUTPUTS_DIR);
       const artifact = files.find(
@@ -451,7 +476,7 @@ class JobManager {
    * and downloadUrl populated — the frontend never needs to poll across instances.
    */
   public async createJob(params: CreateJobParams): Promise<JobRecord> {
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const jobId = `job_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     const targetFormat = String(params.targetFormat || 'mp4').toLowerCase();
     const targetResolution = params.targetResolution || '1080p';
     const operation = params.operation || (targetFormat === 'mp3' || targetFormat === 'flac' || targetFormat === 'wav' ? 'EXTRACT_AUDIO' : 'TRANSCODE_VIDEO');
@@ -523,9 +548,13 @@ class JobManager {
     // Persist immediately so any other serverless instance can find this job
     persistJob(job);
 
-    // Direct Stream Delivery: if directStreamUrl is provided, immediately mark job ready (zero-hop)
+    // Direct Stream Delivery: if directStreamUrl is provided, validate SSRF and immediately mark job ready (zero-hop)
     const directUrl = params.directStreamUrl;
-    if (directUrl && (directUrl.startsWith('http://') || directUrl.startsWith('https://'))) {
+    if (
+      directUrl &&
+      (directUrl.startsWith('http://') || directUrl.startsWith('https://')) &&
+      (process.env.NODE_ENV !== 'production' || validateMediaUrl(directUrl).valid)
+    ) {
       job.status = 'ready';
       job.progress = 100;
       job.stage = 'READY';
@@ -658,8 +687,8 @@ class JobManager {
         const finalPath = path.join(OUTPUTS_DIR, `${job.id}_${job.filename}`);
         const isAudioOnly = ['mp3', 'm4a', 'flac', 'wav', 'opus'].includes(job.targetFormat);
 
-        // Try local file first; otherwise execute cloud fallback inline
-        if (fs.existsSync(params.sourceUrl)) {
+        // Try confined local temp/scratch file first; otherwise execute cloud fallback inline
+        if (isAllowedLocalInputPath(params.sourceUrl)) {
           // For local test files on serverless — still run async (file I/O is fast)
           this.executePipeline(job, params, abortController.signal).catch((err: any) => {
             if (job.status !== 'cancelled') {
@@ -707,8 +736,8 @@ class JobManager {
     try {
       const isAudioOnly = ['mp3', 'm4a', 'flac', 'wav', 'opus'].includes(job.targetFormat);
 
-      // Handle direct local file testing or synthetic fixture paths
-      if (fs.existsSync(job.sourceUrl)) {
+      // Handle confined local test/scratch file paths
+      if (isAllowedLocalInputPath(job.sourceUrl)) {
         await this.processLocalFile(job, finalPath, isAudioOnly, signal);
         return;
       }
@@ -1429,7 +1458,7 @@ class JobManager {
       }
     }
 
-    if (!downloaded && fs.existsSync(job.sourceUrl)) {
+    if (!downloaded && isAllowedLocalInputPath(job.sourceUrl)) {
       try {
         fs.copyFileSync(job.sourceUrl, finalPath);
         downloaded = true;

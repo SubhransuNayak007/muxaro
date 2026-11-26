@@ -29,13 +29,14 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
+import TurnstileChallenge from '@/components/TurnstileChallenge';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
 import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 
-export type AudioFormat = 'mp3' | 'flac' | 'wav' | 'aac';
+export type AudioFormat = 'copy' | 'mp3' | 'flac' | 'wav' | 'aac';
 export type Mp3Bitrate = '128k' | '192k' | '256k' | '320k';
 export type AacBitrate = '128k' | '256k';
 export type PcmBitDepth = '16' | '24';
@@ -67,6 +68,10 @@ export function ExtractAudioTool() {
   // Metadata tags
   const [tagTitle, setTagTitle] = useState<string>('');
   const [tagArtist, setTagArtist] = useState<string>('');
+  const [trimStart, setTrimStart] = useState<string>('');
+  const [trimEnd, setTrimEnd] = useState<string>('');
+  const [fadeInSec, setFadeInSec] = useState<string>('0');
+  const [fadeOutSec, setFadeOutSec] = useState<string>('0');
 
   // Local Upload State
   const [uploader, setUploader] = useState<ResumableMultipartUploader | null>(null);
@@ -83,6 +88,7 @@ export function ExtractAudioTool() {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string>('');
   const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const jobStream = useJobStream(submittedJobId);
@@ -187,7 +193,7 @@ export function ExtractAudioTool() {
         file: selectedFile,
         fileName: selectedFile.name,
         targetFormat: format,
-        streamCopy: false,
+        streamCopy: format === 'copy',
         bitrateKbps,
         onProgress: (prog) => setLocalProgress(prog),
       });
@@ -226,12 +232,17 @@ export function ExtractAudioTool() {
         mediaAssetId: inputMode === 'file' ? uploadedAssetId! : undefined,
         uploadSessionId: inputMode === 'file' ? uploadedAssetId! : undefined,
         jobType: 'extract_audio',
-        operation: 'EXTRACT_AUDIO',
-        targetFormat: format,
+        operation: format === 'copy' ? 'REMUX_STREAM_COPY' : 'EXTRACT_AUDIO',
+        targetFormat: format === 'copy' ? 'native' : format,
+        streamCopy: format === 'copy',
         targetAudioCodec: format,
         targetAudioBitrate: selectedBitrate,
         audioChannels: audioChannels === 'mono' ? 1 : 2,
         normalizeLoudness: normalizeVolume,
+        trimStart: trimStart.trim() ? Number(trimStart) : undefined,
+        trimEnd: trimEnd.trim() ? Number(trimEnd) : undefined,
+        fadeInSec: Number(fadeInSec) > 0 ? Number(fadeInSec) : undefined,
+        fadeOutSec: Number(fadeOutSec) > 0 ? Number(fadeOutSec) : undefined,
         metadata:
           tagTitle || tagArtist || format === 'wav' || format === 'flac'
             ? {
@@ -241,7 +252,8 @@ export function ExtractAudioTool() {
               }
             : undefined,
         title: inputMode === 'file' && selectedFile ? selectedFile.name : undefined,
-        idempotencyKey: `audio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        captchaToken: captchaToken || undefined,
+        idempotencyKey: generateSecureId('audio_'),
       });
 
       setSubmittedJobId(job.jobId || job.id);
@@ -275,9 +287,11 @@ export function ExtractAudioTool() {
   };
 
   const jobDownloadHref = submittedJobId
-    ? jobStream.downloadUrl ||
-      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        jobStream.downloadUrl ||
+          `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+      )
+    : undefined;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -311,7 +325,7 @@ export function ExtractAudioTool() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={localResult.url}
+              href={sanitizeSafeNavigationUrl(localResult.url) ?? '#'}
               download={localResult.fileName}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
             >
@@ -527,13 +541,14 @@ export function ExtractAudioTool() {
             </h2>
 
             {/* Format Buttons */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
               {(
                 [
+                  { id: 'copy', label: 'COPY', desc: 'Original stream · Instant' },
                   { id: 'mp3', label: 'MP3', desc: 'Universal audio' },
                   { id: 'flac', label: 'FLAC', desc: 'Lossless master' },
-                  { id: 'wav', label: 'WAV', desc: 'Studio PCM uncompressed' },
-                  { id: 'aac', label: 'AAC', desc: 'Apple / modern streaming' },
+                  { id: 'wav', label: 'WAV', desc: 'Studio PCM' },
+                  { id: 'aac', label: 'AAC', desc: 'Apple / mobile' },
                 ] as const
               ).map((fmt) => (
                 <button
@@ -670,6 +685,57 @@ export function ExtractAudioTool() {
                 </div>
               </div>
 
+              <div className="pt-3 border-t border-[var(--muxaro-border-subtle)] grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-[var(--muxaro-text-secondary)]">Trim Start (sec)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={trimStart}
+                    onChange={(e) => setTrimStart(e.target.value)}
+                    placeholder="0"
+                    className="w-full px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-mono text-[var(--muxaro-text-primary)]"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-[var(--muxaro-text-secondary)]">Trim End (sec)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={trimEnd}
+                    onChange={(e) => setTrimEnd(e.target.value)}
+                    placeholder="Full"
+                    className="w-full px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-mono text-[var(--muxaro-text-primary)]"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-[var(--muxaro-text-secondary)]">Fade In (sec)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={15}
+                    step={0.5}
+                    value={fadeInSec}
+                    onChange={(e) => setFadeInSec(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-mono text-[var(--muxaro-text-primary)]"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[11px] font-medium text-[var(--muxaro-text-secondary)]">Fade Out (sec)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={15}
+                    step={0.5}
+                    value={fadeOutSec}
+                    onChange={(e) => setFadeOutSec(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-surface)] text-xs font-mono text-[var(--muxaro-text-primary)]"
+                  />
+                </label>
+              </div>
+
               <div className="pt-3 border-t border-[var(--muxaro-border-subtle)] grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input
                   type="text"
@@ -721,9 +787,24 @@ export function ExtractAudioTool() {
             </div>
           )}
 
+          <TurnstileChallenge
+            onVerify={(tok) => {
+              setCaptchaToken(tok);
+              setErrorMessage((prev) =>
+                prev && /verification|captcha/i.test(prev) ? null : prev
+              );
+            }}
+            onReset={() => setCaptchaToken('')}
+          />
+
           <button
             type="submit"
-            disabled={isSubmitting || isLocalProcessing || (inputMode === 'file' && !uploadedAssetId)}
+            disabled={
+              isSubmitting ||
+              isLocalProcessing ||
+              !captchaToken ||
+              (inputMode === 'file' && !uploadedAssetId)
+            }
             className="w-full py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (

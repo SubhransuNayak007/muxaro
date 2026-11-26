@@ -93,7 +93,7 @@ const ALTERNATIVES: Record<string, AlternativeDefinition> = {
       { feature: 'Audio Extraction Honesty', competitor: 'Upsamples low-bitrate streams to fake 320k', muxaro: 'Authentic 320k or lossless bitstream copy' },
       { feature: 'Malvertising & Clickjacking', competitor: 'Frequent malicious redirects and overlays', muxaro: 'Zero ads, zero redirects, verified safe' },
       { feature: '1080p & 4K Audio Sync', competitor: 'Frequently silent (video-only)', muxaro: 'Synchronized audio/video DASH multiplexing' },
-      { feature: 'Daily Quota Limits', competitor: 'Aggressively throttled queues', muxaro: '10 single jobs + 1 playlist job per day' },
+      { feature: 'Daily Credit Walls', competitor: 'Aggressively throttled queues', muxaro: 'Zero daily credit walls' },
     ],
     faqs: [
       {
@@ -157,7 +157,7 @@ const ALTERNATIVES: Record<string, AlternativeDefinition> = {
     answerBlock: 'MUXARO is the premier free alternative to CloudConvert for video and audio tasks. While CloudConvert imposes a 25-minute daily limit and caps free users at 1 GB, MUXARO offers a 4 GB free allowance, sub-3-second stream-copy remuxing (-c copy), remote stream downloading, zero advertisements, and strict 60-minute automatic file deletion.',
     comparisonRows: [
       { feature: 'Free File Size Limit', competitor: '1 GB (often fails on 500 MB+)', muxaro: '4,000 MB (4 GB) Free' },
-      { feature: 'Daily Conversion Time', competitor: 'Capped at 25 minutes per day', muxaro: 'No minute metering (10 large jobs/day)' },
+      { feature: 'Daily Conversion Time', competitor: 'Capped at 25 minutes per day', muxaro: 'No minute metering or credit walls' },
       { feature: 'Stream-Copy Remuxing Speed', competitor: 'Full CPU re-encode (slow queues)', muxaro: 'Sub-3s container remuxing (-c copy)' },
       { feature: 'Remote Stream Downloading', competitor: 'Requires separate downloader', muxaro: 'Built-in multi-platform stream inspector' },
     ],
@@ -201,9 +201,9 @@ const ALTERNATIVES: Record<string, AlternativeDefinition> = {
 };
 
 interface Props {
-  params: {
+  params: Promise<{
     slug: string;
-  };
+  }>;
 }
 
 export function generateStaticParams() {
@@ -212,13 +212,14 @@ export function generateStaticParams() {
   }));
 }
 
-export function generateMetadata({ params }: Props): Metadata {
-  const item = ALTERNATIVES[params.slug];
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const item = ALTERNATIVES[slug];
   if (!item) {
     return constructMetadata({
       title: 'Alternative Comparison — MUXARO',
       description: 'Alternative comparison.',
-      path: `/alternatives/${params.slug}`,
+      path: `/alternatives/${slug}`,
       noIndex: true,
     });
   }
@@ -238,8 +239,9 @@ export function generateMetadata({ params }: Props): Metadata {
   });
 }
 
-export default function AlternativePage({ params }: Props) {
-  const item = ALTERNATIVES[params.slug];
+export default async function AlternativePage({ params }: Props) {
+  const { slug } = await params;
+  const item = ALTERNATIVES[slug];
   if (!item) {
     notFound();
   }
@@ -256,7 +258,10 @@ export default function AlternativePage({ params }: Props) {
     ],
   });
 
-  const faqJsonLd = buildFaqJsonLd(item.faqs);
+  const faqJsonLd = buildFaqJsonLd(item.faqs, {
+    path: `/alternatives/${item.slug}`,
+    name: `${item.competitorName} Alternative FAQ`,
+  });
 
   const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
     { name: 'Home', path: '/' },

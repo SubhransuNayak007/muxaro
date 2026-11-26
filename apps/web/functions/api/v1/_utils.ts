@@ -2,37 +2,83 @@
  * Cloudflare Pages Functions - Edge API Utilities
  */
 
+const ALLOWED_EXACT_ORIGINS = new Set([
+  'https://muxaro.app',
+  'https://www.muxaro.app',
+  'https://muxaro.pages.dev',
+  'https://muxaro.vercel.app',
+]);
+
+export function isAllowedCorsOrigin(origin: string): boolean {
+  if (!origin || origin === 'null') return false;
+  if (ALLOWED_EXACT_ORIGINS.has(origin)) return true;
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (host === 'localhost' || host === '127.0.0.1')
+    ) {
+      return true;
+    }
+    if (
+      parsed.protocol === 'https:' &&
+      (host.endsWith('.muxaro.pages.dev') || host === 'muxaro.pages.dev' || host.endsWith('.muxaro.app'))
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+export const SECURITY_API_HEADERS: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'X-Robots-Tag': 'noindex, nofollow',
+};
+
 export const corsHeaders: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://muxaro.app',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id',
+  'Access-Control-Allow-Headers':
+    'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id, x-captcha-token, x-turnstile-token',
   'Access-Control-Max-Age': '86400',
 };
 
 /**
- * Returns origin-aware CORS headers.
- * When an Origin header is present, reflects that origin and enables credentials and Vary: Origin.
+ * Returns origin-validated CORS headers.
+ * Only echoes trusted MUXARO / localhost origins with credentials; never reflects arbitrary origins.
  */
 export function getCorsHeaders(requestOrOrigin?: Request | string | null): Record<string, string> {
-  let origin = '*';
+  let origin = '';
   if (typeof requestOrOrigin === 'string') {
     origin = requestOrOrigin;
   } else if (requestOrOrigin && typeof requestOrOrigin === 'object' && 'headers' in requestOrOrigin) {
-    origin = requestOrOrigin.headers.get('origin') || '*';
+    origin = requestOrOrigin.headers.get('origin') || '';
+    if (!origin) {
+      try {
+        origin = new URL(requestOrOrigin.url).origin;
+      } catch {
+        origin = '';
+      }
+    }
   }
 
-  const allowOrigin = origin && origin !== 'null' ? origin : '*';
+  const allowed = isAllowedCorsOrigin(origin);
   const headers: Record<string, string> = {
-    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Origin': allowed ? origin : 'https://muxaro.app',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD',
     'Access-Control-Allow-Headers':
-      'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id',
+      'Content-Type, Authorization, x-muxaro-csrf, x-idempotency-key, x-session-token, x-file-name, x-request-id, x-captcha-token, x-turnstile-token',
     'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
   };
 
-  if (allowOrigin !== '*') {
+  if (allowed) {
     headers['Access-Control-Allow-Credentials'] = 'true';
-    headers['Vary'] = 'Origin';
   }
 
   return headers;
@@ -50,6 +96,7 @@ export function jsonResponse(
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store, no-cache, must-revalidate',
+      ...SECURITY_API_HEADERS,
       ...dynamicCors,
       ...extraHeaders,
     },
@@ -60,7 +107,10 @@ export function optionsResponse(request?: Request): Response {
   const dynamicCors = request ? getCorsHeaders(request) : corsHeaders;
   return new Response(null, {
     status: 204,
-    headers: dynamicCors,
+    headers: {
+      ...SECURITY_API_HEADERS,
+      ...dynamicCors,
+    },
   });
 }
 
@@ -74,13 +124,14 @@ export function generateRequestId(prefix = 'edge_'): string {
 }
 
 export function parseCookies(header: string | null): Record<string, string> {
-  const cookies: Record<string, string> = {};
+  const cookies: Record<string, string> = Object.create(null);
   if (!header) return cookies;
   const parts = header.split(';');
   for (const part of parts) {
     const idx = part.indexOf('=');
     if (idx === -1) continue;
     const key = part.slice(0, idx).trim();
+    if (!key || key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     const val = part.slice(idx + 1).trim();
     try {
       cookies[key] = decodeURIComponent(val);
@@ -89,6 +140,81 @@ export function parseCookies(header: string | null): Record<string, string> {
     }
   }
   return cookies;
+}
+
+/**
+ * Edge-compatible SSRF guard for user-supplied URLs in Cloudflare Pages Functions.
+ */
+export function isSafePublicHttpUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password) return false;
+
+    let host = parsed.hostname.toLowerCase().replace(/\.+$/, '');
+    if (host.startsWith('[') && host.endsWith(']')) {
+      host = host.slice(1, -1);
+    }
+    if (!host) return false;
+
+    if (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      host === 'metadata.google.internal' ||
+      host === 'metadata' ||
+      host === 'instance-data' ||
+      host === 'broadcasthost'
+    ) {
+      return false;
+    }
+
+    // Block decimal/octal/hex obfuscated IPv4 literals (e.g. 2130706433, 0177.0.0.1, 0x7f000001)
+    if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return false;
+    if (/^(\d+|0x[0-9a-f]+)(\.(\d+|0x[0-9a-f]+)){1,3}$/i.test(host)) {
+      const octets = host.split('.').map((p) =>
+        p.startsWith('0x') ? Number.parseInt(p, 16) : p.startsWith('0') && p.length > 1 ? Number.parseInt(p, 8) : Number.parseInt(p, 10)
+      );
+      if (octets.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+      const [a, b] = octets;
+      if (
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && b === 168) ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        a >= 224
+      ) {
+        return false;
+      }
+    }
+
+    // Block private/loopback/link-local IPv6
+    if (host.includes(':')) {
+      if (
+        host === '::' ||
+        host === '::1' ||
+        host.startsWith('fe80:') ||
+        host.startsWith('fc') ||
+        host.startsWith('fd') ||
+        host.startsWith('ff') ||
+        host.includes('::ffff:')
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isValidResourceId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{3,96}$/.test(id);
 }
 
 const DEAD_UPSTREAM_HOSTS = ['api.muxaro.app', 'muxaro-api.internal'];
@@ -127,10 +253,18 @@ export async function tryProxyUpstream(
     return null;
   }
 
+  const normalizedSubpath = subpath.replace(/^\/+/, '');
+  if (
+    !normalizedSubpath ||
+    normalizedSubpath.includes('..') ||
+    /%2f|%5c|%00/i.test(normalizedSubpath) ||
+    /[\r\n\0\\]/.test(normalizedSubpath)
+  ) {
+    return null;
+  }
+
   try {
-    const targetUrl = new URL(
-      `${upstreamBase.replace(/\/+$/, '')}/api/v1/${subpath.replace(/^\/+/, '')}`
-    );
+    const targetUrl = new URL(`${upstreamBase.replace(/\/+$/, '')}/api/v1/${normalizedSubpath}`);
 
     // Copy query parameters from original request
     const incomingUrl = new URL(request.url);
@@ -139,11 +273,13 @@ export async function tryProxyUpstream(
     });
 
     const headers = new Headers(request.headers);
+    headers.delete('x-forwarded-for');
+    headers.delete('x-real-ip');
+    headers.delete('true-client-ip');
     headers.set('x-forwarded-host', incomingUrl.host);
     headers.set('x-forwarded-proto', incomingUrl.protocol.replace(':', ''));
 
     const controller = new AbortController();
-    // 5s strict timeout to prevent hanging
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const init: RequestInit = {
@@ -164,18 +300,10 @@ export async function tryProxyUpstream(
     const response = await fetch(targetUrl.toString(), init);
     clearTimeout(timeout);
 
-    // Merge CORS headers into upstream response
     const respHeaders = new Headers(response.headers);
+    Object.entries(SECURITY_API_HEADERS).forEach(([k, v]) => respHeaders.set(k, v));
     const dynamicCors = getCorsHeaders(request);
     Object.entries(dynamicCors).forEach(([k, v]) => {
-      // If upstream already set an explicit Access-Control-Allow-Origin, don't overwrite with wildcard
-      if (
-        k.toLowerCase() === 'access-control-allow-origin' &&
-        respHeaders.has('access-control-allow-origin') &&
-        respHeaders.get('access-control-allow-origin') !== '*'
-      ) {
-        return;
-      }
       respHeaders.set(k, v);
     });
 
@@ -185,7 +313,6 @@ export async function tryProxyUpstream(
       headers: respHeaders,
     });
   } catch {
-    // Upstream unreachable or timed out; seamlessly degrade to Edge handler
     return null;
   }
 }

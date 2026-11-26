@@ -46,10 +46,41 @@ function getNetworkInfo(): NetworkInformationLike | undefined {
 function readManualLightweight(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return window.localStorage.getItem(LIGHTWEIGHT_STORAGE_KEY) === 'true';
+    if (window.localStorage.getItem(LIGHTWEIGHT_STORAGE_KEY) === 'true') {
+      return true;
+    }
+    const rawSettings = window.localStorage.getItem('muxaro_user_settings');
+    if (rawSettings) {
+      const parsed = JSON.parse(rawSettings);
+      if (parsed && parsed.reduceMotion === true) return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+export function setLightweightMode(next: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (next) {
+      window.localStorage.setItem(LIGHTWEIGHT_STORAGE_KEY, 'true');
+    } else {
+      window.localStorage.removeItem(LIGHTWEIGHT_STORAGE_KEY);
+    }
+    const rawSettings = window.localStorage.getItem('muxaro_user_settings');
+    if (rawSettings) {
+      const parsed = JSON.parse(rawSettings);
+      if (parsed && typeof parsed === 'object') {
+        parsed.reduceMotion = next;
+        window.localStorage.setItem('muxaro_user_settings', JSON.stringify(parsed));
+      }
+    }
+  } catch {
+    // Ignore storage restrictions
+  }
+  syncHtmlLightweightAttribute(next);
+  window.dispatchEvent(new CustomEvent<boolean>(LIGHTWEIGHT_EVENT, { detail: next }));
 }
 
 function readNetworkSignals(): { saveData: boolean; slowConnection: boolean } {
@@ -176,18 +207,7 @@ export function useDeviceMode(): DeviceModeState {
   const toggleLightweight = useCallback(() => {
     setManualLightweight((prev) => {
       const next = !prev;
-      if (typeof window !== 'undefined') {
-        try {
-          if (next) {
-            window.localStorage.setItem(LIGHTWEIGHT_STORAGE_KEY, 'true');
-          } else {
-            window.localStorage.removeItem(LIGHTWEIGHT_STORAGE_KEY);
-          }
-        } catch {
-          // Ignore storage quota or private browsing restrictions
-        }
-        window.dispatchEvent(new CustomEvent<boolean>(LIGHTWEIGHT_EVENT, { detail: next }));
-      }
+      setLightweightMode(next);
       return next;
     });
   }, []);

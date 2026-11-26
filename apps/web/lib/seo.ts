@@ -100,9 +100,9 @@ export function buildOrganizationSchema(siteUrl: string) {
     url: siteUrl,
     logo: {
       '@type': 'ImageObject',
-      url: `${siteUrl}/brand/muxaro-mark.svg`,
-      width: '512',
-      height: '512',
+      url: `${siteUrl}/brand/og-image.png`,
+      width: '1200',
+      height: '630',
     },
     description:
       'Enterprise-grade creator media workspace and high-integrity cloud processing engine. Specializing in clean-room FFmpeg stream demuxing, lossless audio extraction, and zero-retention ephemeral privacy.',
@@ -110,11 +110,11 @@ export function buildOrganizationSchema(siteUrl: string) {
     knowsAbout: [
       'Digital Audio Processing',
       'Video Container Multiplexing',
-      'FFmpeg Architecture',
+      'FFmpeg WebAssembly & Cloud Pipelines',
+      'Browser-Local PDF Engineering (QPDF, PDF.js, Tesseract OCR)',
       'Lossless Bitstream Demuxing',
       'Psychoacoustic Codec Optimization',
       'Zero-Retention Cloud Architecture',
-      'Ephemeral Storage Security',
       'GDPR & CCPA Media Compliance',
     ],
     publishingPrinciples: `${siteUrl}/docs/faq`,
@@ -133,132 +133,11 @@ export function buildRootWebAppContextJsonLd(siteUrl: string) {
         '@id': `${siteUrl}/#website`,
         url: `${siteUrl}/`,
         name: 'MUXARO',
-        description: 'Universal Video Downloader & Lossless Media Workspace.',
+        description:
+          'All-in-one video, audio, and browser-local PDF workstation. 14 Video Studio tools, 38 zero-upload PDF utilities, and 8K stream downloading with zero credits and zero ads.',
         publisher: {
           '@id': `${siteUrl}/#organization`,
         },
-      },
-      {
-        '@type': 'WebApplication',
-        '@id': `${siteUrl}/#webapp`,
-        name: 'MUXARO Media Workspace & Processing Engine',
-        alternateName: 'MUXARO Video Downloader & Converter',
-        url: `${siteUrl}/`,
-        description:
-          'Enterprise-grade creator media workspace for downloading 8K/4K videos, extracting lossless studio-grade audio, and converting containers with zero-retention 60-minute automatic file deletion.',
-        applicationCategory: 'MultimediaApplication',
-        operatingSystem: 'All modern web browsers (Chrome, Firefox, Safari, Edge)',
-        browserRequirements: 'Requires JavaScript. HTML5 Media Source Extensions supported.',
-        softwareVersion: '1.0.0',
-        inLanguage: 'en-US',
-        isAccessibleForFree: true,
-        offers: {
-          '@type': 'Offer',
-          price: '0.00',
-          priceCurrency: 'USD',
-          description:
-            'Free daily allowance with 10 single media processing jobs and 1 batch playlist job per rolling 24-hour window with zero ads and zero retention.',
-        },
-        featureList: [
-          'High-speed video downloading up to 8K 60fps (YouTube, TikTok, Instagram, Twitter/X)',
-          'Lossless bitstream audio extraction (AAC, Opus, MP3 320kbps, FLAC, WAV)',
-          'High-fidelity container conversion (MP4, MKV, WebM, MOV)',
-          'DASH/HLS disjoint video and audio stream merging with millisecond timestamp synchronization',
-          'Multi-clip video concatenation with PTS/DTS alignment',
-          'Batch processing and playlist archiving up to 50 items to ZIP',
-          '4 GB free file processing with zero display or popup ads',
-          'Strict 60-minute ephemeral zero-retention storage security',
-        ],
-        creator: {
-          '@id': `${siteUrl}/#organization`,
-        },
-      },
-      {
-        '@type': 'HowTo',
-        '@id': `${siteUrl}/#howto`,
-        name: 'How to Download and Convert Videos Online Without Ads',
-        description:
-          'Step-by-step instructions for downloading online media streams or converting files using MUXARO with zero advertisements and full 4K preservation.',
-        totalTime: 'PT1M',
-        estimatedCost: {
-          '@type': 'MonetaryAmount',
-          currency: 'USD',
-          value: '0',
-        },
-        step: [
-          {
-            '@type': 'HowToStep',
-            url: `${siteUrl}/#step1`,
-            name: 'Paste Link or Upload File',
-            itemListElement: [
-              {
-                '@type': 'HowToDirection',
-                text: 'Paste a video URL from YouTube, TikTok, Instagram, or Twitter into the Omnibox, or upload a local media file up to 4 GB.',
-              },
-            ],
-          },
-          {
-            '@type': 'HowToStep',
-            url: `${siteUrl}/#step2`,
-            name: 'Select Output Preset',
-            itemListElement: [
-              {
-                '@type': 'HowToDirection',
-                text: 'Select your target format: Best Quality (up to 8K/4K with audio), 1080p MP4, 320 kbps MP3, or Lossless FLAC.',
-              },
-            ],
-          },
-          {
-            '@type': 'HowToStep',
-            url: `${siteUrl}/#step3`,
-            name: 'Download Processed Media',
-            itemListElement: [
-              {
-                '@type': 'HowToDirection',
-                text: 'Click Process or Download. Your file is rendered with direct stream-copying and available immediately with a 60-minute automatic purge timer.',
-              },
-            ],
-          },
-        ],
-      },
-      {
-        '@type': 'FAQPage',
-        '@id': `${siteUrl}/#faq`,
-        name: 'MUXARO Platform & Media Architecture FAQ',
-        mainEntity: [
-          {
-            '@type': 'Question',
-            name: 'Is MUXARO really 100% ad-free?',
-            acceptedAnswer: {
-              '@type': 'Answer',
-              text: 'Yes. MUXARO has zero pop-up ads, zero banner ads, and zero redirect links. All operations run in a clean, private interface.',
-            },
-          },
-          {
-            '@type': 'Question',
-            name: 'What is the maximum file size limit for free users?',
-            acceptedAnswer: {
-              '@type': 'Answer',
-              text: 'MUXARO allows processing of files up to 4,000 MB (4 GB) for free, which is 40x higher than typical online conversion tools.',
-            },
-          },
-          {
-            '@type': 'Question',
-            name: 'How does MUXARO download 1080p and 4K YouTube videos with sound?',
-            acceptedAnswer: {
-              '@type': 'Answer',
-              text: 'Modern platforms store 1080p and 4K video as separate DASH streams without embedded audio. MUXARO multiplexes the disjoint video and high-bitrate audio streams into a single playable MP4 container with millisecond timestamp synchronization.',
-            },
-          },
-          {
-            '@type': 'Question',
-            name: 'How long are files kept on MUXARO servers?',
-            acceptedAnswer: {
-              '@type': 'Answer',
-              text: 'All files are held strictly on ephemeral scratch disks and permanently deleted after exactly 60 minutes. MUXARO maintains zero persistent storage of user content.',
-            },
-          },
-        ],
       },
     ],
   };
@@ -293,7 +172,7 @@ export function buildToolSoftwareAppJsonLd({
       '@type': 'Offer',
       price: '0.00',
       priceCurrency: 'USD',
-      description: 'Free tier includes rolling daily media processing jobs with zero retention.',
+      description: 'Free all-in-one browser-local PDF tools and hybrid media processing with zero credits or ads.',
     },
     featureList: features,
     creator: {
@@ -357,14 +236,17 @@ export function buildHowToJsonLd({
 }
 
 export function buildFaqJsonLd(
-  faqs: Array<{ question: string; answer: string }>
+  faqs: Array<{ question: string; answer: string }>,
+  options?: { path?: string; name?: string }
 ) {
   const siteUrl = getSiteUrl();
+  const path = options?.path || '/docs/faq';
+  const normalizedPath = path === '/' ? '' : path;
   return {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    '@id': `${siteUrl}/docs/faq#faq`,
-    name: 'MUXARO Platform Engineering, Security & Policy FAQ',
+    '@id': `${siteUrl}${normalizedPath}#faq`,
+    name: options?.name || 'MUXARO Frequently Asked Questions',
     mainEntity: faqs.map((f) => ({
       '@type': 'Question',
       name: f.question,

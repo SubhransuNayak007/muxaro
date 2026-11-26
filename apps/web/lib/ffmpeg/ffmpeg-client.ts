@@ -178,6 +178,15 @@ export class FFmpegWorkerClient {
         cb.reject(new Error(`Worker execution failed: ${errEvent.message || 'unknown error'}`));
         this.callbacks.delete(id);
       });
+      if (this.worker) {
+        try {
+          this.worker.terminate();
+        } catch {}
+        this.worker = null;
+      }
+      this.isReady = false;
+      this.isInitializing = false;
+      this.initPromise = null;
     };
   }
 
@@ -354,8 +363,24 @@ export class FFmpegWorkerClient {
       if (!this.worker && this.fallbackEngine) {
         return this.fallbackEngine.exec(config);
       }
+      const inputBuffers: Array<{ name: string; buffer: ArrayBuffer }> = [];
+      for (const input of config.inputFiles) {
+        let buffer: ArrayBuffer;
+        if (input.data instanceof ArrayBuffer) {
+          buffer = input.data;
+        } else if (input.data instanceof Uint8Array) {
+          buffer = input.data.buffer.slice(
+            input.data.byteOffset,
+            input.data.byteOffset + input.data.byteLength
+          ) as ArrayBuffer;
+        } else {
+          buffer = await input.data.arrayBuffer();
+        }
+        inputBuffers.push({ name: input.name, buffer });
+      }
+
       const id = `exec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      return new Promise(async (resolve, reject) => {
+      return new Promise((resolve, reject) => {
         this.callbacks.set(id, {
           resolve,
           reject,
@@ -363,17 +388,16 @@ export class FFmpegWorkerClient {
           onLog: config.onLog,
         });
 
-        const inputBuffers: Array<{ name: string; buffer: ArrayBuffer }> = [];
-        for (const input of config.inputFiles) {
-          let buffer: ArrayBuffer;
-          if (input.data instanceof ArrayBuffer) {
-            buffer = input.data;
-          } else if (input.data instanceof Uint8Array) {
-            buffer = input.data.buffer as ArrayBuffer;
-          } else {
-            buffer = await input.data.arrayBuffer();
-          }
-          inputBuffers.push({ name: input.name, buffer });
+        if (config.signal) {
+          config.signal.addEventListener(
+            'abort',
+            () => {
+              this.callbacks.delete(id);
+              this.worker?.postMessage({ id, type: 'cancel' });
+              reject(new DOMException('Operation aborted.', 'AbortError'));
+            },
+            { once: true }
+          );
         }
 
         const msg: WorkerRequestMessage = {

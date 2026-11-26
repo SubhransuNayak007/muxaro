@@ -28,7 +28,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 
 export interface BatchItem {
   id: string;
@@ -365,7 +365,7 @@ export function BatchTool() {
     try {
       const apiBase = getApiBaseUrl();
       const csrf = readCsrfTokenFromCookie();
-      const idempotencyKey = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const idempotencyKey = generateSecureId('batch_');
       const isGlobalAudio = AUDIO_FORMATS.has(globalFormat);
       const operation = mapItemOperation(globalFormat);
 
@@ -913,7 +913,7 @@ export function BatchTool() {
 
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <a
-                  href={zipDownloadUrl}
+                  href={sanitizeSafeNavigationUrl(zipDownloadUrl) ?? '#'}
                   download
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
                 >

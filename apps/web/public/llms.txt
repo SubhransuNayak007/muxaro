@@ -1,38 +1,18 @@
 # MUXARO
 
-> MUXARO is a high-performance, ad-free creator media processing workspace and sovereign stream utility. Engineered with Next.js 14, Fastify 5, and FFmpeg, MUXARO enables lossless stream-copy remuxing (`-c copy`), 8K/4K DASH video-audio multiplexing, bitstream audio extraction (FLAC, MP3, Opus), format conversion, and multi-item batch processing up to 4 GB per file with zero ads, zero user tracking, and automatic 60-minute ephemeral file deletion.
+> MUXARO is an ad-free, zero-credit all-in-one Video, PDF, and Media Studio. Built with Next.js App Router and self-hosted WebAssembly engines (`FFmpeg WASM`, `QPDF WASM`, `PDF.js`, `pdf-lib`, `Tesseract.js`), MUXARO combines 14 hybrid Video & Audio Studio tools, 38 browser-local zero-upload PDF utilities, and 8K/4K stream downloading with automatic 60-minute ephemeral worker cleanup.
 
-## Core Media Tools
+## Core Suites
 
-- [/ (Workspace Home)](https://muxaro.app/): Omnibox media processing engine for instant URL stream inspection, direct downloading, format conversion, and local file uploads up to 4 GB.
-- [/tools/media-converter](https://muxaro.app/tools/media-converter): Universal audio and video container converter supporting MP4, MKV, WebM, MOV, MP3, FLAC, and WAV with automatic lossless stream copying when codecs match.
-- [/tools/audio-extractor](https://muxaro.app/tools/audio-extractor): Bitstream audio demuxer extracting original soundtrack streams (AAC, Opus) without re-encoding, or transcoding to studio-grade FLAC (24-bit), WAV, or 320 kbps MP3.
-- [/tools/audio-video-merger](https://muxaro.app/tools/audio-video-merger): Multiplexer for combining disjoint high-resolution video streams (DASH 4K/8K) with separate audio tracks, featuring millisecond timestamp synchronization.
-- [/tools/video-merger](https://muxaro.app/tools/video-merger): Frame-accurate video clip concatenator joining multiple recordings into a unified MP4 or MKV container with PTS/DTS timeline normalization.
-- [/tools/batch-processing](https://muxaro.app/tools/batch-processing): Multi-URL batch processor allowing parallel queueing and tailored output configurations for creator workflows.
-- [/tools/playlist-processing](https://muxaro.app/tools/playlist-processing): Authorized playlist processor handling up to 50 items with automated ZIP archive packaging and zero-padded item indexing.
-- [/credits](https://muxaro.app/credits): Real-time quota dashboard tracking rolling 24-hour job allowances (10 single jobs, 1 playlist job per 24 hours).
-- [/docs](https://muxaro.app/docs): Technical documentation covering audio quality, container specifications, video resolutions, and ephemeral security guarantees.
+- [Studio Home](https://muxaro.app/): Universal URL & file dropzone (supports links up to 8K plus direct browser-local routing for MP4, MKV, MP3, PDF, DOCX, and PPTX).
+- [All 52 Studio Tools](https://muxaro.app/tools): Searchable directory spanning Video Studio (14), PDF Studio (38), and the upcoming Audio Studio roadmap.
+- [Video Studio (14 tools)](https://muxaro.app/tools?section=video): Target-size compressor (10 MB Discord / 16 MB WhatsApp), lossless trimmer & 60s splitter, 105+ format converter, audio extractor, GIF/WebP, EBU R128 loudness normalizer, 9:16 smart pad, subtitle burner/shifter, metadata scrubber, A/V merger, clip joiner, batch/playlist ZIP hub, frame grabber, and transcript extractor.
+- [PDF Studio (38 browser-local tools)](https://muxaro.app/tools/pdf): 100% client-side, zero-upload PDF creation (invoice/receipt/quote), editing (edit, sign, fillable AcroForms, merge, split, rotate, crop, watermark, Bates headers), optimization (3-tier QPDF compression, repair, pixel-diff + word-diff compare, batch), conversion (camera scan, image/Word/PowerPoint to PDF, multi-worker OCR searchable PDF, lossless image extraction), and security (WebCrypto PKCS#7 verification, AES-256 protect/unlock, sanitize).
+- [Audio Studio Roadmap](https://muxaro.app/tools?section=audio): Active audio workflows today plus upcoming stem separation, voice de-noise/de-reverb, waveform silence trimming, and podcast mastering.
+- [Documentation](https://muxaro.app/docs): Guides covering Video Studio, PDF Studio, Audio Studio, containers vs. codecs, 8K bitrate realities, psychoacoustics, troubleshooting, and security.
 
-## Supported Platforms & Input Streams
+## Key Operational Guarantees
 
-- **YouTube**: Innertube multi-client resolution (IOS, Android, TV, Web) extracting progressive MP4 (360p–720p) and disjoint adaptive DASH video streams up to 8K (4320p, 60fps, HDR) paired with high-bitrate Opus/AAC audio tracks.
-- **TikTok**: Direct extraction of non-watermarked high-definition video (`play_addr`) via SSR hydration JSON parsing.
-- **Instagram**: Reels, Video Posts, and Carousel video extraction via authenticated GraphQL queries.
-- **Twitter / X**: Progressive MP4 multi-bitrate resolution via Twitter GraphQL endpoints.
-- **Direct HTTP/HTTPS**: Any direct media stream or remote file URL with full RFC 9110 HTTP Range header resumption.
-- **Local File Uploads**: Single-stream and chunked multipart uploads up to 4 GB per media item.
-
-## Key Operational Rules & Constraints
-
-- **Zero-Ad Policy**: MUXARO serves 0 display ads, 0 pop-up windows, 0 pop-under redirects, and 0 third-party trackers.
-- **4 GB Free File Size Limit**: All users can process single media files or playlist items up to 4 GB with no subscription required.
-- **Lossless Stream-Copy Remuxing**: When input codecs are compatible with output containers (e.g. H.264/AAC to MP4 or VP9/Opus to MKV/WebM), MUXARO executes `-c copy` stream demuxing in under 1 second with 0% generational re-encoding loss.
-- **DASH Video-Audio Multiplexing**: Automatically merges disjoint 1080p, 1440p, 4K, and 8K adaptive video tracks with original audio tracks into a playable MP4 or MKV container.
-- **Ephemeral Zero-Retention Privacy**: Uploaded media and processed output artifacts expire and are permanently wiped from disk and storage buckets after exactly 60 minutes.
-- **Daily Rolling Allowances**: Free guest and registered tiers receive 10 single media processing jobs and 1 batch playlist job (up to 50 items) per rolling 24-hour window, with atomic quota reservation rollbacks on cancelled or failed jobs.
-- **Signed Download Artifacts**: Download links are protected by HMAC-SHA256 expiration tokens, verifying artifact integrity and preventing unauthorized URL enumeration.
-
-## Extended Documentation
-
-- [Full LLM Specification & Grounding Manual](https://muxaro.app/llms-full.txt): Comprehensive technical specifications, FFmpeg parameters, API endpoints, format conversion matrices, and entity consensus citations for AI engines.
+- **Zero Credits & Zero Ads**: No daily credit walls, no rewarded ads, no watermarks, and no mandatory accounts.
+- **Browser-Local Zero Upload**: All 38 PDF tools and Tier-1 media tools (`<= 350 MB`) run locally inside the browser tab with 0 bytes uploaded.
+- **Ephemeral Cloud Workers**: Remote FFmpeg worker files and temporary outputs purge automatically within 60 minutes.

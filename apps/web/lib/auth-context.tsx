@@ -170,11 +170,12 @@ const AuthContext = createContext<AuthContextValue>(DEFAULT_AUTH_CONTEXT);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const [googleAuthConfigured, setGoogleAuthConfigured] = useState(false);
 
   const refreshSession = useCallback(async (): Promise<AuthUser | null> => {
+    setLoading(true);
     try {
       const response = await fetch(`${getApiBaseUrl()}/auth/session`, {
         method: 'GET',
@@ -215,9 +216,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Avoid firing /auth/session on every public page load; only hydrate CSRF cookie locally.
   useEffect(() => {
-    void refreshSession();
-  }, [refreshSession]);
+    setCsrfToken(readCsrfCookie());
+  }, []);
 
   const performLogout = useCallback(
     async (endpoint: '/auth/logout' | '/auth/logout-all') => {

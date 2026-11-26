@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import { getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const AUDIO_FORMATS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'opus'] as const;
@@ -193,7 +193,7 @@ export default function PlaylistProcessingPage() {
     try {
       const apiBase = getApiBaseUrl();
       const csrf = readCsrfTokenFromCookie();
-      const idempotencyKey = `pl_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = generateSecureId('pl_');
       const audioOnly = isAudioFormat(targetFormat);
       const operation = audioOnly
         ? 'EXTRACT_AUDIO'
@@ -361,9 +361,11 @@ export default function PlaylistProcessingPage() {
   const isJobPartial = playlistJob?.status === 'PARTIAL_FAILURE';
   const isJobFailed = playlistJob?.status === 'FAILED';
   const playlistZipHref = playlistJob
-    ? playlistJob.zipDownloadUrl ||
-      `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        playlistJob.zipDownloadUrl ||
+          `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
+      )
+    : undefined;
 
   return (
     <div className="w-full">
@@ -795,7 +797,7 @@ export default function PlaylistProcessingPage() {
             <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center gap-2 text-sm font-bold text-content">
                 <Package className="w-4 h-4 text-brand" aria-hidden="true" />
-                <span>Separate playlist quota</span>
+                <span>Playlist ZIP packaging</span>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
                 <li className="flex items-start gap-2">
@@ -803,14 +805,7 @@ export default function PlaylistProcessingPage() {
                     className="w-4 h-4 text-success shrink-0 mt-0.5"
                     aria-hidden="true"
                   />
-                  <span>Includes 1 full playlist job every rolling 24 hours.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2
-                    className="w-4 h-4 text-success shrink-0 mt-0.5"
-                    aria-hidden="true"
-                  />
-                  <span>Does not deduct from your 10 individual daily video jobs.</span>
+                  <span>Inspect public playlists and select video or audio targets.</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <CheckCircle2
@@ -818,6 +813,13 @@ export default function PlaylistProcessingPage() {
                     aria-hidden="true"
                   />
                   <span>Supports up to 50 authorised items packaged into a single ZIP file.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2
+                    className="w-4 h-4 text-success shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                  <span>Automatic 60-minute ephemeral scratch storage cleanup.</span>
                 </li>
               </ul>
             </div>

@@ -7,7 +7,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { UserTier } from '@/lib/types';
+import type { UserTier } from '../types.ts';
+import { getApiBaseUrl, getOrCreateClientGuestId } from '../api-client.ts';
 
 export interface UnifiedQuotaInfo {
   tier: UserTier | string;
@@ -29,12 +30,12 @@ export interface UnifiedQuotaInfo {
 export const DEFAULT_UNIFIED_QUOTA: UnifiedQuotaInfo = {
   tier: 'guest',
   accountTier: 'GUEST',
-  dailyVideoLimit: 10,
+  dailyVideoLimit: 100,
   usedVideoJobs: 0,
-  remainingVideoCredits: 10,
-  playlistJobsLimit: 1,
+  remainingVideoCredits: 100,
+  playlistJobsLimit: 20,
   usedPlaylistJobs: 0,
-  remainingPlaylistCredits: 1,
+  remainingPlaylistCredits: 20,
   maxPlaylistItems: 50,
   rollingWindowHours: 24,
   resetCountdownSeconds: 86400,
@@ -165,8 +166,14 @@ class UnifiedQuotaManager {
           return { ...DEFAULT_UNIFIED_QUOTA, evaluatedAt: new Date().toISOString() };
         }
 
-        const res = await fetch('/api/v1/account/credits', {
-          headers: { Accept: 'application/json' },
+        const base = getApiBaseUrl().replace(/\/+$/, '');
+        const guestId = getOrCreateClientGuestId();
+        const res = await fetch(`${base}/account/credits`, {
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            ...(guestId ? { 'x-guest-id': guestId } : {}),
+          },
           cache: 'no-store',
         });
 

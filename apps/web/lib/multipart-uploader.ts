@@ -181,7 +181,14 @@ export class ResumableMultipartUploader {
     }
     this.file = file;
     this.fileKey = computeFileKey(file);
-    this.apiBase = options.apiBase || (typeof window !== 'undefined' && (process.env.NEXT_PUBLIC_API_URL || '/api/v1')) || '/api/v1';
+    const isElectronDesktop =
+      typeof window !== 'undefined' && Boolean((window as any).muxaroDesktop?.isDesktop);
+    this.apiBase =
+      options.apiBase ||
+      (isElectronDesktop
+        ? '/api/v1'
+        : typeof window !== 'undefined' && (process.env.NEXT_PUBLIC_API_URL || '/api/v1')) ||
+      '/api/v1';
     this.concurrency = Math.min(8, Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY));
     this.chunkSize = Math.min(MAX_SERVERLESS_CHUNK_SIZE, Math.max(256 * 1024, options.chunkSize ?? DEFAULT_CHUNK_SIZE));
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
@@ -411,9 +418,12 @@ export class ResumableMultipartUploader {
         const data = initData.data || initData;
         const sessionId = data.uploadSessionId || data.uploadId;
         if (sessionId) {
-          this.mode = 'presigned';
+          this.mode = data.mode === 'chunked' ? 'chunked' : 'presigned';
           this.uploadId = String(sessionId);
-          this.chunkSize = Number(data.chunkSize) || 5 * 1024 * 1024;
+          this.chunkSize =
+            this.mode === 'chunked'
+              ? Math.min(MAX_SERVERLESS_CHUNK_SIZE, Number(data.chunkSizeHint || data.chunkSize) || MAX_SERVERLESS_CHUNK_SIZE)
+              : Number(data.chunkSize) || 5 * 1024 * 1024;
           this.totalParts =
             Number(data.totalChunks) || Math.max(1, Math.ceil(this.file.size / this.chunkSize));
           this.completedParts.clear();

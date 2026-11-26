@@ -478,7 +478,7 @@ function DirectHelperContent() {
                 <Zap className="w-4 h-4" aria-hidden="true" />
               </div>
               <div className="min-w-0">
-                <h2 className="text-sm font-bold text-content uppercase tracking-wider">
+                <h2 className="text-sm font-bold text-content">
                   Target Media Stream
                 </h2>
                 <p className="text-xs text-content-secondary">
@@ -502,12 +502,6 @@ function DirectHelperContent() {
                     : 'bg-surface-elevated text-content-secondary border-line'
                 }`}
               >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    isCompanionActive ? 'bg-success' : checking ? 'bg-amber-400' : 'bg-content-muted'
-                  }`}
-                  aria-hidden="true"
-                />
                 <span>
                   {isCompanionActive
                     ? 'Direct Stream Active'

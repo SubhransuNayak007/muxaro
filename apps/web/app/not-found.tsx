@@ -19,7 +19,7 @@ export default function NotFound() {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
           <Link
             href="/"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-surface-inverted text-surface font-semibold text-sm hover:opacity-90 transition-opacity"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-content text-base font-semibold text-sm hover:opacity-90 transition-opacity"
           >
             <Home className="w-4 h-4" aria-hidden="true" />
             <span>Go to workspace</span>

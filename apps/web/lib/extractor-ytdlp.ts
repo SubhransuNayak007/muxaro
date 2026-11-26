@@ -92,17 +92,13 @@ function resolveQualityBadge(height: number, fps: number, isHdr: boolean): strin
   return undefined;
 }
 
-// 5-minute warm manifest cache for instantaneous re-probing & speculative pre-fetching
+// Warm in-process manifest cache (kept separate from ManifestCache in lib/pipeline)
 interface CachedManifest {
   manifest: ExtractorResult;
   timestamp: number;
 }
 const MANIFEST_CACHE_TTL_MS = 5 * 60 * 1000;
-const globalForExtractor = globalThis as unknown as {
-  __muxaroManifestCache?: Map<string, CachedManifest>;
-};
-const manifestCache = globalForExtractor.__muxaroManifestCache ?? new Map<string, CachedManifest>();
-globalForExtractor.__muxaroManifestCache = manifestCache;
+const manifestCache = new Map<string, CachedManifest>();
 
 function getJsRuntimeArgs(): string[] {
   try {
@@ -175,7 +171,6 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
       ...(bgutilUrl ? ['--extractor-args', `youtubepot-bgutilhttp:base_url=${bgutilUrl}`] : []),
       ...(proxyUrl ? ['--proxy', proxyUrl] : []),
       ...getJsRuntimeArgs(),
-      targetUrl,
     ];
 
     const cookieCandidates = [
@@ -188,6 +183,7 @@ async function runYtDlpDump(targetUrl: string): Promise<any> {
     if (cookieCandidates.length > 0) {
       args.push('--cookies', cookieCandidates[0]);
     }
+    args.push('--', targetUrl);
 
     const child = spawn('yt-dlp', args, {
       shell: false,
@@ -276,6 +272,7 @@ async function runFFprobeDump(targetUrl: string): Promise<any> {
       '-show_format',
       '-show_streams',
       '-of', 'json',
+      '--',
       targetUrl,
     ];
 
@@ -319,8 +316,8 @@ async function runFFprobeDump(targetUrl: string): Promise<any> {
  */
 export async function extractMediaMetadata(rawUrl: string): Promise<ExtractorResult> {
   const trimmedUrl = String(rawUrl || '').trim();
-  if (!trimmedUrl) {
-    throw new Error('URL parameter cannot be empty');
+  if (!trimmedUrl || !/^https?:\/\//i.test(trimmedUrl)) {
+    throw new Error('URL parameter must be a valid HTTP/HTTPS link');
   }
 
   const platform = detectMediaPlatform(trimmedUrl);

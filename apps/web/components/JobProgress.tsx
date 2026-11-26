@@ -6,6 +6,9 @@ import { ProcessingJob, JobState } from '@/lib/types';
 import { formatBytes } from '@/lib/formatters';
 import { api, getApiBaseUrl } from '@/lib/api-client';
 import { detectPlatform } from '@/lib/url-utils';
+import TurnstileChallenge from '@/components/TurnstileChallenge';
+import CommandPreviewDrawer from '@/components/tools/CommandPreviewDrawer';
+import ToolChainBar from '@/components/tools/ToolChainBar';
 import {
   getAutoDownloadPreference,
   setAutoDownloadPreference,
@@ -189,7 +192,7 @@ export default function JobProgress({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [downloadInitiated, setDownloadInitiated] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
-  const [autoDownloadEnabled, setAutoDownloadEnabled] = useState<boolean>(false);
+  const [autoDownloadEnabled, setAutoDownloadEnabled] = useState<boolean>(true);
   const [showPreview, setShowPreview] = useState<boolean>(false);
   const [serverlessRoutingDetected, setServerlessRoutingDetected] = useState<boolean>(false);
   const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
@@ -221,7 +224,12 @@ export default function JobProgress({
   }, [onJobUpdate]);
 
   useEffect(() => {
-    setAutoDownloadEnabled(getAutoDownloadPreference());
+    try {
+      const stored = window.localStorage.getItem('muxaro-auto-download');
+      setAutoDownloadEnabled(stored === null ? true : stored === 'true');
+    } catch {
+      setAutoDownloadEnabled(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -605,7 +613,6 @@ export default function JobProgress({
           anchor.rel = 'noreferrer';
           anchor.referrerPolicy = 'no-referrer';
         }
-        anchor.target = '_blank';
         anchor.style.display = 'none';
         document.body.appendChild(anchor);
         anchor.click();
@@ -720,7 +727,9 @@ export default function JobProgress({
     }
 
     if (telemetryEtaSeconds > 0) {
-      parts.push(`${telemetryEtaSeconds}s left`);
+      const mins = Math.floor(telemetryEtaSeconds / 60);
+      const secs = telemetryEtaSeconds % 60;
+      parts.push(mins > 0 ? `${mins}m ${secs}s left` : `${secs}s left`);
     }
 
     return parts.join(' · ');
@@ -775,7 +784,7 @@ export default function JobProgress({
       normalizedFailureRaw.includes('backend is not configured') ||
       normalizedFailureRaw.includes('backend media processing server is not configured') ||
       normalizedFailureRaw.includes('service degraded') ||
-      normalizedFailureRaw.includes('503')
+      /\b503\b/.test(normalizedFailureRaw)
     );
   }, [job.errorCode, normalizedFailureRaw, serverlessRoutingDetected]);
 
@@ -1040,7 +1049,7 @@ export default function JobProgress({
               rel={job.deliveryMode === 'zero-hop' ? 'noreferrer' : undefined}
               referrerPolicy={job.deliveryMode === 'zero-hop' ? 'no-referrer' : undefined}
               onClick={triggerBrowserSave}
-              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-all shadow-xs cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+              className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-content text-base font-semibold text-xs sm:text-sm hover:opacity-90 active:scale-[0.99] transition-[opacity,transform] duration-150 shadow-xs cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
             >
               {downloadInitiated ? (
                 <Check className="w-4 h-4" aria-hidden="true" />
@@ -1127,6 +1136,22 @@ export default function JobProgress({
             </div>
           )}
 
+          {/* Power-user FFmpeg Command Drawer */}
+          {(job as ExtendedProcessingJob & { ffmpegCommand?: string }).ffmpegCommand && (
+            <CommandPreviewDrawer
+              command={(job as ExtendedProcessingJob & { ffmpegCommand?: string }).ffmpegCommand || ''}
+            />
+          )}
+
+          {/* Zero-Reupload Tool Chaining */}
+          {!isRateLimitedOrChallenged && job.deliveryMode !== 'zero-hop' && (job.id || job.jobId) && (
+            <ToolChainBar
+              jobId={String(job.id || job.jobId)}
+              title={friendlyTitle}
+              isAudioOnly={isAudioOnly}
+            />
+          )}
+
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
             {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
@@ -1200,14 +1225,14 @@ export default function JobProgress({
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
                 <Link
-                  href="/tools/convert"
+                  href="/tools/media-converter"
                   className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
                 >
                   <Zap className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                   <span>Open In-Browser Tools</span>
                 </Link>
                 <Link
-                  href="/settings?tab=instances"
+                  href="/settings"
                   className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs sm:text-sm font-semibold text-content transition-colors"
                 >
                   <span>Connect Custom Worker</span>
@@ -1269,8 +1294,8 @@ export default function JobProgress({
                   </a>
                 ) : (
                   <Link
-                    href="/settings?tab=instances"
-                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-brand-violet text-white text-xs sm:text-sm font-semibold hover:bg-brand-violet-hover transition-colors"
+                    href="/settings"
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold transition-opacity"
                   >
                     <span>Connect Custom Worker</span>
                   </Link>
@@ -1300,6 +1325,11 @@ export default function JobProgress({
                   </button>
                 )}
               </div>
+
+              <TurnstileChallenge
+                title="Human verification"
+                subtitle="Complete the verification check below if prompted, then retry."
+              />
             </div>
           ) : (
             <div className="space-y-3">
@@ -1312,8 +1342,18 @@ export default function JobProgress({
                     Processing could not be completed
                   </h3>
                   <p className="text-xs text-content-secondary mt-1 leading-relaxed">
-                    {friendlyErrorMessage || 'The media server returned an error and could not complete this job.'}
+                    {friendlyErrorMessage || 'Media processing could not be completed. Check your input file format or settings and try again.'}
                   </p>
+                  {(job as ExtendedProcessingJob & { technicalDetails?: string }).technicalDetails && (
+                    <details className="mt-2 rounded-lg border border-line bg-surface-elevated/60 px-3 py-2 text-[11px] text-content-secondary">
+                      <summary className="cursor-pointer font-medium text-content select-none">
+                        Technical details
+                      </summary>
+                      <pre className="mt-1.5 whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed">
+                        {(job as ExtendedProcessingJob & { technicalDetails?: string }).technicalDetails}
+                      </pre>
+                    </details>
+                  )}
                   {retryError && (
                     <p className="text-xs text-error mt-1 leading-relaxed">
                       {retryError}
@@ -1335,7 +1375,18 @@ export default function JobProgress({
                     <Download className="w-3.5 h-3.5" />
                     <span>Save directly</span>
                   </a>
-                ) : !isMobileDevice ? (
+                ) : !isMobileDevice &&
+                  job.sourceUrl &&
+                  /^https?:\/\//i.test(job.sourceUrl) &&
+                  ![
+                    'COMPRESS_TARGET',
+                    'TRIM_SPLIT',
+                    'VIDEO_TO_GIF',
+                    'LOUDNORM_AUDIO',
+                    'BURN_SUBTITLES',
+                    'SCRUB_METADATA',
+                    'ASPECT_RATIO_PAD',
+                  ].includes(String(job.operation || '').toUpperCase()) ? (
                   <Link
                     href={directHelperHref}
                     className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold hover:opacity-90 transition-opacity"
@@ -1343,14 +1394,7 @@ export default function JobProgress({
                     <Zap className="w-3.5 h-3.5" />
                     <span>Stream with MUXARO Direct</span>
                   </Link>
-                ) : (
-                  <Link
-                    href="/settings?tab=instances"
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-brand-violet text-white text-xs font-semibold hover:bg-brand-violet-hover transition-colors"
-                  >
-                    <span>Connect Custom Worker</span>
-                  </Link>
-                )}
+                ) : null}
 
                 <button
                   type="button"

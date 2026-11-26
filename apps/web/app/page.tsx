@@ -1,844 +1,187 @@
-'use client';
-
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import dynamic from 'next/dynamic';
+import React from 'react';
+import type { Metadata } from 'next';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import HomeWorkspace from '@/components/HomeWorkspace';
+import StudioShowcase from '@/components/StudioShowcase';
+import SuiteIndexLedger from '@/components/SuiteIndexLedger';
+import HomeToolsDirectory from '@/components/HomeToolsDirectory';
+import AudioRoadmapBand from '@/components/AudioRoadmapBand';
 import {
-  Link2,
-  UploadCloud,
-  Loader2,
-  Film,
-  Music,
-  Layers,
-  ListVideo,
-  AlertCircle,
-  ShieldCheck,
-  RotateCcw,
-  X,
-  Clock,
-  Server,
-  Zap,
-} from 'lucide-react';
-import HeroWaveLines from '@/components/HeroWaveLines';
-import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
-import HeroOmnibox from '@/components/HeroOmnibox';
-import AdaptiveMediaCard from '@/components/AdaptiveMediaCard';
-import TrustStrip from '@/components/TrustStrip';
-import ValueProposition from '@/components/ValueProposition';
-import CustomWorkerModal from '@/components/CustomWorkerModal';
-import { api } from '@/lib/api-client';
-import { useDeviceMode } from '@/lib/device-mode';
-import { useDeviceDetection } from '@/hooks/useDeviceDetection';
-import { useAuth } from '@/lib/auth-context';
-import { trackEvent } from '@/lib/analytics';
-import { MediaManifest, ProcessingJob, JobState } from '@/lib/types';
+  constructMetadata,
+  buildToolSoftwareAppJsonLd,
+  buildHowToJsonLd,
+  buildFaqJsonLd,
+} from '@/lib/seo';
+import { ALL_STUDIO_TOOLS, CREATOR_TOOLS_CATALOG, PDF_TOOLS_CATALOG } from '@/lib/tools-catalog';
 
-const JobProgress = dynamic(() => import('@/components/JobProgress'), {
-  ssr: false,
-  loading: () => (
-    <div className="muxaro-card rounded-2xl p-8 my-6 text-center flex flex-col items-center justify-center gap-3">
-      <Loader2 className="w-6 h-6 text-brand-blue motion-safe:animate-spin" aria-hidden="true" />
-      <span className="text-sm font-medium text-content-secondary">
-        Opening your download progress…
-      </span>
-    </div>
-  ),
+export const metadata: Metadata = constructMetadata({
+  title: 'MUXARO — All-in-One Video, PDF & Media Studio',
+  description:
+    'Process video up to 8K, compress to exact Discord 10 MB or WhatsApp 16 MB targets, edit and OCR 38 PDF workflows locally in your browser, and extract lossless audio.',
+  path: '/',
+  keywords: [
+    'all in one video tools',
+    'private browser pdf tools',
+    'video downloader 8k',
+    'discord 10mb video compressor',
+    'lossless video trimmer browser',
+    'audio loudness normalizer -14 lufs',
+    'ocr searchable pdf',
+    'media converter 105 formats',
+  ],
 });
 
-const CAPABILITIES = [
+const HOME_STEPS = [
   {
-    href: '/tools/media-converter',
-    title: 'Convert Video',
-    description: 'Change video containers without re-encoding frames.',
-    icon: Film,
-    accentClass: 'bg-interactive text-brand-violet dark:text-content',
-    formats: 'MP4 · MKV · WEBM',
+    name: 'Paste a URL or drop any file',
+    text: 'Enter any supported video link up to 8K or drop MP4, MKV, MP3, PDF, DOCX, or PPTX files.',
   },
   {
-    href: '/tools/audio-extractor',
-    title: 'Extract Audio',
-    description: 'Save original audio tracks with zero transcoding.',
-    icon: Music,
-    accentClass: 'bg-info-bg text-brand-blue dark:text-content',
-    formats: 'MP3 · FLAC · WAV',
+    name: 'Run locally in your browser',
+    text: 'All 38 PDF tools and Tier-1 video/audio utilities execute directly in WebAssembly with zero server upload.',
   },
   {
-    href: '/tools/audio-video-merger',
-    title: 'Merge Video & Audio',
-    description: 'Combine separate video and audio streams cleanly.',
-    icon: Layers,
-    accentClass: 'bg-success-bg text-success',
-    formats: 'MP4 · MKV · WEBM',
+    name: 'Chain outputs cleanly',
+    text: 'Pass finished artifacts directly into compression, trimming, OCR, signing, or encryption without re-uploading.',
+  },
+];
+
+const HOME_FAQS = [
+  {
+    question: 'Which tools run 100% locally in my browser?',
+    answer:
+      'All 38 PDF Studio tools (merge, split, compress, edit, sign, OCR, PKCS#7 verify, AES-256 protect) and Tier-1 video/audio tools (lossless trimmer, frame grabber, subtitle shifter, metadata scrubber, and remuxer) run inside your browser with zero server uploads.',
   },
   {
-    href: '/tools/playlist-batch',
-    title: 'Batch & Playlists',
-    description: 'Download full playlists and multi-video queues.',
-    icon: ListVideo,
-    accentClass: 'bg-interactive text-brand-violet dark:text-content',
-    formats: 'MP4 · MKV · MP3',
+    question: 'Are there any daily credits, paywalls, or ads?',
+    answer:
+      'No. Credits have been removed completely. Browser-local tools run without limits, and Cloud FFmpeg worker tasks run with zero display ads or sign-in walls.',
   },
-] as const;
-
-
-const ACTIVE_STATES = new Set<JobState>([
-  'CREATED',
-  'VALIDATING',
-  'QUEUED',
-  'PROCESSING',
-  'VERIFYING',
-]);
-
-type FailedAction =
-  | { type: 'url'; url: string }
-  | { type: 'file'; file: File };
-
-function isAbortError(err: unknown): boolean {
-  if (err instanceof DOMException && err.name === 'AbortError') return true;
-  if (err instanceof Error && err.name === 'AbortError') return true;
-  return false;
-}
+  {
+    question: 'How long are temporary Cloud worker files kept?',
+    answer:
+      'Media processed by Cloud FFmpeg workers stays isolated only long enough for downloads and zero-reupload chaining, then is automatically deleted within 60 minutes.',
+  },
+  {
+    question: 'What is coming in the Audio Studio suite?',
+    answer:
+      'The upcoming Audio Studio expands MUXARO beyond Audio Extractor and Loudness Normalizer with local stem separation, voice de-noise, waveform silence trimming, and podcast mastering.',
+  },
+];
 
 export default function HomePage() {
-  const router = useRouter();
-  const { shouldAnimateAurora } = useDeviceMode();
-  const { isMobile } = useDeviceDetection();
-  const {
-    authenticated,
-    loading: authLoading,
-    savePendingTask,
-    consumePendingTask,
-  } = useAuth();
+  const webAppJsonLd = buildToolSoftwareAppJsonLd({
+    name: 'MUXARO All-in-One Media & PDF Studio',
+    description:
+      '52 integrated browser-local and Cloud FFmpeg tools across Video Studio, PDF Studio, Stream Downloader, and Audio workflows.',
+    path: '/',
+    features: [
+      '8K and 4K stream downloading with video, audio, and compact modes',
+      '14 Video & Audio Studio tools including 10 MB compression, lossless trim, and 9:16 smart pad',
+      '38 browser-local PDF tools including QPDF compression, OCR, signing, and PKCS#7 verification',
+      'Zero credits, zero sign-up, and zero third-party ads',
+    ],
+  });
 
-  const [activeTab, setActiveTab] = useState<'link' | 'upload'>('link');
-  const [url, setUrl] = useState<string>('');
-  const [inputFocused, setInputFocused] = useState<boolean>(false);
-  const [inspecting, setInspecting] = useState<boolean>(false);
-  const [uploading, setUploading] = useState<boolean>(false);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
-  const [manifest, setManifest] = useState<MediaManifest | null>(null);
-  const [activeJob, setActiveJob] = useState<ProcessingJob | null>(null);
-  const [backgroundJobs, setBackgroundJobs] = useState<ProcessingJob[]>([]);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [lastFailedAction, setLastFailedAction] = useState<FailedAction | null>(null);
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [pastedFeedback, setPastedFeedback] = useState<boolean>(false);
-  const [workerModalOpen, setWorkerModalOpen] = useState<boolean>(false);
+  const howToJsonLd = buildHowToJsonLd({
+    name: 'How to Process Video, Audio, and PDFs with MUXARO',
+    description: 'Paste a link or drop any supported file, pick a workflow, and save your output.',
+    path: '/',
+    steps: HOME_STEPS,
+  });
 
-  const urlInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadAbortRef = useRef<AbortController | null>(null);
-  const restoredPendingRef = useRef<boolean>(false);
-
-  // Track landing page view cleanly with zero PII
-  useEffect(() => {
-    trackEvent('page_view', { page_group: 'landing' });
-  }, []);
-
-  // Restore active background jobs when returning to the workspace
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBackgroundJobs = async () => {
-      try {
-        const jobs = await api.getHistory();
-        if (cancelled || !Array.isArray(jobs)) return;
-        const inFlight = jobs.filter((job) => job && ACTIVE_STATES.has(job.status));
-        setBackgroundJobs(inFlight);
-      } catch {
-        // Stay quietly clean if API is offline or has no session history
-      }
-    };
-
-    void loadBackgroundJobs();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Abort any in-flight browser upload if the user navigates away
-  useEffect(() => {
-    return () => {
-      uploadAbortRef.current?.abort();
-    };
-  }, []);
-
-  const inspectTargetUrl = useCallback(async (targetUrl: string) => {
-    let trimmed = targetUrl.trim();
-    if (!trimmed) {
-      setErrorMessage('Please paste a valid media link to get started.');
-      setLastFailedAction(null);
-      return;
-    }
-
-    // Auto-normalize protocol if user enters or pastes link without https://
-    if (!/^https?:\/\//i.test(trimmed)) {
-      trimmed = `https://${trimmed}`;
-    }
-    setUrl(trimmed);
-
-    setInspecting(true);
-    setErrorMessage(null);
-    setUploadNotice(null);
-    setLastFailedAction(null);
-    setActiveJob(null);
-    trackEvent('media_inspect_started', { source_type: 'url' });
-
-    try {
-      const data = await api.probeUrl(trimmed);
-      setManifest(data);
-      console.info('[MUXARO Probe] Media manifest loaded successfully:', {
-        title: data.title,
-        videoCount: Array.isArray(data.videoStreams) ? data.videoStreams.length : 0,
-        audioCount: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
-      });
-      trackEvent('media_inspect_succeeded', {
-        source_type: 'url',
-        video_options: Array.isArray(data.videoStreams) ? data.videoStreams.length : 0,
-        audio_options: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
-      });
-    } catch (err: unknown) {
-      let message = err instanceof Error ? err.message : '';
-      const errCode = String((err as any)?.code || '').toUpperCase();
-      const errStatus = (err as any)?.status;
-      const isBackendUnconfigured =
-        errCode === 'ERR_BACKEND_NOT_CONFIGURED' ||
-        errStatus === 503 ||
-        /api_internal_url|backend not configured|no media backend worker/i.test(message);
-      const isExplicitBlock =
-        !isBackendUnconfigured &&
-        (errCode === 'HOST_BLOCKED' ||
-          errStatus === 'host_restricted' ||
-          /blocks free cloud servers|bot detection|confirm you're not a bot|confirm you’re not a bot|login_required|host challenged/i.test(
-            message
-          ));
-
-      if (isBackendUnconfigured) {
-        message = isMobile
-          ? 'No backend media worker is connected to this Vercel frontend yet. Connect a custom worker in Settings, or use our in-browser Local Studio tools for files already on your phone.'
-          : 'No backend media worker is connected (API_INTERNAL_URL unset). Install the MUXARO Direct desktop extension to extract directly on your connection, or connect a custom worker.';
-        console.info('[MUXARO Probe] Backend worker not configured on serverless runtime.');
-      } else if (isExplicitBlock) {
-        message = isMobile
-          ? 'This host challenged the server IP (BotGuard / rate limit). Connect a custom worker with a clean ISP IP or residential exit node to process this link on mobile.'
-          : 'This host challenged cloud worker egress. Enable MUXARO Direct in desktop Chrome to extract directly on your connection, or connect a custom worker.';
-        console.info('[MUXARO Probe] Target host challenged cloud worker:', trimmed);
-      } else if (!message || message === '[object Object]' || message.includes('[object Object]')) {
-        message = 'We could not analyse that link. Please check the URL and try again.';
-        console.error('[MUXARO Probe Error] Unresolvable media link error:', err);
-      } else {
-        console.error('[MUXARO Probe Error]', message, err);
-      }
-      setErrorMessage(message);
-      setLastFailedAction({ type: 'url', url: trimmed });
-      trackEvent('media_inspect_failed', { source_type: 'url' });
-    } finally {
-      setInspecting(false);
-    }
-  }, []);
-
-  // Restore any pending media link saved before navigating to sign-in / registration
-  useEffect(() => {
-    if (restoredPendingRef.current) return;
-    restoredPendingRef.current = true;
-    const pending = consumePendingTask();
-    if (pending?.url && /^https?:\/\//i.test(pending.url)) {
-      setActiveTab('link');
-      setUrl(pending.url);
-      void inspectTargetUrl(pending.url);
-    }
-  }, [consumePendingTask, inspectTargetUrl]);
-
-  const handleSaveAndNavigateToAuth = (target: '/login' | '/register') => {
-    const candidateUrl =
-      url.trim() ||
-      (manifest?.sourceUrl && /^https?:\/\//i.test(manifest.sourceUrl)
-        ? manifest.sourceUrl
-        : undefined);
-    if (candidateUrl) {
-      savePendingTask({
-        url: candidateUrl,
-        returnTo: '/',
-      });
-    }
-    trackEvent('cta_clicked', {
-      placement: 'guest_inspect_prompt',
-      destination: target === '/login' ? 'login' : 'register',
-    });
-    router.push(`${target}?returnTo=${encodeURIComponent('/')}`);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await inspectTargetUrl(url);
-  };
-
-  const handleClipboardPaste = async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
-        const text = await navigator.clipboard.readText();
-        const trimmed = text.trim();
-        if (trimmed) {
-          setUrl(trimmed);
-          setErrorMessage(null);
-          setLastFailedAction(null);
-          setPastedFeedback(true);
-          window.setTimeout(() => setPastedFeedback(false), 1800);
-          if (
-            /^https?:\/\//i.test(trimmed) ||
-            /^(www\.|youtu\.be|youtube\.com|vimeo\.com|tiktok\.com|twitter\.com|x\.com|instagram\.com|twitch\.tv|soundcloud\.com)/i.test(trimmed)
-          ) {
-            void inspectTargetUrl(trimmed);
-            return;
-          }
-          urlInputRef.current?.focus();
-          return;
-        }
-      }
-    } catch {
-      // Clipboard access unavailable or denied; focus input for manual paste
-    }
-    urlInputRef.current?.focus();
-  };
-
-  const handleInputPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const text = e.clipboardData.getData('text').trim();
-    if (text) {
-      if (
-        /^https?:\/\//i.test(text) ||
-        /^(www\.|youtu\.be|youtube\.com|vimeo\.com|tiktok\.com|twitter\.com|x\.com|instagram\.com|twitch\.tv|soundcloud\.com)/i.test(text)
-      ) {
-        setUrl(text);
-        setErrorMessage(null);
-        setLastFailedAction(null);
-        window.setTimeout(() => {
-          void inspectTargetUrl(text);
-        }, 50);
-      }
-    }
-  };
-
-  const handleFileUpload = useCallback(async (file: File) => {
-    const maxSizeBytes = 2 * 1024 * 1024 * 1024;
-    if (file.size > maxSizeBytes) {
-      setErrorMessage('That file is larger than 2 GB. Please choose a smaller file.');
-      setLastFailedAction(null);
-      return;
-    }
-
-    uploadAbortRef.current?.abort();
-    const controller = new AbortController();
-    uploadAbortRef.current = controller;
-
-    setUploading(true);
-    setUploadProgress(null);
-    setSelectedFileName(file.name);
-    setErrorMessage(null);
-    setUploadNotice(null);
-    setLastFailedAction(null);
-    setManifest(null);
-    setActiveJob(null);
-    trackEvent('upload_started', { source_type: 'local_file' });
-
-    try {
-      const data = await api.uploadLocalFile(file, {
-        onProgress: (pct) => {
-          if (Number.isFinite(pct)) {
-            setUploadProgress(Math.max(0, Math.min(100, Math.round(pct))));
-          }
-        },
-        signal: controller.signal,
-      });
-      setManifest(data);
-      trackEvent('upload_completed', { source_type: 'local_file' });
-      trackEvent('media_inspect_succeeded', {
-        source_type: 'local_file',
-        video_options: Array.isArray(data.videoStreams) ? data.videoStreams.length : 0,
-        audio_options: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
-      });
-    } catch (err: unknown) {
-      if (isAbortError(err) || controller.signal.aborted) {
-        setUploadNotice('Upload cancelled.');
-        trackEvent('upload_cancelled', { source_type: 'local_file' });
-      } else {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'We could not upload that file. Please try again.';
-        console.error('[MUXARO Upload Error]', message, err);
-        setErrorMessage(message);
-        setLastFailedAction({ type: 'file', file });
-        trackEvent('media_inspect_failed', { source_type: 'local_file' });
-      }
-    } finally {
-      if (uploadAbortRef.current === controller) {
-        uploadAbortRef.current = null;
-      }
-      setUploading(false);
-      setUploadProgress(null);
-      setSelectedFileName(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
-  }, []);
-
-  const handleCancelUpload = () => {
-    uploadAbortRef.current?.abort();
-  };
-
-  const handleRetryLastAction = () => {
-    if (lastFailedAction) {
-      if (lastFailedAction.type === 'url') {
-        void inspectTargetUrl(lastFailedAction.url);
-      } else {
-        void handleFileUpload(lastFailedAction.file);
-      }
-    } else if (url.trim()) {
-      void inspectTargetUrl(url.trim());
-    } else {
-      setErrorMessage(null);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (!uploading && e.dataTransfer.files?.[0]) {
-      void handleFileUpload(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleResumeBackgroundJob = (job: ProcessingJob) => {
-    setActiveJob(job);
-    setBackgroundJobs((prev) => prev.filter((item) => item.id !== job.id));
-  };
-
-  const activeBackgroundCount = backgroundJobs.length;
-  const analyseLabel = inspecting ? 'Analysing…' : 'Analyse';
-  const pasteLabel = pastedFeedback ? 'Pasted' : 'Paste';
-  const uploadScale = uploadProgress !== null ? uploadProgress / 100 : 0;
+  const faqJsonLd = buildFaqJsonLd(HOME_FAQS, {
+    path: '/',
+    name: 'MUXARO Frequently Asked Questions',
+  });
 
   return (
-    <div className="w-full relative">
-      {/* Hero Section with Minimalist Violet-Style Vector Wave Lines */}
-      <section
-        className={`muxaro-aurora-shell w-full pt-8 pb-14 sm:pt-12 sm:pb-20 relative overflow-hidden${
-          inputFocused ? ' muxaro-aurora-focused' : ''
-        }${inspecting || uploading ? ' muxaro-aurora-analyzing' : ''}`}
-        data-aurora-paused={!shouldAnimateAurora ? 'true' : undefined}
-      >
-        <HeroWaveLines />
-        <div className="muxaro-aurora-ribbon" aria-hidden="true" />
-        <div className="muxaro-aurora-glow" aria-hidden="true" />
+    <div className="w-full">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(webAppJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(howToJsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
 
-        <div className="relative z-10 max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Hero Header */}
-          <div className="text-center max-w-3xl mx-auto mb-6 sm:mb-8">
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-content tracking-tight leading-[1.1] mb-3">
-              Lossless media downloader.
+      {/* Fold-Locked Clean Liquid-Glass Hero */}
+      <section className="w-full pt-10 pb-12 sm:pt-14 sm:pb-16">
+        <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-2xl mx-auto mb-7">
+            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-display font-medium text-content tracking-[-0.025em] leading-[1.06] mb-3 break-words">
+              Every media and PDF tool.
             </h1>
-
-            <p className="text-base sm:text-lg text-content-secondary max-w-2xl mx-auto leading-relaxed">
-              Save video up to 8K or extract original audio with zero re-encoding.
+            <p className="text-sm sm:text-base text-content-secondary leading-relaxed">
+              Grab 8K streams, trim or compress video, and run {PDF_TOOLS_CATALOG.length} local PDF tools in your browser.
             </p>
           </div>
 
-          {/* Active Background Queue Restoration Banner */}
-          {!activeJob && activeBackgroundCount > 0 && (
-            <div className="max-w-3xl mx-auto mb-5">
-              <div className="rounded-xl bg-surface border border-line shadow-sm px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 text-sm text-content min-w-0">
-                  <Clock className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
-                  <span>
-                    {activeBackgroundCount === 1
-                      ? 'You have 1 job continuing in the background.'
-                      : `You have ${activeBackgroundCount} jobs continuing in the background.`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleResumeBackgroundJob(backgroundJobs[0])}
-                    className="px-3 py-1.5 rounded-lg bg-interactive text-brand-violet dark:text-content text-xs font-semibold hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                  >
-                    View progress
-                  </button>
-                  <Link
-                    href="/downloads"
-                    className="px-3 py-1.5 rounded-lg border border-line text-content-secondary text-xs font-medium hover:text-content hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                  >
-                    Downloads
-                  </Link>
-                </div>
-              </div>
-            </div>
-          )}
+          <HomeWorkspace />
 
-          {/* Clean Media Workspace Card */}
-          <div className="max-w-3xl mx-auto">
-            {activeJob ? (
-              /* Stage 1: Active Job Progress (Single Stage Container) */
-              <JobProgress
-                initialJob={activeJob}
-                onJobUpdate={setActiveJob}
-                sourceUrl={activeJob.sourceUrl || url || manifest?.sourceUrl}
-                manifest={manifest}
-                onDismiss={() => {
-                  setActiveJob(null);
-                  setManifest(null);
-                  setUrl('');
-                  setErrorMessage(null);
-                  setLastFailedAction(null);
-                }}
-              />
-            ) : manifest ? (
-              /* Stage 2: Adaptive Media Result Stage */
-              <AdaptiveMediaCard
-                manifest={manifest}
-                onReset={() => {
-                  setManifest(null);
-                  setUrl('');
-                  setErrorMessage(null);
-                  setLastFailedAction(null);
-                }}
-                onJobStarted={(job) => {
-                  setActiveJob(job);
-                }}
-              />
-            ) : (
-              /* Stage 3: SSR-First Hero Omnibox & Mode Switcher */
-              <div className="muxaro-media-card p-4 sm:p-6 relative overflow-hidden">
-                {/* Segmented Input Mode Tabs */}
-                <div
-                  role="tablist"
-                  aria-label="Choose how to add media"
-                  className="muxaro-segmented-group mb-4"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    id="tab-link"
-                    aria-selected={activeTab === 'link'}
-                    aria-controls="panel-link"
-                    onClick={() => setActiveTab('link')}
-                    className={`muxaro-segmented-tab ${activeTab === 'link' ? 'active' : ''}`}
-                  >
-                    <Link2 className="w-3.5 h-3.5 text-brand shrink-0" aria-hidden="true" />
-                    <span>Paste a link</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="tab"
-                    id="tab-upload"
-                    aria-selected={activeTab === 'upload'}
-                    aria-controls="panel-upload"
-                    onClick={() => setActiveTab('upload')}
-                    className={`muxaro-segmented-tab ${activeTab === 'upload' ? 'active' : ''}`}
-                  >
-                    <UploadCloud className="w-3.5 h-3.5 text-info shrink-0" aria-hidden="true" />
-                    <span>Upload a file</span>
-                  </button>
-                </div>
-
-                {/* Panel 1: Paste a Link with SSR-First Hero Omnibox */}
-                {activeTab === 'link' ? (
-                  <div id="panel-link" role="tabpanel" aria-labelledby="tab-link">
-                    <HeroOmnibox
-                      url={url}
-                      onUrlChange={setUrl}
-                      onSubmit={(targetUrl, preset) => {
-                        console.info('[MUXARO Omnibox] Inspecting URL with quality preset:', preset);
-                        void inspectTargetUrl(targetUrl);
-                      }}
-                      probing={inspecting}
-                      onFocusChange={setInputFocused}
-                    />
-                  </div>
-                ) : (
-                  /* Panel 2: Upload a File */
-                  <div id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
-                    <div
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        if (!uploading) setIsDragging(true);
-                      }}
-                      onDragLeave={() => setIsDragging(false)}
-                      onDrop={handleDrop}
-                      className={`p-8 sm:p-10 border-2 border-dashed rounded-xl text-center transition-colors duration-150 ${
-                        isDragging
-                          ? 'border-brand-violet bg-interactive'
-                          : 'border-line bg-base hover:border-brand-violet'
-                      }`}
-                    >
-                      <div
-                        className="w-12 h-12 rounded-2xl bg-interactive text-brand-violet dark:text-content mx-auto flex items-center justify-center mb-3"
-                        aria-hidden="true"
-                      >
-                        {uploading ? (
-                          <Loader2 className="w-6 h-6 motion-safe:animate-spin" />
-                        ) : (
-                          <UploadCloud className="w-6 h-6" />
-                        )}
-                      </div>
-
-                      {uploading ? (
-                        <div className="max-w-md mx-auto space-y-4">
-                          <div>
-                            <h2 className="text-base font-semibold text-content mb-1">
-                              {uploadProgress !== null
-                                ? `Uploading your file (${uploadProgress}%)…`
-                                : 'Uploading your file…'}
-                            </h2>
-                            {selectedFileName && (
-                              <p className="text-sm text-content-secondary truncate">
-                                {selectedFileName}
-                              </p>
-                            )}
-                          </div>
-
-                          <div
-                            role="progressbar"
-                            aria-label="Upload progress"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={uploadProgress ?? undefined}
-                            className="w-full h-2 rounded-full bg-elevated overflow-hidden"
-                          >
-                            <div
-                              className="h-full w-full origin-left bg-muxaro-gradient motion-safe:transition-transform motion-safe:duration-150"
-                              style={{ transform: `scaleX(${uploadScale})` }}
-                            />
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={handleCancelUpload}
-                            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl border border-line bg-surface text-sm font-medium text-content-secondary hover:text-content hover:border-brand-violet active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                          >
-                            <X className="w-4 h-4 shrink-0" aria-hidden="true" />
-                            <span>Cancel upload</span>
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <h2 className="text-base font-semibold text-content mb-1">
-                            Drop a file from your computer
-                          </h2>
-                          <p className="text-sm text-content-secondary max-w-md mx-auto mb-5">
-                            Compress a video, change its format, or extract audio. Supports MP4, MOV, MKV, WebM, MP3, and WAV up to 2 GB.
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            className="muxaro-btn-primary px-5 py-2.5 min-h-[44px] rounded-xl text-sm font-semibold inline-flex items-center justify-center whitespace-nowrap active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                          >
-                            Choose a file
-                          </button>
-                        </>
-                      )}
-
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        className="hidden"
-                        disabled={uploading}
-                        accept="video/*,audio/*,.mp4,.mkv,.webm,.mov,.mp3,.flac,.wav,.aac,.m4a"
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) {
-                            void handleFileUpload(e.target.files[0]);
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Calm Cancellation Notice */}
-            {!activeJob && uploadNotice && !errorMessage && (
-              <div
-                role="status"
-                className="mt-4 px-4 py-3 rounded-xl bg-surface border border-line text-content-secondary text-sm flex items-center justify-between gap-3"
-              >
-                <span>{uploadNotice}</span>
-                <button
-                  type="button"
-                  onClick={() => setUploadNotice(null)}
-                  aria-label="Dismiss notice"
-                  className="text-content-secondary hover:text-content active:translate-y-px transition-colors duration-150"
-                >
-                  <X className="w-4 h-4" aria-hidden="true" />
-                </button>
-              </div>
-            )}
-
-            {/* Honest API Error Banner with Retry & Custom Worker Action */}
-            {!activeJob && errorMessage && (
-              <div
-                role="alert"
-                className="mt-4 p-4 sm:p-5 rounded-2xl bg-surface border border-error/40 shadow-card text-sm flex flex-col gap-4"
-              >
-                <div className="flex items-start gap-3 w-full">
-                  <div className="w-8 h-8 rounded-xl bg-error/10 text-error flex items-center justify-center shrink-0 mt-0.5">
-                    <AlertCircle className="w-4 h-4" aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                      {errorMessage.includes('No backend media worker is connected')
-                        ? 'Cloud Worker Not Connected'
-                        : errorMessage.includes('challenged') || errorMessage.includes('blocks free cloud servers')
-                        ? 'Host Challenge Detected'
-                        : 'Unable to analyse link'}
-                    </h3>
-                    <p className="text-xs text-content-secondary mt-1 leading-relaxed">
-                      {errorMessage}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line/40 w-full">
-                  {(errorMessage.includes('No backend media worker is connected') ||
-                    errorMessage.includes('challenged') ||
-                    errorMessage.includes('blocks free cloud servers')) && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setWorkerModalOpen(true)}
-                        className="px-3 py-1.5 rounded-lg bg-brand-violet text-white text-xs font-semibold hover:bg-brand-violet-hover active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5 shadow-xs"
-                      >
-                        <Server className="w-3.5 h-3.5" aria-hidden="true" />
-                        <span>Connect Custom Worker</span>
-                      </button>
-                      {!isMobile ? (
-                        <Link
-                          href="/tools/direct-helper"
-                          className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
-                        >
-                          <Zap className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                          <span>MUXARO Direct Extension</span>
-                        </Link>
-                      ) : (
-                        <Link
-                          href="/tools/media-converter"
-                          className="px-3 py-1.5 rounded-lg border border-line bg-surface hover:bg-surface-elevated text-xs font-semibold text-zinc-900 dark:text-zinc-100 active:translate-y-px transition-colors whitespace-nowrap inline-flex items-center gap-1.5"
-                        >
-                          <Film className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
-                          <span>Local File Studio</span>
-                        </Link>
-                      )}
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleRetryLastAction}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface border border-line text-zinc-900 dark:text-zinc-100 text-xs font-semibold hover:bg-surface-elevated active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                    <span>Retry</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setErrorMessage(null);
-                      setLastFailedAction(null);
-                    }}
-                    className="text-xs font-medium text-content-secondary hover:text-content px-2 py-1 transition-colors"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Quiet hairline-bordered spec line beneath the main workspace card */}
-            <TrustStrip />
+          {/* Clean Suite Strip */}
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs">
+            <Link
+              href="/tools?section=video"
+              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content font-medium"
+            >
+              Video ({CREATOR_TOOLS_CATALOG.length})
+            </Link>
+            <Link
+              href="/tools/pdf"
+              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content font-medium"
+            >
+              PDF ({PDF_TOOLS_CATALOG.length})
+            </Link>
+            <Link
+              href="/tools?section=audio"
+              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content-secondary hover:text-content font-medium"
+            >
+              Audio (Next)
+            </Link>
+            <Link
+              href="/tools"
+              className="spring-bounce px-3.5 py-1.5 rounded-full border border-brand/30 bg-brand/10 text-brand font-semibold hover:bg-brand/15"
+            >
+              All {ALL_STUDIO_TOOLS.length} tools
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* Main Content Container */}
-      <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        {/* Transparent 3-Pillar Value Proposition */}
-        <ValueProposition />
+      {/* Interactive Workbench Console */}
+      <StudioShowcase />
 
-        {/* Helpful Sign-In Prompt for Guest Inspection (non-blocking, preserves task) */}
-        {!authLoading && !authenticated && manifest && !activeJob && (
-          <div className="max-w-3xl mx-auto mb-5">
-            <div className="rounded-2xl bg-surface border border-line shadow-sm px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start sm:items-center gap-2.5 text-sm text-content min-w-0">
-                <ShieldCheck className="w-4 h-4 text-brand-violet shrink-0 mt-0.5 sm:mt-0" aria-hidden="true" />
-                <span>
-                  Create a free account for higher file-size caps, batch playlist downloads, and 24-hr cloud history.
-                </span>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleSaveAndNavigateToAuth('/login')}
-                  className="px-3.5 py-2 rounded-xl bg-interactive text-brand-violet dark:text-content text-xs font-semibold hover:bg-info-bg active:translate-y-px transition-colors duration-150 whitespace-nowrap"
-                >
-                  Sign in
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSaveAndNavigateToAuth('/register')}
-                  className="muxaro-btn-primary px-3.5 py-2 rounded-xl text-xs font-semibold active:translate-y-px whitespace-nowrap"
-                >
-                  Create free account
-                </button>
-              </div>
+      {/* Four-Suite Architectural Ledger */}
+      <SuiteIndexLedger />
+
+      {/* Searchable Launcher Directory + Local vs Cloud Spec Table */}
+      <HomeToolsDirectory />
+
+      {/* Upcoming Audio Suite Preview Band */}
+      <AudioRoadmapBand />
+
+      {/* Concise Factual FAQ */}
+      <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-16 border-t border-line">
+        <h2 className="text-3xl sm:text-4xl font-display font-medium text-content tracking-[-0.02em] mb-8">
+          Questions
+        </h2>
+        <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">
+          {HOME_FAQS.map((item) => (
+            <div key={item.question} className="pb-5 border-b border-line-subtle">
+              <dt className="text-sm font-semibold text-content">{item.question}</dt>
+              <dd className="text-xs sm:text-sm text-content-secondary leading-relaxed mt-1.5">
+                {item.answer}
+              </dd>
             </div>
-          </div>
-        )}
-
-        {/* Compact Hairline-Bordered 4-Card Media Tools Grid */}
-        <section className="pt-4 pb-12" aria-labelledby="capabilities-heading">
-          <h2 id="capabilities-heading" className="sr-only">
-            Media tools
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {CAPABILITIES.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-2xl p-5 border border-line bg-surface hover:border-line-hover transition-colors flex flex-col group active:translate-y-px shadow-xs"
-                >
-                  <div
-                    className={`w-10 h-10 rounded-xl ${item.accentClass} flex items-center justify-center mb-3.5 motion-safe:transition-transform motion-safe:duration-150 motion-safe:group-hover:scale-105`}
-                    aria-hidden="true"
-                  >
-                    <Icon className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-base font-semibold text-content mb-1 group-hover:text-brand-violet transition-colors duration-150">
-                    {item.title}
-                  </h3>
-                  <p className="text-sm text-content-secondary leading-relaxed">
-                    {item.description}
-                  </p>
-                  <div className="mt-4 pt-3.5 border-t border-line text-[11px] font-mono text-content-secondary select-none">
-                    {item.formats}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      </div>
-
-      {/* Custom Worker URL Modal (Cobalt Model) */}
-      <CustomWorkerModal
-        isOpen={workerModalOpen}
-        onClose={() => setWorkerModalOpen(false)}
-      />
+          ))}
+        </dl>
+      </section>
     </div>
   );
 }

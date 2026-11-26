@@ -49,6 +49,11 @@ export function useFFmpegWorker(): UseFFmpegWorkerReturn {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const clientRef = useRef<FFmpegWorkerClient | null>(null);
+  const resultUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    resultUrlRef.current = result?.url || null;
+  }, [result]);
 
   useEffect(() => {
     clientRef.current = FFmpegWorkerClient.getInstance();
@@ -67,12 +72,20 @@ export function useFFmpegWorker(): UseFFmpegWorkerReturn {
       });
 
     return () => {
-      // Abort any active task when component unmounts
+      // Abort any active task and revoke active result URL when component unmounts
       abortControllerRef.current?.abort();
+      if (resultUrlRef.current) {
+        URL.revokeObjectURL(resultUrlRef.current);
+        resultUrlRef.current = null;
+      }
     };
   }, []);
 
   const reset = useCallback(() => {
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      resultUrlRef.current = null;
+    }
     setIsProcessing(false);
     setProgress(INITIAL_PROGRESS);
     setError(null);

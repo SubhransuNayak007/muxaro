@@ -1,0 +1,24 @@
+{
+  "name": "@muxaro/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MUXARO Standalone Offline Android Mobile Studio",
+  "scripts": {
+    "prepare:www": "node scripts/sync-www.mjs",
+    "sync": "npx cap sync android",
+    "build:apk": "npm run prepare:www && npx cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/camera": "^7.0.2",
+    "@capacitor/core": "^7.4.4",
+    "@capacitor/filesystem": "^7.1.5",
+    "@capacitor/haptics": "^7.0.2",
+    "@capacitor/share": "^7.0.2",
+    "@capacitor/splash-screen": "^7.0.3",
+    "@capacitor/status-bar": "^7.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4"
+  }
+}

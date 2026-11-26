@@ -4,7 +4,7 @@ slug: "security"
 description: "Independent technical audit, GDPR & CCPA zero-retention verification, verified developer provenance, and defense-in-depth security engineering controls across MUXARO."
 author: "MUXARO Security & Governance Board"
 publishedAt: "2026-11-19"
-updatedAt: "2026-11-19"
+updatedAt: "2026-11-26"
 category: "Trust & Security"
 keywords: ["Muxaro security audit", "GDPR compliance media tool", "zero log ephemeral processing", "ssrf defense", "ffmpeg sandbox", "verified developer identity"]
 ---
@@ -62,10 +62,11 @@ The foundational privacy principle of MUXARO is **data minimization and ephemera
 ```
 
 ### Core Privacy Guarantees:
-1. **60-Minute Automatic Purge:** All processed video and audio outputs are stored exclusively on temporary scratch volumes with an automated 60-minute time-to-live (TTL). Once the window expires, files are permanently shredded.
-2. **Zero Persistent Media Storage:** Neither incoming video URLs nor uploaded source binaries are ever archived, indexed, or stored permanently.
-3. **No Training on Creator Content:** User media files are **never** utilized to train generative AI models, machine learning algorithms, or marketing datasets.
-4. **Automated URL & PII Redaction:** Internal structured logs pass through recursive redaction filters (`apps/api/src/services/logger.ts`) that strip query parameters, authentication headers, IP addresses, and source URLs prior to output.
+1. **100% Browser-Local PDF & Tier-1 Media Execution:** All 38 [PDF Studio](/tools/pdf) tools and Tier-1 video/audio tools (`<= 350 MB`) run inside your browser via WebAssembly (QPDF, PDF.js, Tesseract, FFmpeg WASM) with **0 bytes uploaded** to any server.
+2. **60-Minute Automatic Purge for Cloud Workers:** When using Cloud FFmpeg workers for heavy encodes or remote URLs, temporary outputs carry a hard **60-minute TTL** and are permanently purged afterward.
+3. **Zero Persistent Media Storage:** Neither incoming video URLs nor uploaded source binaries are ever archived, indexed, or stored permanently.
+4. **No Training on Creator Content:** User files are **never** utilized to train machine learning models or marketing datasets.
+5. **Automated URL & PII Redaction:** Operational logs strip query parameters, authentication headers, and source URLs prior to output.
 
 ---
 
@@ -75,13 +76,13 @@ MUXARO complies with the European General Data Protection Regulation (GDPR) and 
 
 ### GDPR Compliance Posture
 - **Article 5 (Data Minimization):** We collect only the bare minimum technical telemetry required to fulfill your active media processing request.
-- **Article 17 (Right to Erasure / "Right to be Forgotten"):** Fulfilled automatically by our 60-minute ephemeral deletion engine. In addition, registered members can delete their entire account and session history immediately via `/account` or `DELETE /api/v1/auth/me`.
+- **Article 17 (Right to Erasure / "Right to be Forgotten"):** Fulfilled automatically by our ephemeral deletion engine. Users can also clear local browser history anytime in [Settings](/settings).
 - **Article 25 (Data Protection by Design & by Default):** Privacy controls are active by default. Zero third-party marketing cookies are placed on user devices.
 - **Article 32 (Security of Processing):** All transport is encrypted via modern TLS 1.3 with strict HTTP Strict Transport Security (HSTS).
 
 ### CCPA / CPRA Compliance Posture
 - **Zero Sale or Sharing of Personal Information:** MUXARO does not sell, rent, or trade personal data or media assets to data brokers or third parties.
-- **Opt-in Rewarded System:** Rewarded credits on `/credits` are strictly opt-in and triggered solely by explicit user interaction.
+- **Zero Ad-Tracking & Zero Credit Walls:** MUXARO serves zero display ads, zero rewarded-ad scripts, and requires no accounts or credit ledgers.
 
 ---
 
@@ -90,9 +91,8 @@ MUXARO complies with the European General Data Protection Regulation (GDPR) and 
 Our media pipeline operates within a multi-tiered security perimeter designed to defend against automated exploits, server-side request forgery (SSRF), and resource exhaustion:
 
 ### 4.1. Server-Side Request Forgery (SSRF) Defense
-- **Private Network Blocking:** All media URL inspections pass through strict network validators (`security/src/ssrf-guard.ts`).
-- **Forbidden Ranges:** Outbound requests to `localhost`, `127.0.0.1`, RFC 1918 private subnets (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local addresses, and cloud instance metadata services (`169.254.169.254`, `metadata.google.internal`) are unconditionally dropped.
-- **DNS Rebinding Protection:** IP addresses resolved by DNS are pinned at the socket level; HTTP redirects are recursively evaluated against the security filter before subsequent connections are initiated.
+- **Private Network Blocking:** All media URL inspections pass through strict network validators.
+- **Forbidden Ranges:** Outbound requests to private subnets and cloud metadata addresses are blocked.
 
 ### 4.2. Process Sandboxing & Command Hardening
 - **Subprocess Isolation:** Media commands (FFmpeg/FFprobe) are invoked with `{ shell: false }`, completely immunizing the system against shell argument injection.

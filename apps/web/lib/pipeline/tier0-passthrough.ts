@@ -153,11 +153,12 @@ export function createTier0Passthrough(opts: Tier0PassthroughOptions): Tier0Resp
   // Determine status code
   const status = opts.status ?? (opts.contentRange || opts.range ? 206 : 200);
 
-  // Build headers
+  // Build headers (sanitize inline filename against header/quote injection)
   const mimeType = opts.contentType || inferMime(filename);
+  const safeInlineName = filename.replace(/[\r\n"\\;]/g, '_');
   const dispositionHeader =
     disposition === 'inline'
-      ? `inline; filename="${filename}"`
+      ? `inline; filename="${safeInlineName}"`
       : formatContentDisposition(filename);
 
   const headers: Record<string, string> = {

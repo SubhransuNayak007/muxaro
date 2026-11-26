@@ -1,22 +1,34 @@
+import React, { Suspense } from 'react';
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Newsreader, Hanken_Grotesk, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import './motion.css';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
+import { LayoutHeader, LayoutFooter } from '@/components/LayoutChrome';
 import { AuthProvider } from '@/lib/auth-context';
+import { OpenedArtifactProvider } from '@/lib/opened-artifact';
 import { AnalyticsProvider } from '@/components/AnalyticsProvider';
 import { ConsentBanner } from '@/components/ConsentBanner';
+import GlobalSmartCommandLazy from '@/components/GlobalSmartCommandLazy';
+import NavigationProgress from '@/components/NavigationProgress';
 import { buildRootWebAppContextJsonLd } from '@/lib/seo';
 
-const inter = Inter({
+const newsreader = Newsreader({
   subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  display: 'swap',
+  variable: '--font-serif',
+});
+
+const hankenGrotesk = Hanken_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
   display: 'swap',
   variable: '--font-sans',
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const ibmPlexMono = IBM_Plex_Mono({
   subsets: ['latin'],
+  weight: ['400', '500', '600'],
   display: 'swap',
   preload: false,
   variable: '--font-mono',
@@ -28,48 +40,44 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://muxaro.app')
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: 'MUXARO — Universal Video Downloader & Lossless Media Workspace',
-  description:
-    'Download up to 8K video, extract lossless 320 kbps MP3 & studio FLAC, or convert formats cleanly. 100% ad-free with a 4 GB free limit.',
-  keywords: [
-    'yt video downloader',
-    'youtube video downloader 4k',
-    'youtube to mp4 1080p',
-    'extract audio from youtube',
-    'youtube to mp3 converter',
-    'download youtube video 60fps',
-    'free online video downloader',
-    'lossless audio extractor',
-    'merge video and audio online',
-    'ad free youtube downloader',
-    'media converter',
-    'muxaro workspace',
-    '4gb media converter',
-  ],
-  alternates: {
-    canonical: '/',
+  title: {
+    default: 'MUXARO — All-in-One Video, PDF & Media Studio',
+    template: '%s',
   },
+  description:
+    'All-in-one creator and document studio: 14 hybrid Video & Audio tools, 38 browser-local PDF utilities, and 8K stream downloading with zero credits and zero ads.',
+  keywords: [
+    'all in one video tools',
+    'private pdf tools browser',
+    'video compressor 10mb discord',
+    'lossless video trimmer',
+    'media converter 105 formats',
+    'pdf editor merge compress ocr',
+    'video downloader 8k',
+    'audio loudness normalizer',
+    'muxaro',
+  ],
   openGraph: {
     type: 'website',
     url: SITE_URL,
     siteName: 'MUXARO',
-    title: 'MUXARO — Your Media. One Powerful Workspace.',
+    title: 'MUXARO — All-in-One Video, PDF & Media Studio',
     description:
-      'Convert videos, extract studio-grade audio, and combine tracks in one fast, private workspace.',
+      '14 Video & Audio studio tools, 38 browser-local PDF tools, and 8K stream downloading with zero credits, zero sign-up, and zero ads.',
     images: [
       {
         url: '/brand/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'MUXARO — Your Media. One Powerful Workspace.',
+        alt: 'MUXARO — All-in-One Video, PDF & Media Studio',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'MUXARO — Your Media. One Powerful Workspace.',
+    title: 'MUXARO — All-in-One Video, PDF & Media Studio',
     description:
-      'Convert videos, extract studio-grade audio, and combine tracks in one fast, private workspace.',
+      '14 Video & Audio studio tools, 38 browser-local PDF utilities, and 8K stream downloading with zero credits.',
     images: ['/brand/og-image.png'],
   },
   icons: {
@@ -85,8 +93,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-scroll-behavior="smooth"
       suppressHydrationWarning
-      className={`${inter.variable} ${jetbrainsMono.variable}`}
+      className={`${newsreader.variable} ${hankenGrotesk.variable} ${ibmPlexMono.variable}`}
     >
       <head>
         <link rel="icon" href="/brand/favicon.svg" type="image/svg+xml" />
@@ -98,11 +107,14 @@ export default function RootLayout({
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{if(window.location.hostname==='muxaro.pages.dev'||window.location.hostname.endsWith('.muxaro.pages.dev')){window.location.replace('https://muxaro.vercel.app'+window.location.pathname+window.location.search);return;}var d=document.documentElement;var t=localStorage.getItem('theme');var isDark=t==='dark'||(!t&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(isDark){d.classList.add('dark');d.setAttribute('data-theme','dark');}else{d.classList.remove('dark');d.setAttribute('data-theme','light');}if(localStorage.getItem('muxaro-lightweight')==='true'){d.setAttribute('data-lightweight','true');}}catch(e){}})();`,
+            __html: `(function(){try{var d=document.documentElement;var t=localStorage.getItem('theme');var isDark=t!=='light';if(isDark){d.classList.add('dark');d.setAttribute('data-theme','dark');}else{d.classList.remove('dark');d.setAttribute('data-theme','light');}var lw=localStorage.getItem('muxaro-lightweight');var usRaw=localStorage.getItem('muxaro_user_settings');var rm=false;if(usRaw){try{rm=Boolean(JSON.parse(usRaw).reduceMotion);}catch(_){}}if(lw==='true'||rm){d.setAttribute('data-lightweight','true');}}catch(e){}})();`,
           }}
         />
       </head>
       <body className="min-h-screen flex flex-col justify-between font-sans bg-base text-primary">
+        <Suspense fallback={null}>
+          <NavigationProgress />
+        </Suspense>
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2 focus:rounded-md focus:bg-surface focus:text-content focus:border focus:border-line focus:shadow-md text-sm font-medium"
@@ -110,16 +122,19 @@ export default function RootLayout({
           Skip to main content
         </a>
         <AuthProvider>
-          <AnalyticsProvider>
-            <div className="w-full">
-              <Navbar />
-              <main id="main-content" className="w-full">
-                {children}
-              </main>
-            </div>
-            <Footer />
-            <ConsentBanner />
-          </AnalyticsProvider>
+          <OpenedArtifactProvider>
+            <AnalyticsProvider>
+              <div className="w-full">
+                <LayoutHeader />
+                <main id="main-content" className="w-full">
+                  {children}
+                </main>
+              </div>
+              <LayoutFooter />
+              <ConsentBanner />
+              <GlobalSmartCommandLazy />
+            </AnalyticsProvider>
+          </OpenedArtifactProvider>
         </AuthProvider>
       </body>
     </html>

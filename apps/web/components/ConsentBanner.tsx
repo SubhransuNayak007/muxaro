@@ -87,8 +87,7 @@ export function ConsentBanner() {
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-content">Privacy choices</h2>
                 <p className="mt-1 text-xs sm:text-sm text-content-secondary leading-relaxed">
-                  Muxaro uses essential cookies for sign-in and queue security. You can also opt in to privacy-safe
-                  analytics and optional rewarded ads. Read our{' '}
+                  Muxaro runs local tools entirely in your browser and uses essential state only for active processing queues. You can optionally allow privacy-safe analytics. Read our{' '}
                   <Link
                     href="/privacy"
                     className="font-medium text-brand underline underline-offset-2 hover:opacity-85 focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -150,32 +149,6 @@ export function ConsentBanner() {
                   />
                 </button>
               </div>
-
-              <div className="flex items-center justify-between gap-4 p-3 sm:p-3.5">
-                <div className="min-w-0">
-                  <p className="text-xs sm:text-sm font-medium text-content">Optional rewarded ads</p>
-                  <p className="text-xs text-content-secondary">
-                    Allows opt-in rewarded ads when you choose to earn extra daily conversions.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={rewardedAdsEnabled}
-                  aria-label="Enable optional rewarded ads"
-                  onClick={() => setRewardedAdsEnabled((prev) => !prev)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-line motion-safe:transition-colors active:opacity-90 ${
-                    rewardedAdsEnabled ? 'bg-brand' : 'bg-surface-muted'
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`inline-block h-4 w-4 rounded-full bg-surface shadow-sm motion-safe:transition-transform ${
-                      rewardedAdsEnabled ? 'translate-x-5' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
             </div>
           )}
 
@@ -191,7 +164,7 @@ export function ConsentBanner() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => commitChoice(analyticsEnabled, rewardedAdsEnabled)}
+                  onClick={() => commitChoice(analyticsEnabled, false)}
                   className="muxaro-btn-primary inline-flex items-center justify-center px-4 py-2 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   Save preferences
@@ -216,7 +189,7 @@ export function ConsentBanner() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => commitChoice(true, true)}
+                  onClick={() => commitChoice(true, false)}
                   className="muxaro-btn-primary inline-flex items-center justify-center px-4 py-2 text-xs sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                 >
                   Accept all

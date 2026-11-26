@@ -4,12 +4,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Link2,
   ClipboardPaste,
+  UploadCloud,
   X,
   ArrowRight,
   Loader2,
   Check,
-  SlidersHorizontal,
-  ChevronDown,
+  Plus,
+  Film,
+  Music,
+  Minimize2,
 } from 'lucide-react';
 
 export type SupportedPlatform =
@@ -31,114 +34,58 @@ export type SmartPreset =
   | '720p'
   | '480p'
   | 'audio'
+  | 'mute'
   | 'desktop-direct'
   | 'best'
   | 'mp3'
   | 'lossless';
 
-export const PRESET_OPTIONS: { id: SmartPreset; label: string; badge: string }[] = [
-  { id: '8k', label: '8K Ultra HD', badge: 'Local Ultra HD' },
-  { id: '4k', label: '4K Ultra HD', badge: '4K Ultra HD' },
-  { id: '2k', label: '2K (1440p)', badge: 'Cloud & Local Ready' },
-  { id: '1080p', label: '1080p FHD', badge: 'Cloud Ready' },
-  { id: '720p', label: '720p HD', badge: 'Cloud Ready' },
-  { id: '480p', label: '480p SD', badge: 'Cloud Ready' },
-  { id: 'audio', label: 'Audio Only', badge: 'MP3 · FLAC' },
-];
-
-export const presetLabels: Record<SmartPreset, string> = {
-  '8k': '8K · Local Ultra HD',
-  '4k': '4K · Ultra HD',
-  '2k': '2K (1440p) · Cloud Ready',
-  '1080p': '1080p · Cloud Ready',
-  '720p': '720p · Cloud Ready',
-  '480p': '480p · Cloud Ready',
-  audio: 'Audio Only · Cloud',
-  'desktop-direct': '8K / 4K · Local Direct',
-  best: '8K / 4K · Local Direct',
-  mp3: 'MP3 Audio · Cloud',
-  lossless: 'Studio FLAC · Cloud',
-};
+export type DownloadIntentMode = 'video' | 'audio' | 'compact';
 
 export interface PlatformConfig {
   id: NonNullable<SupportedPlatform>;
   name: string;
   domainPattern: RegExp;
-  colorClass?: string;
-  hoverColorClass?: string;
-  activeBgClass?: string;
-  activeBorderClass?: string;
 }
 
 export const SUPPORTED_PLATFORMS: PlatformConfig[] = [
-  {
-    id: 'youtube',
-    name: 'YouTube',
-    domainPattern: /youtube\.com|youtu\.be/i,
-  },
-  {
-    id: 'instagram',
-    name: 'Instagram',
-    domainPattern: /instagram\.com/i,
-  },
-  {
-    id: 'x',
-    name: 'X',
-    domainPattern: /twitter\.com|x\.com/i,
-  },
-  {
-    id: 'facebook',
-    name: 'Facebook',
-    domainPattern: /facebook\.com|fb\.watch/i,
-  },
-  {
-    id: 'pinterest',
-    name: 'Pinterest',
-    domainPattern: /pinterest\.com|pin\.it/i,
-  },
-  {
-    id: 'tiktok',
-    name: 'TikTok',
-    domainPattern: /tiktok\.com/i,
-  },
-  {
-    id: 'reddit',
-    name: 'Reddit',
-    domainPattern: /reddit\.com/i,
-  },
-  {
-    id: 'vimeo',
-    name: 'Vimeo',
-    domainPattern: /vimeo\.com/i,
-  },
+  { id: 'youtube', name: 'YouTube', domainPattern: /youtube\.com|youtu\.be/i },
+  { id: 'instagram', name: 'Instagram', domainPattern: /instagram\.com/i },
+  { id: 'x', name: 'X', domainPattern: /twitter\.com|x\.com/i },
+  { id: 'facebook', name: 'Facebook', domainPattern: /facebook\.com|fb\.watch/i },
+  { id: 'pinterest', name: 'Pinterest', domainPattern: /pinterest\.com|pin\.it/i },
+  { id: 'tiktok', name: 'TikTok', domainPattern: /tiktok\.com/i },
+  { id: 'reddit', name: 'Reddit', domainPattern: /reddit\.com|redd\.it/i },
+  { id: 'vimeo', name: 'Vimeo', domainPattern: /vimeo\.com/i },
 ];
 
 export function detectPlatform(url: string): SupportedPlatform {
-  if (!url || typeof url !== 'string') return null;
-  const lower = url.trim().toLowerCase();
-  for (const plat of SUPPORTED_PLATFORMS) {
-    if (plat.domainPattern.test(lower)) {
-      return plat.id;
-    }
+  const clean = url.trim();
+  if (!clean) return null;
+  for (const p of SUPPORTED_PLATFORMS) {
+    if (p.domainPattern.test(clean)) return p.id;
   }
   return null;
 }
 
-// Crisp, lightweight inline SVGs for platforms
-export function PlatformIcon({ platform, className = 'w-4 h-4' }: { platform: SupportedPlatform; className?: string }) {
+export function PlatformIcon({
+  platform,
+  className = 'w-4 h-4',
+}: {
+  platform: SupportedPlatform;
+  className?: string;
+}) {
   switch (platform) {
     case 'youtube':
       return (
         <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.5 12 3.5 12 3.5s-7.505 0-9.377.55a3.016 3.016 0 0 0-2.122 2.136C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.55 9.376.55 9.376.55s7.505 0 9.377-.55a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
         </svg>
       );
     case 'instagram':
       return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-          <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
-          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
-          <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+        <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+          <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
         </svg>
       );
     case 'x':
@@ -187,53 +134,74 @@ interface HeroOmniboxProps {
   onUrlChange: (url: string) => void;
   onSubmit: (url: string, preset: SmartPreset) => void;
   probing: boolean;
+  mode: DownloadIntentMode;
+  onModeChange: (mode: DownloadIntentMode) => void;
   onFocusChange?: (focused: boolean) => void;
+  onFileDropClick?: () => void;
+  uploadingFile?: boolean;
 }
+
+const MODE_PRESET_MAP: Record<DownloadIntentMode, SmartPreset> = {
+  video: '4k',
+  audio: 'audio',
+  compact: '720p',
+};
+
+const INTENT_MODES = [
+  { id: 'video', label: 'Best Video', icon: Film },
+  { id: 'audio', label: 'Audio', icon: Music },
+  { id: 'compact', label: 'Compact', icon: Minimize2 },
+] as const;
 
 export default function HeroOmnibox({
   url,
   onUrlChange,
   onSubmit,
   probing,
+  mode,
+  onModeChange,
   onFocusChange,
+  onFileDropClick,
+  uploadingFile = false,
 }: HeroOmniboxProps) {
   const [detectedPlatform, setDetectedPlatform] = useState<SupportedPlatform>(null);
-  const [activePreset, setActivePreset] = useState<SmartPreset>('1080p');
   const [pastedFeedback, setPastedFeedback] = useState<boolean>(false);
-  const [presetDropdownOpen, setPresetDropdownOpen] = useState<boolean>(false);
+  const [showPlatforms, setShowPlatforms] = useState<boolean>(false);
   const [isMobileWidth, setIsMobileWidth] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  const activePreset = MODE_PRESET_MAP[mode];
 
   useEffect(() => {
-    const checkWidth = () => {
-      setIsMobileWidth(window.innerWidth < 420);
-    };
+    const checkWidth = () => setIsMobileWidth(window.innerWidth < 440);
     checkWidth();
     window.addEventListener('resize', checkWidth);
     return () => window.removeEventListener('resize', checkWidth);
   }, []);
 
-  // Close quality preset dropdown on click outside
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setPresetDropdownOpen(false);
-      }
-    };
-    if (presetDropdownOpen) {
-      document.addEventListener('mousedown', handleOutsideClick);
-      return () => document.removeEventListener('mousedown', handleOutsideClick);
-    }
-  }, [presetDropdownOpen]);
-
-  // Synchronize detected platform with URL changes
   useEffect(() => {
     setDetectedPlatform(detectPlatform(url));
   }, [url]);
 
-  // Global Cmd/Ctrl+V listener
+  useEffect(() => {
+    if (!showPlatforms) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setShowPlatforms(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowPlatforms(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showPlatforms]);
+
   useEffect(() => {
     const handleGlobalPaste = (e: ClipboardEvent) => {
       const activeEl = document.activeElement;
@@ -264,7 +232,6 @@ export default function HeroOmnibox({
     return () => window.removeEventListener('paste', handleGlobalPaste);
   }, [onUrlChange, onSubmit, activePreset]);
 
-  // Handle Clipboard API Paste Click
   const handlePasteClick = async () => {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
@@ -282,9 +249,7 @@ export default function HeroOmnibox({
           return;
         }
       }
-    } catch {
-      // Focus input if clipboard permission denied
-    }
+    } catch {}
     inputRef.current?.focus();
   };
 
@@ -297,196 +262,184 @@ export default function HeroOmnibox({
   const handleSubmitForm = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = url.trim();
-    if (trimmed) {
-      onSubmit(trimmed, activePreset);
+    if (!trimmed) {
+      inputRef.current?.focus();
+      return;
     }
+    const looksLikeUrl =
+      /^https?:\/\//i.test(trimmed) ||
+      (/^[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#].*)?$/i.test(trimmed) && !/\s/.test(trimmed));
+    if (!looksLikeUrl && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('muxaro:open-command', { detail: { query: trimmed } }));
+      return;
+    }
+    onSubmit(trimmed, activePreset);
   };
 
   return (
-    <div className="w-full space-y-4">
-      {/* SSR-first Fixed Shell Container: Exactly min-h-[76px] to guarantee CLS = 0.00 */}
-      <div
-        ref={containerRef}
-        className="w-full min-h-[76px] rounded-2xl bg-surface border border-line p-2 sm:p-2.5 shadow-card transition-colors duration-150 flex flex-col justify-center relative focus-within:border-brand-violet focus-within:ring-2 focus-within:ring-brand-violet/20"
-      >
-        <form onSubmit={handleSubmitForm} className="flex items-center gap-2 w-full">
-          {/* Left: Platform badge or Link Icon */}
+    <div className="w-full max-w-2xl mx-auto space-y-2.5">
+      {/* Main Command Bar */}
+      <div className="w-full min-h-[54px] rounded-2xl liquid-glass px-2.5 py-1.5 flex flex-col justify-center relative focus-within:border-line-focus focus-within:ring-2 focus-within:ring-focus/15">
+        <form onSubmit={handleSubmitForm} className="flex items-center gap-1.5 w-full">
           <div className="flex items-center pl-1.5 shrink-0">
-            {detectedPlatform ? (
+            {probing ? (
+              <Loader2 className="w-4 h-4 text-brand motion-safe:animate-spin" aria-hidden="true" />
+            ) : detectedPlatform ? (
               <span
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-content text-base border border-content transition-colors duration-150 shadow-xs"
-                title={`Detected platform: ${detectedPlatform}`}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-xs font-medium bg-surface-elevated border border-line text-content"
+                title={detectedPlatform}
               >
-                <PlatformIcon platform={detectedPlatform} className="w-3.5 h-3.5 shrink-0 text-inherit" />
+                <PlatformIcon platform={detectedPlatform} className="w-3.5 h-3.5 shrink-0" />
                 <span className="capitalize hidden xs:inline">{detectedPlatform}</span>
               </span>
             ) : (
-              <span className="p-1.5 text-content-secondary" aria-hidden="true">
+              <span className="p-1 text-content-secondary" aria-hidden="true">
                 <Link2 className="w-4 h-4" />
               </span>
             )}
           </div>
 
-          {/* Center Input with Responsive Placeholder & Graceful Ellipsis */}
           <input
             ref={inputRef}
             type="text"
             inputMode="url"
+            maxLength={512}
             value={url}
             onChange={(e) => onUrlChange(e.target.value)}
             onFocus={() => onFocusChange?.(true)}
             onBlur={() => onFocusChange?.(false)}
             placeholder={
-              isMobileWidth
-                ? 'Paste media or playlist link…'
-                : 'Paste video, audio, or playlist URL…'
+              isMobileWidth ? 'Paste link or drop any file…' : 'Paste video link or drop MP4, PDF, MP3, DOCX…'
             }
-            aria-label="Media URL input"
-            className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary placeholder:truncate truncate text-xs sm:text-sm md:text-base font-sans focus:outline-none focus:ring-0 px-1.5 sm:px-2 py-1 select-text"
+            aria-label="Media link or file input"
+            className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary placeholder:truncate truncate text-sm font-sans focus:outline-none focus:ring-0 px-1.5 py-1.5 select-text"
           />
 
-          {/* Right Action Cluster */}
-          <div className="flex items-center gap-1.5 shrink-0 pr-1">
-            {/* Clear Button */}
+          <div className="flex items-center gap-1 shrink-0">
             {url.trim().length > 0 && (
               <button
                 type="button"
                 onClick={handleClear}
                 aria-label="Clear URL input"
-                title="Clear"
-                className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-elevated transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet"
+                className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-elevated transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >
                 <X className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
 
-            {/* Quality Preset Dropdown */}
-            <div className="relative" ref={dropdownRef}>
+            {onFileDropClick && (
               <button
                 type="button"
-                onClick={() => setPresetDropdownOpen((prev) => !prev)}
-                aria-expanded={presetDropdownOpen}
-                aria-haspopup="menu"
-                aria-label="Quality preset options"
-                title="Choose download quality preset"
-                className="hidden sm:inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand-violet transition-colors duration-150 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
+                onClick={onFileDropClick}
+                disabled={uploadingFile}
+                aria-label="Choose local media file"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content hover:border-line-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus whitespace-nowrap disabled:opacity-50"
               >
-                <SlidersHorizontal className="w-3.5 h-3.5 text-brand-violet shrink-0" aria-hidden="true" />
-                <span className="text-[11px] font-semibold">{presetLabels[activePreset]}</span>
-                <ChevronDown className={`w-3 h-3 text-content-secondary shrink-0 transition-transform ${presetDropdownOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                <UploadCloud className="w-3.5 h-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Drop file</span>
               </button>
+            )}
 
-              {presetDropdownOpen && (
-                <div
-                  role="menu"
-                  aria-label="Quality preset options"
-                  className="absolute right-0 mt-2 w-72 rounded-xl border border-line bg-surface shadow-lg p-1.5 z-50 text-xs"
-                >
-                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-content-secondary border-b border-line mb-1 flex items-center justify-between">
-                    <span>Quality Preset</span>
-                    <span className="font-mono text-[9px] text-content-muted">Cloud & Local</span>
-                  </div>
-                  {PRESET_OPTIONS.map((opt) => {
-                    const isSelected = activePreset === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setActivePreset(opt.id);
-                          setPresetDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors duration-150 ${
-                          isSelected
-                            ? 'bg-interactive text-brand-violet dark:text-content font-semibold'
-                            : 'text-content hover:bg-surface-elevated'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="truncate">{opt.label}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary shrink-0">
-                            {opt.badge}
-                          </span>
-                        </div>
-                        {isSelected && <Check className="w-3.5 h-3.5 text-brand-violet shrink-0 ml-2" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Paste Button (Clipboard API) */}
             <button
               type="button"
               onClick={handlePasteClick}
               aria-label="Paste URL from clipboard"
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand-violet transition-colors duration-150 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-violet whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content hover:border-line-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus whitespace-nowrap"
             >
               {pastedFeedback ? (
-                <Check className="w-3.5 h-3.5 text-emerald-500" aria-hidden="true" />
+                <Check className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
               ) : (
-                <ClipboardPaste className="w-3.5 h-3.5 text-brand-violet" aria-hidden="true" />
+                <ClipboardPaste className="w-3.5 h-3.5" aria-hidden="true" />
               )}
-              <span className="hidden xs:inline">{pastedFeedback ? 'Pasted!' : 'Paste'}</span>
+              <span className="hidden xs:inline">{pastedFeedback ? 'Pasted' : 'Paste'}</span>
             </button>
 
-            {/* Primary Submit Action: High-Contrast Solid Action Button (Zero Sparkles) */}
+            {/* Primary CTA: Highest Visual Hierarchy Weight on Screen */}
             <button
               type="submit"
-              disabled={probing || !url.trim()}
-              aria-label={probing ? 'Analyzing media link' : 'Analyze media link'}
-              className={`px-4 sm:px-5 py-2 min-h-[40px] rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 whitespace-nowrap active:translate-y-px transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content focus-visible:ring-offset-2 focus-visible:ring-offset-surface select-none ${
-                url.trim() && !probing
-                  ? 'bg-content text-base hover:opacity-90 cursor-pointer shadow-sm'
-                  : 'bg-surface-elevated text-content-secondary/50 border border-line cursor-not-allowed opacity-60'
-              }`}
+              disabled={probing}
+              aria-label={probing ? 'Analyzing link' : 'Analyze link'}
+              className="px-4 py-1.5 min-h-[36px] rounded-lg text-xs font-semibold bg-brand text-brand-fg hover:bg-brand-hover flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60"
             >
-              <span>{probing ? 'Analyzing…' : 'Analyze'}</span>
-              {probing ? (
-                <Loader2 className="w-4 h-4 motion-safe:animate-spin shrink-0" aria-hidden="true" />
-              ) : (
-                <ArrowRight className="w-4 h-4 shrink-0" aria-hidden="true" />
-              )}
+              <span>{probing ? 'Wait' : 'Go'}</span>
+              <ArrowRight className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
             </button>
           </div>
         </form>
       </div>
 
-      {/* Sleek Minimalist Monochrome Platform Strip */}
-      <div
-        role="region"
-        aria-label="Supported media platforms"
-        className="w-full flex items-center justify-center py-1"
-      >
-        <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 text-xs max-w-full">
-          <span className="text-[11px] font-medium text-content-secondary shrink-0 mr-1 select-none">
-            Supported:
-          </span>
-          {SUPPORTED_PLATFORMS.map((platform) => {
-            const isDetected = detectedPlatform === platform.id;
+      {/* MUXARO Output Intent Modes (Soft Active Tint + Strict Monochrome Icons) + Supported Services */}
+      <div className="flex flex-wrap items-center justify-between gap-2 relative" ref={popoverRef}>
+        <div
+          role="listbox"
+          aria-label="Output mode"
+          className="inline-flex items-center rounded-xl border border-line bg-surface p-0.5"
+        >
+          {INTENT_MODES.map((item) => {
+            const Icon = item.icon;
+            const selected = mode === item.id;
             return (
-              <span
-                key={platform.id}
-                title={`${platform.name} supported (Lossless stream copy)`}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-colors duration-150 select-none shrink-0 ${
-                  isDetected
-                    ? 'bg-content text-base border-content font-semibold shadow-xs'
-                    : 'bg-surface/60 border-line text-content-secondary hover:text-content hover:border-line-hover font-normal'
+              <button
+                key={item.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => onModeChange(item.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[9px] text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus whitespace-nowrap ${
+                  selected
+                    ? 'bg-brand/12 border-brand/30 text-brand font-semibold'
+                    : 'border-transparent text-content-secondary hover:text-content'
                 }`}
               >
-                <PlatformIcon
-                  platform={platform.id}
-                  className={`w-3 h-3 shrink-0 ${
-                    isDetected ? 'text-inherit' : 'text-content-secondary'
+                <Icon
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    selected ? 'text-brand' : 'text-content-secondary'
                   }`}
+                  aria-hidden={true}
                 />
-                <span className="leading-none">{platform.name}</span>
-              </span>
+                <span>{item.label}</span>
+              </button>
             );
           })}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowPlatforms((v) => !v)}
+          aria-expanded={showPlatforms}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-line bg-surface hover:border-line-hover text-xs font-medium text-content-secondary hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus whitespace-nowrap"
+        >
+          <Plus
+            className={`w-3.5 h-3.5 transition-transform duration-150 ${
+              showPlatforms ? 'rotate-45 text-brand' : ''
+            }`}
+            aria-hidden="true"
+          />
+          <span>Supported services</span>
+        </button>
+
+        {showPlatforms && (
+          <div
+            role="dialog"
+            aria-label="Supported video platforms"
+            className="absolute right-0 top-full mt-2 z-30 w-full sm:w-80 rounded-xl border border-line bg-surface p-3.5 shadow-card"
+          >
+            <div className="grid grid-cols-2 gap-1.5 mb-2.5">
+              {SUPPORTED_PLATFORMS.map((platform) => (
+                <div
+                  key={platform.id}
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-elevated border border-line-subtle text-xs text-content"
+                >
+                  <PlatformIcon platform={platform.id} className="w-3.5 h-3.5 text-content-secondary shrink-0" />
+                  <span>{platform.name}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-content-secondary leading-snug">
+              Supports direct media URLs and local uploads up to 2 GB, plus instant browser-local PDF and audio routing.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

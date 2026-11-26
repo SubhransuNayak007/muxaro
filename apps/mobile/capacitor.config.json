@@ -1,0 +1,20 @@
+{
+  "appId": "app.muxaro.studio",
+  "appName": "MUXARO",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 600,
+      "backgroundColor": "#0B0C0F",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#0B0C0F"
+    }
+  }
+}

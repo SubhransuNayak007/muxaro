@@ -173,8 +173,13 @@ export default function AntigravityOrbitalField() {
     };
   }, [mounted, shouldAnimateAurora]);
 
+  if (!shouldAnimateAurora) {
+    return null;
+  }
+
   return (
     <div
+      data-eco-hide="true"
       className="absolute inset-0 overflow-hidden pointer-events-none z-0"
       aria-hidden="true"
     >

@@ -29,18 +29,47 @@ import {
   X,
   Layers,
   ArrowRight,
+  Search,
 } from 'lucide-react';
 import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
+import TurnstileChallenge from '@/components/TurnstileChallenge';
+import CommandPreviewDrawer from '@/components/tools/CommandPreviewDrawer';
 import { useEcoStore } from '@/lib/eco-store';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
 import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 
-export type VideoContainer = 'mp4' | 'mkv' | 'webm' | 'mov';
+export type VideoContainer = string;
 export type VideoCodec = 'copy' | 'h264' | 'hevc' | 'vp9' | 'av1';
 export type Resolution = 'source' | '4320p' | '2160p' | '1440p' | '1080p' | '720p' | '480p';
+
+interface FormatCatalogItem {
+  ext: string;
+  name: string;
+  category: string;
+  type: 'video' | 'audio' | 'image';
+  streamCopy: boolean;
+}
+
+const FALLBACK_FORMATS: FormatCatalogItem[] = [
+  { ext: 'mp4', name: 'MP4 (MPEG-4 Part 14)', category: 'Popular Video', type: 'video', streamCopy: true },
+  { ext: 'mkv', name: 'MKV (Matroska)', category: 'Popular Video', type: 'video', streamCopy: true },
+  { ext: 'webm', name: 'WebM (VP9 / Opus)', category: 'Popular Video', type: 'video', streamCopy: true },
+  { ext: 'mov', name: 'MOV (QuickTime)', category: 'Popular Video', type: 'video', streamCopy: true },
+  { ext: 'avi', name: 'AVI (Audio Video Interleave)', category: 'Popular Video', type: 'video', streamCopy: true },
+  { ext: 'flv', name: 'FLV (Flash Video)', category: 'Popular Video', type: 'video', streamCopy: false },
+  { ext: 'wmv', name: 'WMV (Windows Media)', category: 'Popular Video', type: 'video', streamCopy: false },
+  { ext: 'ts', name: 'MPEG-TS', category: 'Broadcast & Streaming', type: 'video', streamCopy: true },
+  { ext: 'gif', name: 'GIF (Animated)', category: 'Animated & Visual', type: 'video', streamCopy: false },
+  { ext: 'mp3', name: 'MP3 Audio', category: 'Popular Audio', type: 'audio', streamCopy: false },
+  { ext: 'flac', name: 'FLAC Lossless', category: 'Lossless & Studio Audio', type: 'audio', streamCopy: false },
+  { ext: 'wav', name: 'WAV PCM', category: 'Lossless & Studio Audio', type: 'audio', streamCopy: false },
+  { ext: 'm4a', name: 'M4A AAC', category: 'Popular Audio', type: 'audio', streamCopy: true },
+  { ext: 'opus', name: 'Opus Audio', category: 'Popular Audio', type: 'audio', streamCopy: true },
+  { ext: 'ogg', name: 'OGG Vorbis', category: 'Popular Audio', type: 'audio', streamCopy: false },
+];
 
 // Keep proxied multipart chunks comfortably under Vercel's 4.5 MB request body ceiling
 const SAFE_CHUNK_SIZE_BYTES = Math.floor(3.5 * 1024 * 1024);
@@ -63,10 +92,75 @@ export function ConvertTool() {
 
   // Target Settings
   const [targetContainer, setTargetContainer] = useState<VideoContainer>('mp4');
+  const [formatCatalog, setFormatCatalog] = useState<FormatCatalogItem[]>(FALLBACK_FORMATS);
+  const [formatSearch, setFormatSearch] = useState<string>('');
+  const [formatCategory, setFormatCategory] = useState<string>('All');
   const [videoCodec, setVideoCodec] = useState<VideoCodec>('copy');
   const [resolution, setResolution] = useState<Resolution>('source');
   const [qualityPreset, setQualityPreset] = useState<'fast' | 'balanced' | 'high'>('balanced');
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams(window.location.search);
+    const preset = (sp.get('preset') || '').toLowerCase();
+    if (preset === 'mkv-to-mp4' || preset === 'remux') {
+      setInputMode('file');
+      setTargetContainer('mp4');
+      setVideoCodec('copy');
+    } else if (preset === 'whatsapp-mp4') {
+      setTargetContainer('mp4');
+      setVideoCodec('h264');
+      setResolution('720p');
+    } else if (preset === 'prores' || preset === 'edit-ready') {
+      setTargetContainer('mov');
+      setShowAdvanced(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const hasCustomWorker =
+      typeof window !== 'undefined' && Boolean(window.localStorage.getItem('muxaro_custom_worker_url')?.trim());
+    const hasPublicApi = Boolean(process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_VERIFIED_API_URL);
+    if (!hasCustomWorker && !hasPublicApi) return;
+
+    let active = true;
+    const base = getApiBaseUrl().replace(/\/+$/, '');
+    fetch(`${base}/formats`, { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (active && json?.data && Array.isArray(json.data) && json.data.length > 0) {
+          setFormatCatalog(json.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const formatCategories = useMemo(() => {
+    const cats = new Set<string>(['All']);
+    for (const item of formatCatalog) cats.add(item.category);
+    return Array.from(cats);
+  }, [formatCatalog]);
+
+  const filteredFormats = useMemo(() => {
+    const q = formatSearch.trim().toLowerCase();
+    return formatCatalog.filter((item) => {
+      if (formatCategory !== 'All' && item.category !== formatCategory) return false;
+      if (!q) return true;
+      return (
+        item.ext.toLowerCase().includes(q) ||
+        item.name.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q)
+      );
+    });
+  }, [formatCatalog, formatCategory, formatSearch]);
+
+  const selectedFormatSpec = useMemo(() => {
+    return formatCatalog.find((f) => f.ext === targetContainer) || FALLBACK_FORMATS[0];
+  }, [formatCatalog, targetContainer]);
 
   // Local Upload State
   const [uploader, setUploader] = useState<ResumableMultipartUploader | null>(null);
@@ -83,6 +177,7 @@ export function ConvertTool() {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string>('');
   const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
 
   const jobStream = useJobStream(submittedJobId);
@@ -105,7 +200,7 @@ export function ConvertTool() {
 
   // Stream Copy / Lossless Remux Feasibility Detection
   const remuxFeasibility = useMemo(() => {
-    if (targetContainer === 'mp4' || targetContainer === 'mkv' || targetContainer === 'mov') {
+    if (selectedFormatSpec.streamCopy && selectedFormatSpec.type === 'video' && targetContainer !== 'webm') {
       return {
         feasible: true,
         reason: 'Input container streams are natively packable without re-encoding.',
@@ -121,8 +216,13 @@ export function ConvertTool() {
         lossless: false,
       };
     }
-    return { feasible: false, reason: 'Re-encode required for target format', speedMultiplier: '1x', lossless: false };
-  }, [targetContainer]);
+    return {
+      feasible: false,
+      reason: `Converting to .${targetContainer.toUpperCase()} (${selectedFormatSpec.name}) via FFmpeg.`,
+      speedMultiplier: 'FFmpeg Transcode',
+      lossless: false,
+    };
+  }, [targetContainer, selectedFormatSpec]);
 
   // Keep codec in sync with Eco mode if remux is feasible
   useEffect(() => {
@@ -222,10 +322,13 @@ export function ConvertTool() {
     setLocalProgress({ ratio: 0, percent: 0, message: 'Initializing FFmpeg Web Worker…' });
     try {
       const client = FFmpegWorkerClient.getInstance();
+      const wasmContainer = ['mp4', 'mkv', 'webm', 'mov'].includes(targetContainer)
+        ? (targetContainer as 'mp4' | 'mkv' | 'webm' | 'mov')
+        : 'mp4';
       const result = await client.convert({
         file: selectedFile,
         fileName: selectedFile.name,
-        targetContainer,
+        targetContainer: wasmContainer,
         streamCopy: videoCodec === 'copy',
         videoCodec: videoCodec === 'copy' ? undefined : videoCodec,
         onProgress: (prog) => setLocalProgress(prog),
@@ -259,14 +362,19 @@ export function ConvertTool() {
 
     setIsSubmitting(true);
     try {
-      const isCopy = videoCodec === 'copy';
-      const operation = isCopy ? 'REMUX_STREAM_COPY' : 'TRANSCODE_VIDEO';
+      const isCopy = videoCodec === 'copy' && selectedFormatSpec.streamCopy;
+      const isAudioTarget = selectedFormatSpec.type === 'audio';
+      const operation = isAudioTarget
+        ? 'EXTRACT_AUDIO'
+        : isCopy
+        ? 'REMUX_STREAM_COPY'
+        : 'CONVERT_FORMAT';
 
       const job = await api.createJob({
         sourceUrl: inputMode === 'url' ? normalizeMediaUrl(urlInput) : undefined,
         mediaAssetId: inputMode === 'file' ? uploadedAssetId! : undefined,
         uploadSessionId: inputMode === 'file' ? uploadedAssetId! : undefined,
-        jobType: 'transcode_video',
+        jobType: isAudioTarget ? 'extract_audio' : 'transcode_video',
         operation,
         targetFormat: targetContainer,
         targetVideoCodec: videoCodec === 'copy' ? undefined : videoCodec,
@@ -275,7 +383,8 @@ export function ConvertTool() {
         ecoMode: ecoSettings.enabled,
         qualityPreset,
         title: inputMode === 'file' && selectedFile ? selectedFile.name : undefined,
-        idempotencyKey: `conv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        captchaToken: captchaToken || undefined,
+        idempotencyKey: generateSecureId('conv_'),
       });
 
       setSubmittedJobId(job.jobId || job.id);
@@ -310,9 +419,11 @@ export function ConvertTool() {
   };
 
   const jobDownloadHref = submittedJobId
-    ? jobStream.downloadUrl ||
-      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        jobStream.downloadUrl ||
+          `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+      )
+    : undefined;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -367,7 +478,7 @@ export function ConvertTool() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={localResult.url}
+              href={sanitizeSafeNavigationUrl(localResult.url) ?? '#'}
               download={localResult.fileName}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
             >
@@ -504,18 +615,36 @@ export function ConvertTool() {
                             <button
                               type="button"
                               onClick={startUpload}
-                              className="px-4 py-1.5 rounded-lg bg-[var(--muxaro-indigo)] text-white text-xs font-semibold hover:opacity-95"
+                              className={`px-4 py-1.5 rounded-lg text-xs font-semibold ${
+                                remuxFeasibility.feasible &&
+                                videoCodec === 'copy' &&
+                                selectedFile.size <= 350 * 1024 * 1024
+                                  ? 'border border-[var(--muxaro-border)] text-[var(--muxaro-text-secondary)] hover:bg-[var(--muxaro-bg-elevated)]'
+                                  : 'bg-[var(--muxaro-indigo)] text-white hover:opacity-95'
+                              }`}
                             >
-                              Upload File
+                              Upload to Cloud
                             </button>
                           )}
                           <button
                             type="button"
                             onClick={runLocalFfmpegConvert}
                             disabled={isLocalProcessing}
-                            className="px-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] text-xs font-semibold text-[var(--muxaro-text-primary)] hover:bg-[var(--muxaro-bg-elevated)] disabled:opacity-50"
+                            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-50 ${
+                              remuxFeasibility.feasible &&
+                              videoCodec === 'copy' &&
+                              selectedFile.size <= 350 * 1024 * 1024
+                                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                : 'border border-[var(--muxaro-border)] text-[var(--muxaro-text-primary)] hover:bg-[var(--muxaro-bg-elevated)]'
+                            }`}
                           >
-                            {isLocalProcessing ? 'Processing Locally…' : 'Process in Browser'}
+                            {isLocalProcessing
+                              ? 'Remuxing Locally…'
+                              : remuxFeasibility.feasible &&
+                                videoCodec === 'copy' &&
+                                selectedFile.size <= 350 * 1024 * 1024
+                              ? 'Instant Local Remux'
+                              : 'Process in Browser'}
                           </button>
                           <button
                             type="button"
@@ -589,24 +718,61 @@ export function ConvertTool() {
               Output Container & Quality
             </h2>
 
-            {/* Target Container Selection */}
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--muxaro-text-secondary)]">
-                Target Container
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {(['mp4', 'mkv', 'webm', 'mov'] as VideoContainer[]).map((fmt) => (
+            {/* Target Container Selection (100+ Video, Audio & Visual Formats) */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-xs font-semibold text-[var(--muxaro-text-secondary)]">
+                  Target format ({formatCatalog.length}+ supported formats) — Selected:{' '}
+                  <span className="font-mono text-[var(--muxaro-text-primary)] uppercase">
+                    .{targetContainer}
+                  </span>
+                </label>
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-[var(--muxaro-text-tertiary)] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={formatSearch}
+                    onChange={(e) => setFormatSearch(e.target.value)}
+                    placeholder="Search 100+ formats (mp4, flac, gif…)"
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-xs text-[var(--muxaro-text-primary)] focus:outline-none focus:border-[var(--muxaro-border-focus)]"
+                  />
+                </div>
+              </div>
+
+              {/* Category Filter Pills */}
+              <div className="flex flex-wrap gap-1.5">
+                {formatCategories.map((cat) => (
                   <button
-                    key={fmt}
+                    key={cat}
                     type="button"
-                    onClick={() => setTargetContainer(fmt)}
-                    className={`py-3 px-4 rounded-xl border text-sm font-semibold uppercase text-center transition-colors duration-150 ${
-                      targetContainer === fmt
+                    onClick={() => setFormatCategory(cat)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      formatCategory === cat
+                        ? 'bg-[var(--muxaro-text-primary)] text-[var(--muxaro-bg-base)] border-[var(--muxaro-text-primary)]'
+                        : 'bg-[var(--muxaro-bg-base)] text-[var(--muxaro-text-secondary)] border-[var(--muxaro-border)] hover:border-[var(--muxaro-border-focus)]'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Scrollable Format Grid */}
+              <div className="max-h-60 overflow-y-auto pr-1 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                {filteredFormats.map((fmt) => (
+                  <button
+                    key={fmt.ext}
+                    type="button"
+                    onClick={() => setTargetContainer(fmt.ext)}
+                    title={fmt.name}
+                    className={`py-2 px-2.5 rounded-xl border text-left transition-colors duration-150 ${
+                      targetContainer === fmt.ext
                         ? 'border-[var(--muxaro-indigo)] bg-[var(--muxaro-tag-pill-bg)] text-[var(--muxaro-indigo)]'
                         : 'border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] text-[var(--muxaro-text-secondary)] hover:border-[var(--muxaro-border-focus)]'
                     }`}
                   >
-                    .{fmt}
+                    <div className="text-xs font-bold uppercase font-mono">.{fmt.ext}</div>
+                    <div className="text-[10px] opacity-75 truncate">{fmt.name}</div>
                   </button>
                 ))}
               </div>
@@ -628,7 +794,7 @@ export function ConvertTool() {
                 )}
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider">
+                    <span className="text-xs font-bold">
                       {remuxFeasibility.feasible
                         ? 'Lossless Stream Copy (Remux) Feasible'
                         : 'Full Transcode Mode'}
@@ -753,10 +919,77 @@ export function ConvertTool() {
             </div>
           )}
 
+          {/* Quick 1-Click Intent Presets */}
+          <div className="muxaro-card p-5 bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border)] rounded-2xl space-y-3">
+            <span className="text-xs font-semibold text-[var(--muxaro-text-secondary)]">
+              1-Click Workflow Presets
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetContainer('mov');
+                  setVideoCodec('h264');
+                  setResolution('source');
+                  setQualityPreset('high');
+                }}
+                className="p-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] hover:bg-[var(--muxaro-bg-elevated)] text-left transition-colors"
+              >
+                <div className="text-xs font-bold text-[var(--muxaro-text-primary)]">Edit-Ready (Premiere / DaVinci)</div>
+                <div className="text-[11px] text-[var(--muxaro-text-secondary)] mt-0.5">High-bitrate MOV · Source resolution</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetContainer('mp4');
+                  setVideoCodec('h264');
+                  setResolution('1080p');
+                  setQualityPreset('balanced');
+                }}
+                className="p-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] hover:bg-[var(--muxaro-bg-elevated)] text-left transition-colors"
+              >
+                <div className="text-xs font-bold text-[var(--muxaro-text-primary)]">Universal WhatsApp / iOS MP4</div>
+                <div className="text-[11px] text-[var(--muxaro-text-secondary)] mt-0.5">H.264 + AAC · Plays on every phone</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetContainer('mp4');
+                  setVideoCodec('copy');
+                  setResolution('source');
+                }}
+                className="p-3 rounded-xl border border-[var(--muxaro-border)] bg-[var(--muxaro-bg-base)] hover:bg-[var(--muxaro-bg-elevated)] text-left transition-colors"
+              >
+                <div className="text-xs font-bold text-[var(--muxaro-text-primary)]">Instant Remux (MKV → MP4)</div>
+                <div className="text-[11px] text-[var(--muxaro-text-secondary)] mt-0.5">Stream copy in ~1s · zero quality loss</div>
+              </button>
+            </div>
+          </div>
+
+          <CommandPreviewDrawer
+            command={`ffmpeg -i input.mkv -c:v ${videoCodec === 'copy' ? 'copy' : videoCodec} ${resolution !== 'source' ? `-vf scale=-2:${resolution.replace('p', '')} ` : ''}-c:a ${videoCodec === 'copy' ? 'copy' : 'aac'} output.${targetContainer}`}
+            instantBadge={videoCodec === 'copy'}
+          />
+
+          <TurnstileChallenge
+            onVerify={(tok) => {
+              setCaptchaToken(tok);
+              setErrorMessage((prev) =>
+                prev && /verification|captcha/i.test(prev) ? null : prev
+              );
+            }}
+            onReset={() => setCaptchaToken('')}
+          />
+
           {/* Submit Action Button */}
           <button
             type="submit"
-            disabled={isSubmitting || isLocalProcessing || (inputMode === 'file' && !uploadedAssetId)}
+            disabled={
+              isSubmitting ||
+              isLocalProcessing ||
+              !captchaToken ||
+              (inputMode === 'file' && !uploadedAssetId)
+            }
             className="w-full py-3.5 px-6 rounded-xl bg-[var(--muxaro-indigo)] text-white font-semibold text-sm shadow-[var(--muxaro-shadow-btn)] hover:shadow-[var(--muxaro-shadow-btn-hover)] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--muxaro-border-focus)] transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isSubmitting ? (
@@ -788,7 +1021,7 @@ export function ConvertTool() {
             </div>
 
             <span
-              className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+              className={`px-3 py-1 rounded-full text-xs font-semibold ${
                 jobStream.status === 'READY'
                   ? 'bg-emerald-500/15 text-emerald-600'
                   : jobStream.status === 'FAILED'
@@ -807,7 +1040,7 @@ export function ConvertTool() {
                 {jobStream.stageMessage}
               </span>
               <span className="font-mono text-[var(--muxaro-text-secondary)]">
-                {jobStream.progress}% • Speed: {jobStream.speed} • ETA: {jobStream.etaSeconds}s
+                {jobStream.progress}% | Speed: {jobStream.speed} | ETA: {jobStream.etaSeconds}s
               </span>
             </div>
 

@@ -1084,68 +1084,16 @@ function EmptyState() {
   );
 }
 
-// Honest Quota Pill (renders ONLY when real API quota data is loaded)
-function QuotaPill({ quota }: { quota: QuotaStatus | null }) {
-  if (!quota) return null;
-
-  const limit = quota.individualVideosLimit;
-  const remaining = quota.individualVideosRemaining;
-  if (
-    typeof limit !== 'number' ||
-    !Number.isFinite(limit) ||
-    limit <= 0 ||
-    typeof remaining !== 'number' ||
-    !Number.isFinite(remaining)
-  ) {
-    return null;
-  }
-
-  const safeRemaining = Math.max(0, remaining);
-  const pct = Math.round((safeRemaining / limit) * 100);
-  const color =
-    pct > 50
-      ? 'var(--muxaro-success)'
-      : pct > 20
-      ? 'var(--muxaro-warning)'
-      : 'var(--muxaro-error)';
-
-  return (
-    <Link
-      href="/credits"
-      className="inline-flex items-center gap-2 px-3 py-2 whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus active:scale-[0.98]"
-      style={{
-        backgroundColor: 'var(--muxaro-bg-surface)',
-        border: '1px solid var(--muxaro-border)',
-        borderRadius: 'var(--muxaro-radius-sm)',
-        boxShadow: 'var(--muxaro-shadow-sm)',
-        textDecoration: 'none',
-      }}
-    >
-      <Clock className="w-3.5 h-3.5 shrink-0" style={{ color }} aria-hidden="true" />
-      <span
-        className="text-xs font-medium"
-        style={{ color: 'var(--muxaro-text-primary)' }}
-      >
-        <span className="mono-metric font-semibold" style={{ color }}>
-          {safeRemaining}
-        </span>
-        <span
-          className="mono-metric"
-          style={{ color: 'var(--muxaro-text-tertiary)' }}
-        >
-          /{limit}
-        </span>{' '}
-        daily uses
-      </span>
-    </Link>
-  );
+// Quota UI removed (zero credit gates across MUXARO)
+function QuotaPill(_props: { quota: QuotaStatus | null }) {
+  return null;
 }
 
 // Main Batch-Aware My Downloads Page
 export default function DashboardPage() {
   const [history, setHistory] = useState<ProcessingJob[]>([]);
   const [batches, setBatches] = useState<MediaBatch[]>([]);
-  const [quota, setQuota] = useState<QuotaStatus | null>(null);
+  const [quota] = useState<QuotaStatus | null>(null);
   const [selectedJob, setSelectedJob] = useState<ProcessingJob | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1211,19 +1159,11 @@ export default function DashboardPage() {
   );
 
   const fetchQuota = useCallback(async () => {
-    try {
-      const quotaResult = await api.getQuota();
-      if (quotaResult && typeof quotaResult.individualVideosLimit === 'number') {
-        setQuota(quotaResult);
-      }
-    } catch {
-      // Omit quota pill silently if unavailable; never invent numbers
-    }
+    // Credit/quota polling removed for instant workspace load
   }, []);
 
   useEffect(() => {
     fetchWorkspaceData('initial');
-    fetchQuota();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

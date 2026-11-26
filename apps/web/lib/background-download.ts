@@ -1,3 +1,5 @@
+import { generateSecureId } from './url-utils';
+
 export const AUTO_DOWNLOAD_STORAGE_KEY = 'muxaro-auto-download';
 
 export interface BackgroundDownloadCapabilities {
@@ -277,7 +279,7 @@ let isDirectBridgeVerified = false;
 export function pingMuxaroDirect(): void {
   if (typeof window === 'undefined') return;
   try {
-    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const nonce = generateSecureId('nonce_');
     const origin =
       window.location.origin && window.location.origin !== 'null'
         ? window.location.origin
@@ -502,7 +504,7 @@ export function extractMediaViaDirectBridge(
   }
 
   return new Promise((resolve) => {
-    const requestId = `ext_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = generateSecureId('ext_');
     const targetOrigin =
       window.location.origin && window.location.origin !== 'null'
         ? window.location.origin

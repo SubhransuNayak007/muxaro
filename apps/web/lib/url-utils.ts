@@ -98,14 +98,61 @@ export function detectPlatform(rawUrl: string): { name: string; icon: 'youtube' 
   try {
     const parsed = new URL(normalizeMediaUrl(rawUrl) || rawUrl);
     const host = parsed.hostname.toLowerCase();
-    if (host.includes('youtube.com') || host.includes('youtu.be')) {
+    if (
+      host === 'youtube.com' ||
+      host.endsWith('.youtube.com') ||
+      host === 'youtu.be' ||
+      host.endsWith('.youtu.be')
+    ) {
       return { name: 'YouTube', icon: 'youtube' };
     }
-    if (host.includes('vimeo.com')) {
+    if (host === 'vimeo.com' || host.endsWith('.vimeo.com')) {
       return { name: 'Vimeo', icon: 'vimeo' };
     }
     return { name: parsed.hostname.replace(/^www\./i, ''), icon: 'generic' };
   } catch {
     return { name: 'Media Source', icon: 'generic' };
   }
+}
+
+/**
+ * Validates and sanitizes URLs passed to `<a href>` or programmatic browser downloads,
+ * allowing only http:, https:, blob:, or safe root-relative paths (rejecting javascript:/data:/vbscript:).
+ */
+export function sanitizeSafeNavigationUrl(rawUrl: unknown): string | undefined {
+  if (typeof rawUrl !== 'string') return undefined;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return undefined;
+
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'blob:') {
+      return parsed.href;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Generates a cryptographically strong identifier for nonces, client IDs, and idempotency keys.
+ */
+export function generateSecureId(prefix = ''): string {
+  let token = '';
+  const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    token = cryptoApi.randomUUID().replace(/-/g, '').slice(0, 16);
+  } else if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    const bytes = new Uint8Array(12);
+    cryptoApi.getRandomValues(bytes);
+    token = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  } else {
+    token = `${Date.now().toString(36)}_${process.hrtime ? process.hrtime()[1].toString(36) : '0'}`;
+  }
+  return prefix ? `${prefix}${token}` : token;
 }

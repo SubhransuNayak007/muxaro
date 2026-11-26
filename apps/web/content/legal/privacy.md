@@ -4,7 +4,7 @@ slug: "privacy"
 description: "Comprehensive Privacy Policy outlining MUXARO's privacy-by-design architecture, zero tracking cookies, GDPR and CCPA compliance, and ephemeral media file deletion guarantees."
 author: "MUXARO Data Protection & Privacy Team"
 publishedAt: "2026-11-18"
-updatedAt: "2026-11-18"
+updatedAt: "2026-11-26"
 category: "Legal & Compliance"
 keywords: ["privacy policy", "gdpr compliance", "ccpa cpra", "ephemeral storage guarantee", "zero tracking cookies", "data minimization"]
 ---
@@ -12,7 +12,7 @@ keywords: ["privacy policy", "gdpr compliance", "ccpa cpra", "ephemeral storage 
 # Privacy Policy
 
 **Effective Date:** November 18, 2026  
-**Last Updated:** November 18, 2026  
+**Last Updated:** November 26, 2026  
 
 MUXARO Technologies (**"Muxaro"**, **"we"**, **"us"**, or **"our"**) operates on an uncompromising foundational principle: **Privacy by Design and Radical Data Minimization**. 
 
@@ -23,9 +23,10 @@ We believe that high-utility developer tools and media converters do not need to
 ## 1. Core Privacy Commitments
 
 1. **Zero Tracking Cookies:** We do not use third-party advertising cookies, retargeting pixels, or behavioral tracking beacons.
-2. **Zero Persistent Media Storage:** We do not store your media files. All uploaded source streams and converted outputs exist solely on ephemeral scratch volumes and are destroyed within 60 minutes of completion.
-3. **Zero AI Training on User Media:** We **never** inspect, transcribe, fingerprint, or train machine learning/AI models on your audiovisual files.
-4. **Zero Data Monetization:** We have never sold, rented, leased, or shared user data or media files with data brokers, advertisers, or third parties, and we never will.
+2. **100% Browser-Local PDF & Tier-1 Media Processing:** All 38 PDF tools and Tier-1 video/audio tools run inside your browser tab via WebAssembly. Your PDFs and local documents never leave your device (`0 bytes uploaded`), and optional recent history is stored strictly in your own browser's IndexedDB.
+3. **Zero Persistent Server Storage:** When using Cloud FFmpeg workers, uploaded source streams and converted outputs exist solely on ephemeral scratch volumes and are destroyed within 60 minutes of completion.
+4. **Zero AI Training on User Media:** We **never** inspect, transcribe, fingerprint, or train machine learning models on your files.
+5. **Zero Data Monetization:** We never sell, rent, lease, or share user data or files with data brokers, advertisers, or third parties.
 
 ---
 
@@ -111,7 +112,7 @@ Depending on your geographical jurisdiction, you enjoy specific statutory rights
 - **Right to Opt-Out of Sale or Sharing:** We do not sell or share personal information as defined by the CCPA/CPRA.
 - **Right to Non-Discrimination:** We will never deny service, charge different prices, or provide a lower quality of service because you exercised any of your privacy rights.
 
-To exercise any of these rights, email our Data Protection Officer at `privacy@Muxaro.media`. Because we maintain pseudonymized, hashed logs and no persistent accounts for free users, we may require verification of your IP or request parameters to locate relevant records.
+To exercise any of these rights, email our Data Protection Officer at `privacy@muxaro.app`. Because we maintain pseudonymized, hashed logs and no persistent accounts, we may require verification of your request parameters to locate relevant records.
 
 ---
 
@@ -120,7 +121,7 @@ To exercise any of these rights, email our Data Protection Officer at `privacy@M
 | Data Category | Purpose | Retention Period | Destruction Mechanism |
 | :--- | :--- | :--- | :--- |
 | **User Media Files** | Video/audio processing | **Max 60 minutes** | Automated unlinking & cryptographic shred |
-| **Hashed IP & Quota Records**| Rolling 24-hour allowance | **24 hours rolling** | Automatic ledger eviction |
+| **Hashed IP & Rate-Limit Logs**| Abuse & DDoS prevention | **24 hours rolling** | Automatic log eviction |
 | **Edge Server Logs** | DDoS mitigation & security | **7 days** | Automated rotating log purge |
 | **Legal & DMCA Records** | Statutory compliance | **3 years** | Encrypted administrative archive |
 
@@ -146,5 +147,5 @@ We enforce defense-in-depth engineering standards to safeguard all data in trans
 We may periodically update this Privacy Policy to reflect evolving regulatory frameworks or architectural improvements. Updates take effect immediately upon publication.
 
 If you have questions, comments, or requests regarding this Privacy Policy, please contact:
-- **Data Protection Officer:** `privacy@Muxaro.media`
+- **Data Protection Officer:** `privacy@muxaro.app`
 - **Mailing Address:** MUXARO Technologies, Attention: Privacy & Compliance Officer.

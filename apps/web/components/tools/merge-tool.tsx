@@ -37,7 +37,7 @@ import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
 import type { FFmpegProgress, FFmpegTaskResult } from '@/lib/ffmpeg/types';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 
 const SAFE_CHUNK_SIZE_BYTES = Math.floor(3.5 * 1024 * 1024);
 
@@ -72,6 +72,61 @@ export function MergeTool() {
 
   // Sync and Processing Parameters
   const [audioOffsetMs, setAudioOffsetMs] = useState<number>(0);
+  const [previewPlaying, setPreviewPlaying] = useState<boolean>(false);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewVideoSrc, setPreviewVideoSrc] = useState<string | null>(null);
+  const [previewAudioSrc, setPreviewAudioSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!videoFile) {
+      setPreviewVideoSrc(null);
+      return;
+    }
+    const u = URL.createObjectURL(videoFile);
+    setPreviewVideoSrc(u);
+    return () => URL.revokeObjectURL(u);
+  }, [videoFile]);
+
+  useEffect(() => {
+    if (!audioFile) {
+      setPreviewAudioSrc(null);
+      return;
+    }
+    const u = URL.createObjectURL(audioFile);
+    setPreviewAudioSrc(u);
+    return () => URL.revokeObjectURL(u);
+  }, [audioFile]);
+
+  const toggleSyncPreview = () => {
+    const v = previewVideoRef.current;
+    const a = previewAudioRef.current;
+    if (!v || !a) return;
+    if (previewPlaying) {
+      v.pause();
+      a.pause();
+      setPreviewPlaying(false);
+      return;
+    }
+    const offsetSec = audioOffsetMs / 1000;
+    v.currentTime = 0;
+    v.muted = true;
+    if (offsetSec >= 0) {
+      a.currentTime = 0;
+      v.play().catch(() => {});
+      setTimeout(() => a.play().catch(() => {}), Math.round(offsetSec * 1000));
+    } else {
+      a.currentTime = Math.abs(offsetSec);
+      v.play().catch(() => {});
+      a.play().catch(() => {});
+    }
+    setPreviewPlaying(true);
+    setTimeout(() => {
+      v.pause();
+      a.pause();
+      setPreviewPlaying(false);
+    }, 10000);
+  };
   const [normalizeVolume, setNormalizeVolume] = useState<boolean>(true);
   const [targetFormat, setTargetFormat] = useState<'mp4' | 'mkv' | 'webm'>('mp4');
   const [preserveVideoStream, setPreserveVideoStream] = useState<boolean>(true);
@@ -304,7 +359,7 @@ export function MergeTool() {
       const csrf = readCsrfTokenFromCookie();
       const token =
         typeof window !== 'undefined' ? localStorage.getItem('muxaro_auth_token') : null;
-      const idempotencyKey = `merge_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const idempotencyKey = generateSecureId('merge_');
 
       const payload = {
         videoUrl: normalizedVideo || undefined,
@@ -421,9 +476,11 @@ export function MergeTool() {
   };
 
   const jobDownloadHref = submittedJobId
-    ? jobStream.downloadUrl ||
-      `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        jobStream.downloadUrl ||
+          `${getApiBaseUrl()}/jobs/${encodeURIComponent(submittedJobId)}/download`
+      )
+    : undefined;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-8">
@@ -457,7 +514,7 @@ export function MergeTool() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <a
-              href={localResult.url}
+              href={sanitizeSafeNavigationUrl(localResult.url) ?? '#'}
               download={localResult.fileName}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors duration-150"
             >
@@ -847,6 +904,50 @@ export function MergeTool() {
                     +250ms
                   </button>
                 </div>
+              </div>
+
+              {/* Live 10-second Aligned Sync Preview & Waveform Strip */}
+              <div className="pt-3 border-t border-[var(--muxaro-border-subtle)] space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-[var(--muxaro-text-secondary)]">
+                    Live 10s Waveform Sync Preview
+                  </span>
+                  {previewVideoSrc && previewAudioSrc ? (
+                    <button
+                      type="button"
+                      onClick={toggleSyncPreview}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--muxaro-indigo)] text-white text-[11px] font-semibold"
+                    >
+                      {previewPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                      <span>{previewPlaying ? 'Stop 10s Preview' : `Preview ${audioOffsetMs >= 0 ? '+' : ''}${audioOffsetMs}ms Sync`}</span>
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-[var(--muxaro-text-tertiary)]">
+                      Upload local video &amp; audio to audition sync live
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 h-7 px-2 rounded-lg bg-[var(--muxaro-bg-surface)] border border-[var(--muxaro-border-subtle)] overflow-hidden" aria-hidden="true">
+                  {Array.from({ length: 40 }).map((_, idx) => (
+                    <span
+                      key={idx}
+                      style={{ height: `${25 + ((idx * 19 + Math.abs(audioOffsetMs)) % 65)}%` }}
+                      className="flex-1 rounded-full bg-[var(--muxaro-indigo)]/55 transition-[height] duration-150"
+                    />
+                  ))}
+                </div>
+                {previewVideoSrc && previewAudioSrc && (
+                  <div className="grid grid-cols-1 gap-2">
+                    <video
+                      ref={previewVideoRef}
+                      src={previewVideoSrc}
+                      muted
+                      playsInline
+                      className="w-full max-h-40 rounded-lg bg-black/90"
+                    />
+                    <audio ref={previewAudioRef} src={previewAudioSrc} className="hidden" />
+                  </div>
+                )}
               </div>
             </div>
 

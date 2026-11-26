@@ -427,12 +427,12 @@ export class OPFSStreamWriter implements IStreamAccumulator {
     }, 60000);
 
     if (options.cleanupAfterExport) {
-      // Delay OPFS file cleanup to ensure browser has started download stream
+      // Delay OPFS cleanup past the downloadUrl revocation window
       setTimeout(async () => {
         try {
           await this.cleanup();
         } catch (_) {}
-      }, 30000);
+      }, 65000);
     }
 
     return {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { setLightweightMode } from '@/lib/device-mode';
 
 export type MuxaroTheme = 'auto' | 'light' | 'dark';
 export type VideoQuality = 'auto' | '1080p' | '1440p' | '2160p' | '4320p';
@@ -143,6 +144,9 @@ export function saveSettings(settings: MuxaroUserSettings): void {
     }
 
     applyThemeSetting(settings.theme);
+
+    // Synchronize Reduce Motion <-> Eco / Lightweight GPU mode attribute
+    setLightweightMode(Boolean(settings.reduceMotion));
 
     // Broadcast across windows/tabs
     window.dispatchEvent(

@@ -64,10 +64,35 @@ let cachedCoreBlobUrl = null;
 let cachedWasmBlobUrl = null;
 let cachedCoreSource = null;
 
+const ALLOWED_CDN_PREFIXES = [
+  'https://unpkg.com/@ffmpeg/',
+  'https://cdn.jsdelivr.net/npm/@ffmpeg/',
+];
+
+function assertSafeAssetUrl(rawUrl) {
+  const candidate = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!candidate) {
+    throw new Error('Invalid asset URL');
+  }
+  if (candidate.startsWith('blob:')) {
+    return candidate;
+  }
+  const baseOrigin = self.location?.origin || 'http://localhost';
+  const parsed = new URL(candidate, baseOrigin);
+  if (parsed.origin === baseOrigin && (parsed.protocol === 'http:' || parsed.protocol === 'https:')) {
+    return parsed.href;
+  }
+  if (parsed.protocol === 'https:' && ALLOWED_CDN_PREFIXES.some((prefix) => parsed.href.startsWith(prefix))) {
+    return parsed.href;
+  }
+  throw new Error(`Blocked untrusted worker asset origin: ${parsed.origin}`);
+}
+
 async function toTypedBlobUrl(url, mimeType) {
-  const res = await fetch(url);
+  const safeUrl = assertSafeAssetUrl(url);
+  const res = await fetch(safeUrl);
   if (!res.ok) {
-    throw new Error(`HTTP ${res.status} fetching ${url}`);
+    throw new Error(`HTTP ${res.status} fetching ${safeUrl}`);
   }
   const buf = await res.arrayBuffer();
   return URL.createObjectURL(new Blob([buf], { type: mimeType }));

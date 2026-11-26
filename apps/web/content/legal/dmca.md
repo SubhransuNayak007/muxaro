@@ -4,7 +4,7 @@ slug: "dmca"
 description: "Formal Digital Millennium Copyright Act (17 U.S.C. § 512) notice requirements, designated copyright agent details, counter-notification procedure, and repeat infringer policy."
 author: "MUXARO Intellectual Property & Legal Compliance Division"
 publishedAt: "2026-11-18"
-updatedAt: "2026-11-18"
+updatedAt: "2026-11-26"
 category: "Legal & Compliance"
 keywords: ["dmca policy", "copyright notice", "dmca takedown procedure", "designated copyright agent", "repeat infringer policy", "counter notification 512g"]
 ---
@@ -12,7 +12,7 @@ keywords: ["dmca policy", "copyright notice", "dmca takedown procedure", "design
 # Copyright Policy & DMCA Takedown Procedure
 
 **Effective Date:** November 18, 2026  
-**Last Updated:** November 18, 2026  
+**Last Updated:** November 26, 2026  
 
 MUXARO Technologies (**"Muxaro"**) respects the intellectual property rights of content creators, authors, filmmakers, musicians, and copyright holders worldwide. We expect all users of our Service to respect these rights in full accordance with the United States Digital Millennium Copyright Act (**"DMCA"**, codified at 17 U.S.C. § 512), the European Union Directive on Copyright in the Digital Single Market (Directive (EU) 2019/790), and applicable international intellectual property treaties.
 
@@ -26,8 +26,8 @@ Pursuant to 17 U.S.C. § 512(c)(2), MUXARO has registered a **Designated Copyrig
 
 - **Attn:** Designated DMCA Copyright Agent  
 - **Entity:** MUXARO Technologies — Legal Affairs Division  
-- **Email:** `dmca@Muxaro.media` *(Recommended for fastest statutory processing)*  
-- **Alternate Contact:** `copyright@Muxaro.media`  
+- **Email:** `dmca@muxaro.app` *(Recommended for fastest statutory processing)*  
+- **Alternate Contact:** `copyright@muxaro.app`  
 - **Physical Mail:** MUXARO Technologies, Attention: Copyright Compliance Officer, 1209 Orange Street, Wilmington, DE 19801, USA  
 
 ---
@@ -38,7 +38,7 @@ To ensure your notification is actionable under statutory safe harbor requiremen
 
 1. **Signature of Authorized Party:** A physical or electronic signature of a person authorized to act on behalf of the owner of an exclusive right that is allegedly infringed.
 2. **Identification of the Copyrighted Work:** Clear identification of the copyrighted work claimed to have been infringed (e.g. title, registration number, or URL of the original work). If multiple copyrighted works on a single online site are covered by a single notification, provide a representative list.
-3. **Identification of the Infringing Material:** Specific identification of the material claimed to be infringing or to be the subject of infringing activity, along with information reasonably sufficient to permit Muxaro to locate the material (e.g., exact URL on `Muxaro.media` or specific job identifier).
+3. **Identification of the Infringing Material:** Specific identification of the material claimed to be infringing or to be the subject of infringing activity, along with information reasonably sufficient to permit Muxaro to locate the material (e.g., exact URL on `muxaro.app` or specific job identifier).
 4. **Contact Information:** Accurate contact information for the complaining party, including your full legal name, physical mailing address, telephone number, and email address.
 5. **Good Faith Statement:** An explicit statement that:  
    *"I have a good faith belief that use of the material in the manner complained of is not authorized by the copyright owner, its agent, or the law (such as fair use)."*
@@ -64,7 +64,7 @@ Upon receipt of a substantially compliant DMCA notice meeting all statutory elem
 
 If a user believes in good faith that material was removed or disabled as a result of a mistake, misidentification, or misapplication of fair use doctrine, the user may file a formal **Counter-Notification** pursuant to 17 U.S.C. § 512(g)(2)–(3).
 
-To be legally effective, a Counter-Notification must be sent to our Designated Copyright Agent (`dmca@Muxaro.media`) and contain:
+To be legally effective, a Counter-Notification must be sent to our Designated Copyright Agent (`dmca@muxaro.app`) and contain:
 
 1. **User Signature:** A physical or electronic signature of the user.
 2. **Identification of Removed Material:** Identification of the material that has been removed or to which access has been disabled, and the location (URL) at which the material appeared before removal.
@@ -98,10 +98,10 @@ MUXARO does **not** provide technology, services, or tools designed to decrypt, 
 
 ## 7. Submission Checklist for Claimants
 
-Before submitting a notice to `dmca@Muxaro.media`, ensure:
+Before submitting a notice to `dmca@muxaro.app`, ensure:
 - [ ] You have verified that the material is not protected by **Fair Use** (17 U.S.C. § 107; see *Lenz v. Universal Music Corp.*).
-- [ ] You have included the exact URLs on `Muxaro.media` where the infringing material is located.
+- [ ] You have included the exact URLs on `muxaro.app` where the infringing material is located.
 - [ ] You have included both required statutory statements (Good Faith and Penalty of Perjury).
 - [ ] You have included an electronic or physical signature.
 
-*For all DMCA inquiries, contact: `dmca@Muxaro.media`.*
+*For all DMCA inquiries, contact: `dmca@muxaro.app`.*

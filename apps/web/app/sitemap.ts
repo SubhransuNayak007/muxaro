@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { ALL_DOCS } from '@/content';
+import { PDF_TOOLS_CATALOG } from '@/lib/tools-catalog';
 
 export const dynamic = 'force-static';
 
@@ -9,7 +10,7 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || PRIMARY_CANONICAL)
   .replace(/\/+$/, '');
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const currentDate = new Date('2026-11-22T00:00:00.000Z');
+  const currentDate = new Date('2026-11-26T00:00:00.000Z');
 
   // Core Static Landing Pages
   const staticRoutes: MetadataRoute.Sitemap = [
@@ -53,37 +54,85 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${SITE_URL}/tools/batch-processing`,
       lastModified: currentDate,
       changeFrequency: 'weekly',
-      priority: 0.8,
-    },
-    {
-      url: `${SITE_URL}/tools/playlist-batch`,
-      lastModified: currentDate,
-      changeFrequency: 'weekly',
-      priority: 0.8,
+      priority: 0.85,
     },
     {
       url: `${SITE_URL}/tools/playlist-processing`,
       lastModified: currentDate,
       changeFrequency: 'weekly',
-      priority: 0.8,
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/playlist-batch`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/video-compressor`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    },
+    {
+      url: `${SITE_URL}/tools/video-trimmer`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    },
+    {
+      url: `${SITE_URL}/tools/video-to-gif`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    },
+    {
+      url: `${SITE_URL}/tools/audio-normalizer`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/subtitle-burner`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/metadata-scrubber`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/aspect-ratio-pad`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    },
+    {
+      url: `${SITE_URL}/tools/thumbnail-extractor`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
+    },
+    {
+      url: `${SITE_URL}/tools/transcript-extractor`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.85,
     },
     {
       url: `${SITE_URL}/tools/direct-helper`,
       lastModified: currentDate,
-      changeFrequency: 'monthly',
-      priority: 0.7,
+      changeFrequency: 'weekly',
+      priority: 0.8,
     },
     {
       url: `${SITE_URL}/docs`,
       lastModified: currentDate,
       changeFrequency: 'weekly',
       priority: 0.8,
-    },
-    {
-      url: `${SITE_URL}/settings`,
-      lastModified: currentDate,
-      changeFrequency: 'weekly',
-      priority: 0.7,
     },
     {
       url: `${SITE_URL}/terms`,
@@ -148,5 +197,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.85,
   }));
 
-  return [...staticRoutes, ...convertRoutes, ...alternativeRoutes, ...docRoutes];
+  const pdfRoutes: MetadataRoute.Sitemap = [
+    {
+      url: `${SITE_URL}/tools/pdf`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+    },
+    ...PDF_TOOLS_CATALOG.map((tool) => ({
+      url: `${SITE_URL}${tool.href}`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly' as const,
+      priority: 0.85,
+    })),
+  ];
+
+  return [...staticRoutes, ...pdfRoutes, ...convertRoutes, ...alternativeRoutes, ...docRoutes];
 }

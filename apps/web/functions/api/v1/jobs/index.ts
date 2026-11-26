@@ -1,16 +1,12 @@
 /**
  * POST & GET /api/v1/jobs
  * Cloudflare Edge Job Creation & Dispatch Handler
- *
- * Tries upstream Fastify/EC2 processing backend first.
- * When upstream is offline or unreachable, resolves the media stream at the edge via
- * Cobalt API or direct stream extraction and returns a READY job with instant downloadUrl.
- * NEVER returns a hardcoded 503 error.
  */
 
 import type { PagesFunction } from '../_types';
 import {
   generateRequestId,
+  isSafePublicHttpUrl,
   jsonResponse,
   optionsResponse,
   tryProxyUpstream,
@@ -41,83 +37,55 @@ export const onRequestGet: PagesFunction = async (context) => {
 };
 
 export const onRequestPost: PagesFunction = async (context) => {
-  // 1. Try upstream Fastify / EC2 backend worker first
   const upstream = await tryProxyUpstream(context.request, context.env, 'jobs');
-  if (upstream && upstream.ok) {
-    return upstream;
-  }
+  if (upstream) return upstream;
 
   const reqId = generateRequestId('edge_cjob_');
 
   let body: any = {};
   try {
     body = await context.request.json();
-  } catch {}
-
-  const sourceUrl = String(body?.mediaUrl || body?.sourceUrl || '').trim();
-  const targetFormat = String(body?.targetFormat || 'mp4').toLowerCase();
-  const targetResolution = String(body?.targetResolution || '1080p');
-  const title = String(body?.title || 'Downloaded Media');
-
-  const isAudio =
-    targetFormat === 'mp3' ||
-    targetFormat === 'm4a' ||
-    targetFormat === 'opus' ||
-    targetFormat === 'flac' ||
-    targetFormat === 'wav';
-  const videoQuality = targetResolution.replace('p', '');
-
-  // 2. Direct stream URL if source is direct media, otherwise standard download endpoint
-  let streamUrl = '';
-  if (/\.(mp4|webm|mkv|mov|mp3|wav|flac|m4a)($|\?)/i.test(sourceUrl)) {
-    streamUrl = sourceUrl;
+  } catch {
+    return jsonResponse(
+      {
+        success: false,
+        error: { code: 'ERR_INVALID_PAYLOAD', message: 'Malformed JSON payload.' },
+        requestId: reqId,
+      },
+      400,
+      {},
+      context.request
+    );
   }
 
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const finalDownloadUrl =
-    streamUrl ||
-    `/api/v1/jobs/${jobId}/download?url=${encodeURIComponent(sourceUrl)}&format=${targetFormat}`;
-
-  const estBytes =
-    targetResolution.includes('4320') || targetResolution.includes('8K')
-      ? 1850 * 1024 * 1024
-      : targetResolution.includes('2160') || targetResolution.includes('4K')
-      ? 680 * 1024 * 1024
-      : targetResolution.includes('1440')
-      ? 340 * 1024 * 1024
-      : isAudio
-      ? 12 * 1024 * 1024
-      : 185 * 1024 * 1024;
-
-  const jobPayload = {
-    id: jobId,
-    jobId,
-    status: 'READY',
-    progress: 100,
-    downloadUrl: finalDownloadUrl,
-    outputSizeBytes: estBytes,
-    targetFormat,
-    targetResolution,
-    operation: body?.operation || 'TRANSCODE_VIDEO',
-    title,
-    inputTitle: title,
-    sourceUrl,
-    streamCopy: true,
-    artifact: {
-      downloadUrl: finalDownloadUrl,
-      size: estBytes,
-      filename: `${title.replace(/[^a-zA-Z0-9_-]/g, '_')}.${targetFormat}`,
-      mimeType: isAudio ? 'audio/mpeg' : 'video/mp4',
-    },
-  };
+  const sourceUrl = String(body?.mediaUrl || body?.sourceUrl || '').trim();
+  if (sourceUrl && !isSafePublicHttpUrl(sourceUrl)) {
+    return jsonResponse(
+      {
+        success: false,
+        error: {
+          code: 'ERR_FORBIDDEN_URL',
+          message: 'Private, local, or unsupported URL schemes are not allowed.',
+        },
+        requestId: reqId,
+      },
+      400,
+      {},
+      context.request
+    );
+  }
 
   return jsonResponse(
     {
-      success: true,
-      data: jobPayload,
+      success: false,
+      error: {
+        code: 'ERR_BACKEND_NOT_CONFIGURED',
+        message:
+          'Cloud FFmpeg worker is not configured on this edge deployment. Run local browser Studio tools directly or connect a worker in Settings.',
+      },
       requestId: reqId,
     },
-    200,
+    503,
     {},
     context.request
   );

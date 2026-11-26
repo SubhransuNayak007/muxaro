@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { api, getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 import { JobState, ProcessingJob } from '@/lib/types';
-import { normalizeMediaUrl } from '@/lib/url-utils';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
@@ -167,7 +167,7 @@ export default function BatchProcessingPage() {
     setItems((prev) => [
       ...prev,
       {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: generateSecureId('item_'),
         url: normalized,
         format: defaultFormat,
         resolution: defaultOperation === 'extract_audio' ? 'audio_only' : defaultResolution,
@@ -193,7 +193,7 @@ export default function BatchProcessingPage() {
     try {
       const apiBase = getApiBaseUrl();
       const csrf = readCsrfTokenFromCookie();
-      const idempotencyKey = `bat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = generateSecureId('bat_');
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -367,9 +367,11 @@ export default function BatchProcessingPage() {
   }, [batchSession?.id, batchSession?.status, batchSession?.title, batchSession?.totalItems, batchSession?.progress]);
 
   const batchZipHref = batchSession
-    ? batchSession.zipDownloadUrl ||
-      `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        batchSession.zipDownloadUrl ||
+          `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
+      )
+    : undefined;
   const isBatchZipReady =
     !!batchSession &&
     (batchSession.status === 'COMPLETED' ||
@@ -645,9 +647,6 @@ export default function BatchProcessingPage() {
                 >
                   {isQueueing ? 'Queueing jobs…' : `Start batch of ${items.length} ${items.length === 1 ? 'job' : 'jobs'}`}
                 </button>
-                <span className="text-xs text-content-secondary">
-                  Uses {items.length} of your 10 daily free media jobs
-                </span>
               </div>
             )}
 

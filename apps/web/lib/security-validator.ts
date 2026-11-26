@@ -42,11 +42,22 @@ export interface UrlValidationResult {
   error?: string;
 }
 
+export function extractCleanMediaUrl(rawInput: string): string {
+  const raw = String(rawInput || '').trim();
+  if (!raw) return '';
+  // If user pasted a share snippet like "Title https://youtu.be/...", extract the URL safely
+  const embeddedMatch = raw.match(/https?:\/\/[^\s"'<>]+/i);
+  if (embeddedMatch && (/\s/.test(raw) || !/^https?:\/\//i.test(raw))) {
+    return embeddedMatch[0];
+  }
+  return raw;
+}
+
 /**
  * Validates a media URL against scheme restrictions, SSRF, and command injection patterns.
  */
 export function validateMediaUrl(rawUrl: string): UrlValidationResult {
-  const trimmed = String(rawUrl || '').trim();
+  const trimmed = extractCleanMediaUrl(rawUrl);
   if (!trimmed) {
     return { valid: false, normalizedUrl: '', error: 'URL cannot be empty.' };
   }

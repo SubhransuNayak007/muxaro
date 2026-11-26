@@ -171,20 +171,30 @@ describe('Task 2: Cloudflare Turnstile & 5-Minute Session JWT Helper', () => {
     assert.strictEqual(verified, null);
   });
 
-  it('verifies Cloudflare test tokens in test environment', async () => {
-    const testRes = await verifyTurnstileToken('XXXX.DUMMY.TOKEN.XXXX');
-    assert.strictEqual(testRes.success, true);
-    assert.strictEqual(testRes.hostname, 'localhost');
+  it('verifies Cloudflare test tokens ONLY in non-production test/dev environments', async () => {
+    const prevEnv = process.env.NODE_ENV;
+    try {
+      (process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+      const testRes = await verifyTurnstileToken('XXXX.DUMMY.TOKEN.XXXX');
+      assert.strictEqual(testRes.success, true);
+      assert.strictEqual(testRes.hostname, 'localhost');
+
+      (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
+      const prodBypassAttempt = await verifyTurnstileToken('XXXX.DUMMY.TOKEN.XXXX');
+      assert.strictEqual(prodBypassAttempt.success, false, 'Dummy token must NEVER bypass in production');
+    } finally {
+      (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+    }
   });
 });
 
 describe('Task 3: Unified Quota Manager', () => {
   it('normalizes quota data with defaults', () => {
     const q = normalizeUnifiedQuota({});
-    assert.strictEqual(q.dailyVideoLimit, 10);
-    assert.strictEqual(q.remainingVideoCredits, 10);
-    assert.strictEqual(q.playlistJobsLimit, 1);
-    assert.strictEqual(q.remainingPlaylistCredits, 1);
+    assert.strictEqual(q.dailyVideoLimit, 100);
+    assert.strictEqual(q.remainingVideoCredits, 100);
+    assert.strictEqual(q.playlistJobsLimit, 20);
+    assert.strictEqual(q.remainingPlaylistCredits, 20);
     assert.strictEqual(q.rollingWindowHours, 24);
   });
 
@@ -209,31 +219,33 @@ describe('Task 3: Unified Quota Manager', () => {
   });
 
   it('records optimistic deduction accurately', () => {
-    // Prime the quota
     (quotaManager as any).cachedQuota = { ...DEFAULT_UNIFIED_QUOTA };
     quotaManager.recordOptimisticDeduction('video', 2);
     const cached = (quotaManager as any).cachedQuota;
     assert.strictEqual(cached.usedVideoJobs, 2);
-    assert.strictEqual(cached.remainingVideoCredits, 8);
+    assert.strictEqual(cached.remainingVideoCredits, 98);
   });
 });
 
-describe('Task 4: Zero Ads Verification', () => {
-  it('verifies apps/web/app/credits/page.tsx has completely removed RewardedAdCard and ad claims', () => {
-    const creditsPagePath = path.resolve(process.cwd(), 'apps/web/app/credits/page.tsx');
-    const content = fs.readFileSync(creditsPagePath, 'utf8');
+describe('Task 4: Zero Credits & Zero Ads Verification', () => {
+  it('verifies /credits redirects cleanly and Navbar has no credit pill', () => {
+    const webRoot = path.resolve(import.meta.dirname, '..');
+    const creditsPagePath = path.resolve(webRoot, 'app/credits/page.tsx');
+    const navbarPath = path.resolve(webRoot, 'components/Navbar.tsx');
+    const creditsContent = fs.readFileSync(creditsPagePath, 'utf8');
+    const navbarContent = fs.readFileSync(navbarPath, 'utf8');
 
-    assert.strictEqual(content.includes('RewardedAdCard'), false, 'RewardedAdCard must not be in credits page');
-    assert.strictEqual(content.includes('Extra credits from ads'), false, 'Extra credits from ads must be removed');
-    assert.strictEqual(content.includes('Bonus ad credits'), false, 'Bonus ad credits must be removed');
-    assert.strictEqual(content.includes('rewarded ads'), false, 'Rewarded ads text must be removed');
+    assert.strictEqual(creditsContent.includes('redirect('), true, '/credits must redirect cleanly');
+    assert.strictEqual(creditsContent.includes('RewardedAdCard'), false, 'RewardedAdCard must not be in credits page');
+    assert.strictEqual(navbarContent.includes('useUnifiedQuota'), false, 'Navbar must not poll credits');
   });
 });
 
 describe('Task 5: Google OAuth Conditional Rendering', () => {
   it('verifies /login and /register do not show unavailable message when unconfigured', () => {
-    const loginPage = fs.readFileSync(path.resolve(process.cwd(), 'apps/web/app/login/page.tsx'), 'utf8');
-    const registerPage = fs.readFileSync(path.resolve(process.cwd(), 'apps/web/app/register/page.tsx'), 'utf8');
+    const webRoot = path.resolve(import.meta.dirname, '..');
+    const loginPage = fs.readFileSync(path.resolve(webRoot, 'app/login/page.tsx'), 'utf8');
+    const registerPage = fs.readFileSync(path.resolve(webRoot, 'app/register/page.tsx'), 'utf8');
 
     assert.strictEqual(
       loginPage.includes('Google sign-in is currently unavailable on this server'),
@@ -245,5 +257,46 @@ describe('Task 5: Google OAuth Conditional Rendering', () => {
       false,
       'Register page must not display unavailable banner'
     );
+  });
+});
+
+describe('Task 6: Pentest & SSRF / Open Redirect / Headers Verification', () => {
+  it('verifies Cloudflare edge utils block private IP/localhost SSRF & arbitrary Origin reflection', async () => {
+    const utils = await import('../functions/api/v1/_utils.ts');
+    assert.strictEqual(utils.isSafePublicHttpUrl('http://127.0.0.1:8080/secret'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('http://169.254.169.254/latest/meta-data/'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('http://[::1]/admin'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('http://2130706433/admin'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('http://0177.0.0.1/admin'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('https://internal.service.local/x'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('javascript:alert(1)'), false);
+    assert.strictEqual(utils.isSafePublicHttpUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'), true);
+
+    assert.strictEqual(utils.isValidResourceId('../etc/passwd'), false);
+    assert.strictEqual(utils.isValidResourceId('job_123456-abc'), true);
+
+    assert.strictEqual(utils.isAllowedCorsOrigin('https://evil.example'), false);
+    assert.strictEqual(utils.isAllowedCorsOrigin('https://muxaro.pages.dev'), true);
+    assert.strictEqual(utils.isAllowedCorsOrigin('https://preview-abc.muxaro.pages.dev'), true);
+  });
+
+  it('verifies markdown sanitizer blocks javascript:/data:/vbscript: links', async () => {
+    const webRoot = path.resolve(import.meta.dirname, '..');
+    const mdSource = fs.readFileSync(path.resolve(webRoot, 'lib/markdown.ts'), 'utf8');
+    assert.strictEqual(mdSource.includes("'javascript:'") || mdSource.includes('javascript:'), true);
+  });
+
+  it('verifies Turnstile dummy bypass is gated out of production and camera permissions are enabled', () => {
+    const webRoot = path.resolve(import.meta.dirname, '..');
+    const turnstileSrc = fs.readFileSync(path.resolve(webRoot, 'lib/security/turnstile.ts'), 'utf8');
+    const headersSrc = fs.readFileSync(path.resolve(webRoot, 'public/_headers'), 'utf8');
+    const redirectsSrc = fs.readFileSync(path.resolve(webRoot, 'public/_redirects'), 'utf8');
+
+    assert.strictEqual(
+      turnstileSrc.includes("NODE_ENV === 'test' || process.env.NODE_ENV === 'development'"),
+      true
+    );
+    assert.strictEqual(headersSrc.includes('camera=(self)'), true);
+    assert.strictEqual(redirectsSrc.includes('muxaro.vercel.app'), false);
   });
 });

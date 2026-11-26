@@ -402,6 +402,9 @@ export default function VideoMergerPage() {
                   <option value="mkv">MKV (Container)</option>
                   <option value="webm">WebM (Web stream)</option>
                 </select>
+                <p className="text-[11px] text-content-secondary mt-2">
+                  Auto-Conform enabled: mixed resolutions, frame rates (60fps + 30fps), and audio channels are automatically normalized so audio stays in sync.
+                </p>
               </div>
 
               {errorMsg && (

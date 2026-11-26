@@ -259,8 +259,10 @@
       try {
         const u = new URL(rawUrl);
         const host = u.hostname.toLowerCase();
-        if (!host.includes('youtube.com') && !host.includes('youtu.be')) return null;
-        if (host.includes('youtu.be')) return u.pathname.slice(1).split('/')[0] || null;
+        const isYouTubeHost = host === 'youtube.com' || host.endsWith('.youtube.com');
+        const isYoutuBeHost = host === 'youtu.be' || host.endsWith('.youtu.be');
+        if (!isYouTubeHost && !isYoutuBeHost) return null;
+        if (isYoutuBeHost) return u.pathname.slice(1).split('/')[0] || null;
         return u.searchParams.get('v') || (u.pathname.includes('/shorts/') ? u.pathname.split('/shorts/')[1].split('/')[0] : null);
       } catch (_) {
         return null;
@@ -507,7 +509,7 @@
   }
 
   // 2. Integration on YouTube (youtube.com/watch?v=...)
-  if (location.hostname.includes('youtube.com')) {
+  if (location.hostname === 'youtube.com' || location.hostname.endsWith('.youtube.com')) {
     function injectYouTubeButton() {
       if (!location.pathname.startsWith('/watch')) return;
       if (document.getElementById('muxaro-direct-yt-btn')) return;

@@ -1,28 +1,28 @@
 ---
 title: "Terms of Service"
 slug: "terms"
-description: "Legal terms of service governing the use of MUXARO media processing utilities, acceptable use policies, copyright representations, and rolling quota allowances."
+description: "Legal terms of service governing the use of MUXARO's browser-local PDF tools, media processing utilities, acceptable use policies, and copyright representations."
 author: "MUXARO Legal & Compliance Team"
 publishedAt: "2026-11-18"
-updatedAt: "2026-11-18"
+updatedAt: "2026-11-26"
 category: "Legal & Compliance"
-keywords: ["terms of service", "user agreement", "acceptable use policy", "copyright compliance", "rolling quota limits"]
+keywords: ["terms of service", "user agreement", "acceptable use policy", "copyright compliance", "browser local pdf"]
 ---
 
 # Terms of Service
 
 **Effective Date:** November 18, 2026  
-**Last Updated:** November 18, 2026  
+**Last Updated:** November 26, 2026  
 
-Welcome to **MUXARO** (together with its websites, APIs, applications, and developer tools, collectively referred to as the **"Service"** or **"Platform"**), operated by MUXARO Technologies (**"Muxaro"**, **"we"**, **"us"**, or **"our"**).
+Welcome to **MUXARO** (together with its websites, browser-local WebAssembly utilities, APIs, and developer tools, collectively referred to as the **"Service"** or **"Platform"**), operated by MUXARO Technologies (**"Muxaro"**, **"we"**, **"us"**, or **"our"**).
 
-Please read these Terms of Service (these **"Terms"**) carefully before accessing or using the Service. By accessing, browsing, submitting media to, or utilizing any API or tool provided by the Service, you (**"User"** or **"you"**) acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/legal/privacy) and [Copyright & DMCA Policy](/legal/dmca).
+Please read these Terms of Service (these **"Terms"**) carefully before accessing or using the Service. By accessing, browsing, submitting media to, or utilizing any tool provided by the Service, you (**"User"** or **"you"**) acknowledge that you have read, understood, and agree to be bound by these Terms and our [Privacy Policy](/privacy) and [Copyright & DMCA Policy](/dmca).
 
 ---
 
 ## 1. Description of the Service
 
-MUXARO provides high-integrity, cloud-native digital media utilities designed to inspect audiovisual stream metadata, demux and remux compatible containers (such as MP4, WebM, and MKV), extract native audio tracks, and transcode media formats. 
+MUXARO provides browser-local PDF utilities (running 100% client-side in WebAssembly) and hybrid digital media tools designed to inspect audiovisual stream metadata, demux and remux compatible containers (such as MP4, WebM, and MKV), extract native audio tracks, normalize loudness, and convert formats. 
 
 The Service functions strictly as a technological utility and automated data processor. Muxaro does not maintain a public index of user content, does not host persistent media libraries, and does not provide public search engines for copyrighted media.
 
@@ -64,14 +64,11 @@ Violation of this Acceptable Use Policy results in immediate, permanent revocati
 
 ---
 
-## 5. Fair Use Quotas & Rolling Allowance Mechanics
+## 5. Fair Use & Resource Protection
 
-1. **Free Tier Allocation:** To guarantee equal availability of computational resources across our global user base, free tier users are allocated:
-   - **10 Individual Video Processing Jobs** per rolling 24-hour window.
-   - **1 Playlist Job** (supporting up to 50 items) per rolling 24-hour window.
-2. **Rolling Window Calculation:** Quotas are computed continuously on a rolling 24-hour basis. Each consumed processing credit restores exactly 24 hours after job execution.
-3. **Independent Quota Pools:** Playlist processing credits run on an independent ledger and do not deplete or restrict individual video processing credits.
-4. **Failed Job Restorations:** If a processing job fails due to an upstream network disconnection, server-side processing error, or unsupported source format, any provisional quota reservation is automatically rolled back with zero penalty to your balance.
+1. **Browser-Local Execution:** All 38 PDF Studio utilities and Tier-1 media tools run directly on your device with zero server upload and no daily credit limits.
+2. **Cloud Worker Resource Limits:** Remote Cloud FFmpeg worker tasks enforce reasonable per-job timeouts and maximum file sizes (up to 2 GB) to preserve infrastructure stability for all users.
+3. **Abuse Prevention:** Automated scraping, denial-of-service attempts, or proxy-based abuse against shared worker endpoints may be rate-limited automatically.
 
 ---
 
@@ -142,5 +139,5 @@ We reserve the right to revise or amend these Terms at any time. When modificati
 ## 14. Contact Information
 
 For legal inquiries, compliance questions, or formal notices regarding these Terms, contact our legal team at:
-- **Email:** `legal@Muxaro.media`
+- **Email:** `legal@muxaro.app`
 - **Address:** MUXARO Technologies, Legal & Regulatory Compliance Department.

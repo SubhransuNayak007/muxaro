@@ -12,7 +12,7 @@ import {
   tryProxyUpstream,
 } from '../_utils';
 
-export const onRequestOptions: PagesFunction = async () => optionsResponse();
+export const onRequestOptions: PagesFunction = async (context) => optionsResponse(context.request);
 
 export const onRequestGet: PagesFunction = async (context) => {
   const upstream = await tryProxyUpstream(context.request, context.env, 'auth/session');
@@ -21,6 +21,8 @@ export const onRequestGet: PagesFunction = async (context) => {
   const reqId = generateRequestId('edge_sess_');
   const cookies = parseCookies(context.request.headers.get('Cookie'));
   const csrfToken = cookies['muxaro_csrf'] || crypto.randomUUID().replace(/-/g, '');
+  const isHttps = context.request.url.startsWith('https://');
+  const secureAttr = isHttps ? '; Secure' : '';
 
   const authPayload = {
     authenticated: false,
@@ -39,7 +41,8 @@ export const onRequestGet: PagesFunction = async (context) => {
     },
     200,
     {
-      'Set-Cookie': `muxaro_csrf=${csrfToken}; Path=/; SameSite=Lax; Max-Age=2592000`,
-    }
+      'Set-Cookie': `muxaro_csrf=${csrfToken}; Path=/; SameSite=Lax; Max-Age=2592000${secureAttr}`,
+    },
+    context.request
   );
 };

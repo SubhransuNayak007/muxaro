@@ -329,10 +329,26 @@ export class FallbackStreamAccumulator implements IStreamAccumulator {
             for (const key of keys) {
               store.delete(key);
             }
-            tx.oncomplete = () => resolve();
+            tx.oncomplete = () => {
+              try {
+                this.db?.close();
+              } catch {}
+              this.db = null;
+              resolve();
+            };
           };
-          req.onerror = () => resolve();
+          req.onerror = () => {
+            try {
+              this.db?.close();
+            } catch {}
+            this.db = null;
+            resolve();
+          };
         } catch {
+          try {
+            this.db?.close();
+          } catch {}
+          this.db = null;
           resolve();
         }
       });

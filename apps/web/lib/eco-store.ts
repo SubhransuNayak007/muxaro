@@ -15,6 +15,7 @@ export interface EcoSettings {
   hardwareAcceleration: boolean;
   energySaverBitrate: boolean;
   autoThrottleBattery: boolean;
+  reduceVisualEffects?: boolean;
   maxResolution: 'source' | '1080p' | '720p' | '480p';
   estimatedCarbonSavedGrams: number;
   jobsProcessedEco: number;

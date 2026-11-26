@@ -391,26 +391,33 @@ export async function runTier2CutThrough(opts: Tier2Options): Promise<Tier2Resul
     if (!ffmpegProc.killed) ffmpegProc.kill('SIGKILL');
   }, { once: true });
 
-  // 6. Pipeline FFmpeg stdout → HTTP response
+  // 6. Register FFmpeg error handler BEFORE piping stdout
   let ffmpegError: Error | null = null;
+  const exitPromise = new Promise<number | null>((resolve) => {
+    ffmpegProc.once('error', (err) => {
+      ffmpegError = err;
+      resolve(null);
+    });
+    if (ffmpegProc.exitCode !== null) {
+      resolve(ffmpegProc.exitCode);
+      return;
+    }
+    ffmpegProc.once('exit', (code) => resolve(code));
+  });
+
   try {
     await pipelineAsync(
       ffmpegProc.stdout as unknown as NodeJS.ReadableStream,
       responseWritable,
     );
   } catch (err) {
-    ffmpegError = err instanceof Error ? err : new Error(String(err));
+    if (!ffmpegError) {
+      ffmpegError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   // 7. Wait for FFmpeg to exit (or it already has)
-  const exitCode = await new Promise<number | null>((resolve) => {
-    if (ffmpegProc.exitCode !== null) {
-      resolve(ffmpegProc.exitCode);
-      return;
-    }
-    ffmpegProc.once('exit', (code) => resolve(code));
-    ffmpegProc.once('error', () => resolve(null));
-  });
+  const exitCode = await exitPromise;
 
   // 8. Cleanup loopback server and fetchers
   loopback.close();

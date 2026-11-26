@@ -22,7 +22,11 @@ import type {
 } from './contracts.ts';
 import type { MediaStream } from './types.ts';
 import type { ExtractorResult } from './extractor-ytdlp.ts';
-import { sanitizeFilename } from './security-validator.ts';
+import { sanitizeFilename, validateMediaUrl } from './security-validator.ts';
+
+function hostMatches(host: string, domain: string): boolean {
+  return host === domain || host.endsWith(`.${domain}`);
+}
 
 export interface ExtractedPlatformMedia {
   platform: SupportedPlatform;
@@ -871,30 +875,34 @@ export async function extractPlatformMedia(
 ): Promise<ExtractedPlatformMedia | null> {
   const trimmed = String(rawUrl || '').trim();
   if (!trimmed || !/^https?:\/\//i.test(trimmed)) return null;
+  if (process.env.NODE_ENV === 'production') {
+    const check = validateMediaUrl(trimmed);
+    if (!check.valid) return null;
+  }
 
   try {
     const parsed = new URL(trimmed);
     const host = parsed.hostname.toLowerCase();
 
-    if (host.includes('pinterest.com') || host.includes('pin.it')) {
+    if (hostMatches(host, 'pinterest.com') || hostMatches(host, 'pin.it')) {
       return await extractPinterest(trimmed, options);
     }
-    if (host.includes('twitter.com') || host.includes('x.com')) {
+    if (hostMatches(host, 'twitter.com') || hostMatches(host, 'x.com')) {
       return await extractTwitter(trimmed, options);
     }
-    if (host.includes('reddit.com') || host.includes('redd.it')) {
+    if (hostMatches(host, 'reddit.com') || hostMatches(host, 'redd.it')) {
       return await extractReddit(trimmed, options);
     }
-    if (host.includes('tiktok.com')) {
+    if (hostMatches(host, 'tiktok.com')) {
       return await extractTikTok(trimmed, options);
     }
-    if (host.includes('vimeo.com')) {
+    if (hostMatches(host, 'vimeo.com')) {
       return await extractVimeo(trimmed, options);
     }
-    if (host.includes('instagram.com')) {
+    if (hostMatches(host, 'instagram.com')) {
       return await extractFacebookAndInstagram(trimmed, 'instagram', options);
     }
-    if (host.includes('facebook.com') || host.includes('fb.watch')) {
+    if (hostMatches(host, 'facebook.com') || hostMatches(host, 'fb.watch')) {
       return await extractFacebookAndInstagram(trimmed, 'facebook', options);
     }
 

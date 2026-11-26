@@ -20,8 +20,7 @@ import {
 } from 'lucide-react';
 import { api, getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 import { JobState, ProcessingJob } from '@/lib/types';
-import { normalizeMediaUrl } from '@/lib/url-utils';
-import { useUnifiedQuota, quotaManager } from '@/lib/quota/quota-manager';
+import { normalizeMediaUrl, sanitizeSafeNavigationUrl, generateSecureId } from '@/lib/url-utils';
 import ActiveLinkIndicator from '@/components/ActiveLinkIndicator';
 
 const JobProgress = dynamic(() => import('@/components/JobProgress'), {
@@ -171,12 +170,9 @@ interface PlaylistJobStatus {
 
 export default function PlaylistBatchPage() {
   const [mode, setMode] = useState<'batch' | 'playlist'>('batch');
-  const { quota, refresh: refreshQuota } = useUnifiedQuota();
-  const remainingVideo = quota?.remainingVideoCredits ?? 10;
-  const totalVideoLimit = quota?.dailyVideoLimit ?? 10;
-  const remainingPlaylist = quota?.remainingPlaylistCredits ?? 1;
-  const totalPlaylistLimit = quota?.playlistJobsLimit ?? 1;
-  const maxPlaylistItems = quota?.maxPlaylistItems ?? 50;
+  const maxPlaylistItems = 50;
+  const [filenameTemplate, setFilenameTemplate] = useState<string>('{index}_{title}_{res}');
+  const [skipFailed, setSkipFailed] = useState<boolean>(true);
 
   // Batch state (starts clean and empty)
   const [items, setItems] = useState<BatchEntry[]>([]);
@@ -226,7 +222,7 @@ export default function PlaylistBatchPage() {
     setItems((prev) => [
       ...prev,
       {
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        id: generateSecureId('item_'),
         url: normalized,
         format: batchFormat,
         resolution: batchOp === 'extract_audio' ? 'audio_only' : batchResolution,
@@ -240,12 +236,6 @@ export default function PlaylistBatchPage() {
 
   const handleRunBatch = async () => {
     if (items.length === 0) return;
-    if (items.length > remainingVideo) {
-      setBatchError(
-        `Batch contains ${items.length} items, but only ${remainingVideo} daily video credits remain (Daily limit: ${totalVideoLimit}).`
-      );
-      return;
-    }
 
     setIsBatchSubmitting(true);
     setBatchError(null);
@@ -255,7 +245,7 @@ export default function PlaylistBatchPage() {
     try {
       const apiBase = getApiBaseUrl();
       const csrf = readCsrfTokenFromCookie();
-      const idempotencyKey = `bat_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = generateSecureId('bat_');
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -276,6 +266,8 @@ export default function PlaylistBatchPage() {
           targetFormat: primary.format,
           targetResolution:
             primary.operation === 'extract_audio' ? undefined : primary.resolution,
+          filenameTemplate,
+          skipFailed,
           streamCopy: primary.format === 'native',
           idempotencyKey,
           items: items.map((item) => ({
@@ -309,8 +301,6 @@ export default function PlaylistBatchPage() {
           jobs.push(job);
         }
         setActiveJobs(jobs);
-        quotaManager.recordOptimisticDeduction('video', items.length);
-        refreshQuota().catch(() => {});
         return;
       }
 
@@ -342,8 +332,6 @@ export default function PlaylistBatchPage() {
           zipDownloadUrl: d.zipDownloadUrl || null,
         });
       }
-      quotaManager.recordOptimisticDeduction('video', items.length);
-      refreshQuota().catch(() => {});
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -499,20 +487,13 @@ export default function PlaylistBatchPage() {
       return;
     }
 
-    if (remainingPlaylist <= 0) {
-      setPlaylistError(
-        `Daily playlist allowance reached (0 of ${totalPlaylistLimit} available). Your slot restores in a rolling 24-hour cycle.`
-      );
-      return;
-    }
-
     setIsPlaylistSubmitting(true);
     setPlaylistError(null);
     setPlaylistBackendDisconnected(false);
     try {
       const apiBase = getApiBaseUrl();
       const csrf = readCsrfTokenFromCookie();
-      const idempotencyKey = `plb_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const idempotencyKey = generateSecureId('plb_');
       const audioOnly = isAudioFormat(playlistFormat);
       const operation = audioOnly
         ? 'EXTRACT_AUDIO'
@@ -536,6 +517,8 @@ export default function PlaylistBatchPage() {
           operation,
           targetFormat: playlistFormat,
           targetResolution: audioOnly ? undefined : playlistResolution,
+          filenameTemplate,
+          skipFailed,
           packageAsZip: packageZip,
           idempotencyKey,
         }),
@@ -564,8 +547,6 @@ export default function PlaylistBatchPage() {
         zipDownloadUrl: d.zipDownloadUrl || null,
         items: Array.isArray(d.items) ? d.items : undefined,
       });
-      quotaManager.recordOptimisticDeduction('playlist', 1);
-      refreshQuota().catch(() => {});
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -581,9 +562,6 @@ export default function PlaylistBatchPage() {
     playlistResolution,
     packageZip,
     inspected,
-    remainingPlaylist,
-    totalPlaylistLimit,
-    refreshQuota,
   ]);
 
   useEffect(() => {
@@ -690,13 +668,17 @@ export default function PlaylistBatchPage() {
   const isPlaylistPartial = playlistJob?.status === 'PARTIAL_FAILURE';
   const isPlaylistFailed = playlistJob?.status === 'FAILED';
   const playlistZipHref = playlistJob
-    ? playlistJob.zipDownloadUrl ||
-      `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        playlistJob.zipDownloadUrl ||
+          `${getApiBaseUrl()}/playlists/jobs/${encodeURIComponent(playlistJob.playlistJobId)}/download`
+      )
+    : undefined;
   const batchZipHref = batchSession
-    ? batchSession.zipDownloadUrl ||
-      `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
-    : null;
+    ? sanitizeSafeNavigationUrl(
+        batchSession.zipDownloadUrl ||
+          `${getApiBaseUrl()}/batches/${encodeURIComponent(batchSession.id)}/download.zip`
+      )
+    : undefined;
   const isBatchZipReady =
     !!batchSession &&
     (batchSession.status === 'COMPLETED' ||
@@ -899,7 +881,7 @@ export default function PlaylistBatchPage() {
                       Items in queue ({items.length})
                     </span>
                     <span>
-                      Uses {items.length} of {remainingVideo} available daily video jobs ({totalVideoLimit} total)
+                      {items.length} queued for batch packaging
                     </span>
                   </div>
 
@@ -1062,7 +1044,7 @@ export default function PlaylistBatchPage() {
                   <div className="flex items-center gap-2">
                     <ListVideo className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
                     <span>
-                      Daily playlist quota: <strong className="text-content font-semibold">{remainingPlaylist} of {totalPlaylistLimit}</strong> available today
+                      Playlist ZIP packaging with up to {maxPlaylistItems} items
                     </span>
                   </div>
                   <span>Max {maxPlaylistItems} items per archive</span>
@@ -1200,20 +1182,33 @@ export default function PlaylistBatchPage() {
                     </select>
                   </div>
 
-                  <div className="flex items-end pb-1.5">
-                    <label
-                      htmlFor="pb-playlist-zip"
-                      className="flex items-center gap-2.5 text-sm text-content cursor-pointer"
-                    >
-                      <input
-                        id="pb-playlist-zip"
-                        type="checkbox"
-                        checked={packageZip}
-                        onChange={(e) => setPackageZip(e.target.checked)}
-                        className="w-4 h-4 rounded-sm border border-line accent-brand"
-                      />
-                      <span>Download all as one ZIP archive</span>
-                    </label>
+                  <div className="sm:col-span-3 grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-line-subtle">
+                    <div>
+                      <label htmlFor="pb-filename-template" className="block text-xs font-medium text-content-secondary mb-1.5">
+                        ZIP filename template
+                      </label>
+                      <select
+                        id="pb-filename-template"
+                        value={filenameTemplate}
+                        onChange={(e) => setFilenameTemplate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-sm bg-base border border-line text-content text-xs font-mono"
+                      >
+                        <option value="{index}_{title}_{res}">{'{index}_{title}_{res}'}</option>
+                        <option value="{index} - {title}">{'{index} - {title}'}</option>
+                        <option value="{title}_{res}">{'{title}_{res}'}</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 text-xs text-content cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={skipFailed}
+                          onChange={(e) => setSkipFailed(e.target.checked)}
+                          className="w-4 h-4 rounded-sm border border-line accent-brand"
+                        />
+                        <span>Skip unavailable items automatically so one dead link never aborts the ZIP</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
 
@@ -1277,13 +1272,11 @@ export default function PlaylistBatchPage() {
                 <button
                   type="button"
                   onClick={submitPlaylist}
-                  disabled={isPlaylistSubmitting || !playlistUrl.trim() || remainingPlaylist <= 0}
+                  disabled={isPlaylistSubmitting || !playlistUrl.trim()}
                   className="muxaro-btn-primary px-6 py-3 text-sm whitespace-nowrap active:opacity-90 disabled:opacity-50"
                 >
                   {isPlaylistSubmitting
                     ? 'Starting playlist…'
-                    : remainingPlaylist <= 0
-                    ? 'Daily playlist limit reached'
                     : 'Process playlist'}
                 </button>
 
@@ -1369,9 +1362,9 @@ export default function PlaylistBatchPage() {
                               )}
                               <span className="text-content truncate">{item.title}</span>
                             </div>
-                            {item.status === 'READY' && item.downloadUrl ? (
+                            {item.status === 'READY' && sanitizeSafeNavigationUrl(item.downloadUrl) ? (
                               <a
-                                href={item.downloadUrl}
+                                href={sanitizeSafeNavigationUrl(item.downloadUrl) ?? '#'}
                                 download
                                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-sm border border-line bg-surface text-xs font-semibold text-brand hover:border-brand transition-colors active:opacity-90 whitespace-nowrap"
                               >
@@ -1403,13 +1396,13 @@ export default function PlaylistBatchPage() {
             <div className="muxaro-media-card p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-content">
-                  Daily allowance overview
+                  Batch &amp; playlist capabilities
                 </span>
                 <Link
-                  href="/credits"
+                  href="/docs/video-studio"
                   className="text-xs text-brand hover:underline font-medium"
                 >
-                  View live status
+                  Read guide
                 </Link>
               </div>
               <ul className="space-y-3 text-xs text-content-secondary leading-relaxed">
@@ -1419,7 +1412,7 @@ export default function PlaylistBatchPage() {
                     aria-hidden="true"
                   />
                   <span>
-                    <strong className="text-content font-semibold">{totalVideoLimit}</strong> individual video or audio jobs every rolling 24 hours (<strong className="text-content font-semibold">{remainingVideo}</strong> remaining).
+                    Queue multi-URL video or audio batches with unified or per-item format rules.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -1428,7 +1421,7 @@ export default function PlaylistBatchPage() {
                     aria-hidden="true"
                   />
                   <span>
-                    <strong className="text-content font-semibold">{totalPlaylistLimit}</strong> separate playlist job (up to {maxPlaylistItems} items) every rolling 24 hours (<strong className="text-content font-semibold">{remainingPlaylist}</strong> remaining).
+                    Package up to <strong className="text-content font-semibold">{maxPlaylistItems}</strong> authorised items into a single organized ZIP archive.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -1437,7 +1430,7 @@ export default function PlaylistBatchPage() {
                     aria-hidden="true"
                   />
                   <span>
-                    Playlist jobs never subtract from your {totalVideoLimit} individual media jobs.
+                    Skip-failed resilience and custom filename templates with 60-minute ephemeral cleanup.
                   </span>
                 </li>
               </ul>

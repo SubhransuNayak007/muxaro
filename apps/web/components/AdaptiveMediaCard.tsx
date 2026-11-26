@@ -16,8 +16,11 @@ import {
   ArrowDown,
   Zap,
   ShieldCheck,
+  VolumeX,
+  Volume2,
 } from 'lucide-react';
 import Link from 'next/link';
+import TurnstileChallenge from './TurnstileChallenge';
 import { MediaManifest, ProcessingJob } from '@/lib/types';
 import { formatBytes, formatDuration } from '@/lib/formatters';
 import {
@@ -29,6 +32,7 @@ import {
 } from '@/lib/api-client';
 import { startZeroWaitStream } from '@/lib/stream-engine';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
+import { sanitizeSafeNavigationUrl } from '@/lib/url-utils';
 import { ResumableMultipartUploader } from '@/lib/multipart-uploader';
 import {
   normalizeVideoOptions,
@@ -220,12 +224,14 @@ export function formatCleanDisplayUrl(rawUrl: string): string {
 
 interface AdaptiveMediaCardProps {
   manifest: MediaManifest;
+  initialPreset?: string;
   onReset: () => void;
   onJobStarted?: (job: ProcessingJob) => void;
 }
 
 export default function AdaptiveMediaCard({
   manifest,
+  initialPreset,
   onReset,
   onJobStarted,
 }: AdaptiveMediaCardProps) {
@@ -233,14 +239,9 @@ export default function AdaptiveMediaCard({
   const { isInstalled: isDirectBridgeInstalled } = useMuxaroBridge();
   const { settings, mounted: settingsMounted } = useMuxaroSettings();
 
-  // Normalize Video & Audio Options (Mobile capped to 2K, Desktop up to 8K)
+  // Normalize Video & Audio Options (Full 8K support on both Mobile & Desktop)
   const allVideoOptions = useMemo(() => normalizeVideoOptions(manifest), [manifest]);
-  const videoOptions = useMemo(() => {
-    if (isDeviceLoaded && isMobile) {
-      return allVideoOptions.filter((opt) => opt.height <= 1440);
-    }
-    return allVideoOptions;
-  }, [allVideoOptions, isDeviceLoaded, isMobile]);
+  const videoOptions = allVideoOptions;
 
   const audioTracks = useMemo(() => normalizeAudioOptions(manifest), [manifest]);
 
@@ -249,19 +250,42 @@ export default function AdaptiveMediaCard({
     return (manifest.platform as SupportedPlatform) || detectPlatform(manifest.sourceUrl);
   }, [manifest.platform, manifest.sourceUrl]);
 
-  // Active Segmented Tab
-  const [activeTab, setActiveTab] = useState<SegmentedControlTab>('video');
+  // Active Segmented Tab (honors Omnibox preset if audio)
+  const [activeTab, setActiveTab] = useState<SegmentedControlTab>(() =>
+    initialPreset === 'audio' ? 'audio' : 'video'
+  );
 
   // Video State
   const [selectedVideoId, setSelectedVideoId] = useState<string>('');
   const [videoContainer, setVideoContainer] = useState<VideoContainer>('mp4');
+  const [muteVideo, setMuteVideo] = useState<boolean>(() => initialPreset === 'mute');
   const [showAllStreams, setShowAllStreams] = useState<boolean>(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [challengeNonce, setChallengeNonce] = useState<number>(0);
 
   // Audio State
   const [selectedAudioId, setSelectedAudioId] = useState<AudioFormatId>('mp3');
 
-  // Sync with persistent user settings
+  // Sync with HeroOmnibox preset or persistent user settings
   useEffect(() => {
+    const presetTargetMap: Record<string, number> = {
+      '8k': 4320,
+      '4k': 2160,
+      '2k': 1440,
+      '1080p': 1080,
+      '720p': 720,
+      '480p': 480,
+    };
+    const presetHeight = initialPreset ? presetTargetMap[initialPreset] : undefined;
+    if (presetHeight && videoOptions.length > 0) {
+      const exactOrClosest =
+        videoOptions.find((o) => o.height === presetHeight) ||
+        videoOptions.find((o) => o.height <= presetHeight);
+      if (exactOrClosest) {
+        setSelectedVideoId(exactOrClosest.id);
+        return;
+      }
+    }
     if (!settingsMounted) return;
     if (settings.containerFormat !== 'auto') {
       setVideoContainer(settings.containerFormat);
@@ -269,6 +293,7 @@ export default function AdaptiveMediaCard({
     if (settings.audioFormat) {
       setSelectedAudioId(settings.audioFormat);
     }
+    setMuteVideo(initialPreset === 'mute' || Boolean(settings.muteVideo));
     if (settings.videoQuality !== 'auto') {
       const targetHeight = parseInt(settings.videoQuality, 10);
       if (Number.isFinite(targetHeight)) {
@@ -278,7 +303,7 @@ export default function AdaptiveMediaCard({
         }
       }
     }
-  }, [settingsMounted, settings.containerFormat, settings.audioFormat, settings.videoQuality, videoOptions]);
+  }, [initialPreset, settingsMounted, settings.containerFormat, settings.audioFormat, settings.videoQuality, videoOptions]);
 
   // Subtitles State
   const [selectedSubtitleLang, setSelectedSubtitleLang] = useState<string>('English');
@@ -307,9 +332,11 @@ export default function AdaptiveMediaCard({
   // Trigger browser download immediately
   const triggerBrowserDownload = useCallback((url: string, filename?: string) => {
     if (typeof window === 'undefined' || !url) return;
+    const safeUrl = sanitizeSafeNavigationUrl(url);
+    if (!safeUrl) return;
     try {
       const link = document.createElement('a');
-      link.href = url;
+      link.href = safeUrl;
       if (filename) {
         link.setAttribute('download', filename);
       } else {
@@ -321,7 +348,7 @@ export default function AdaptiveMediaCard({
       link.click();
       document.body.removeChild(link);
     } catch {
-      window.open(url, '_blank');
+      window.open(safeUrl, '_blank', 'noopener,noreferrer');
     }
   }, []);
 
@@ -476,15 +503,9 @@ export default function AdaptiveMediaCard({
     onReset();
   };
 
-  // Primary Download Dispatcher (Instant Download Fast-Path)
+  // Primary Download Dispatcher: submit tracked backend job and hand off to JobProgress
   const handleStartDownload = async () => {
     if (submitting || stream.status === 'PROCESSING') return;
-
-    // Fast-path: if file is already processed or ready, save immediately
-    if (isReady && fallbackDownloadUrl) {
-      triggerBrowserDownload(fallbackDownloadUrl);
-      return;
-    }
 
     setSubmitting(true);
     setErrorMessage(null);
@@ -493,29 +514,17 @@ export default function AdaptiveMediaCard({
 
     const isAudioOnly = activeTab === 'audio';
     const isCarousel = activeTab === 'carousel';
-
     const operation = isCarousel
       ? 'BATCH'
       : isAudioOnly
       ? 'EXTRACT_AUDIO'
       : 'MEDIA_CONVERT';
-
-    const targetFormat = isCarousel
-      ? 'zip'
-      : isAudioOnly
-      ? selectedAudioPreset.ext
-      : videoContainer;
-
-    const targetResolution =
-      isAudioOnly || isCarousel
-        ? undefined
-        : selectedVideoOption?.height
-        ? `${selectedVideoOption.height}p`
-        : undefined;
-
-    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(manifest.sourceUrl || '');
-    const videoStreamUrl = selectedVideoOption?.stream?.url;
-    const audioStreamUrl = manifest.audioStreams?.[0]?.url;
+    const targetFormat = isAudioOnly ? selectedAudioPreset.ext : videoContainer;
+    const targetResolution = isAudioOnly
+      ? undefined
+      : selectedVideoOption?.height
+      ? `${selectedVideoOption.height}p`
+      : undefined;
 
     // Local Upload Processing Path (homepage `/` file drops):
     // Route cleanly to in-browser FFmpegWorkerClient Web Worker first, or upload via
@@ -578,6 +587,7 @@ export default function AdaptiveMediaCard({
             targetFormat,
             workerRes.sizeBytes || localFile.size
           );
+          setSubmitting(false);
           return;
         } catch (workerErr: any) {
           console.warn(
@@ -674,67 +684,16 @@ export default function AdaptiveMediaCard({
       }
     }
 
-    // Check if separate adaptive tracks require client-side muxing
-    const isAdaptiveVideoOnly = isYouTube && !isAudioOnly && selectedVideoOption && selectedVideoOption.height > 720;
-
-    // Client-Side StreamEngine Fast-Path:
-    // When video and audio streams are available directly, mux them client-side in the browser
-    if (isAdaptiveVideoOnly && videoStreamUrl && audioStreamUrl) {
-      setClientStreamProgress({
-        stage: 'connecting',
-        percent: 5,
-        message: 'Connecting to direct stream pipelines…',
-      });
-      try {
-        const controller = await startZeroWaitStream({
-          sourceUrl: manifest.sourceUrl,
-          videoUrl: videoStreamUrl,
-          audioUrl: audioStreamUrl,
-          format: videoContainer === 'webm' ? 'webm' : 'mp4',
-          filename: `${manifest.title || 'media'}.${videoContainer}`,
-          videoSizeBytes: selectedVideoOption.estimatedSizeBytes,
-          audioSizeBytes: manifest.audioStreams?.[0]?.estimatedSizeBytes,
-          onProgress: (p) => {
-            setClientStreamProgress({
-              stage: p.stage,
-              percent: p.percent,
-              speed: p.speedBytesPerSec > 0 ? `${(p.speedBytesPerSec / (1024 * 1024)).toFixed(1)} MB/s` : undefined,
-              message: p.message,
-            });
-          },
-          onError: (streamErr) => {
-            console.warn('[StreamEngine] Client stream error, falling back to server job:', streamErr);
-          },
-        });
-        const res = await controller.completion;
-        setClientStreamProgress(null);
-        const dlUrl = res.downloadUrl;
-        if (dlUrl) {
-          setFallbackDownloadUrl(dlUrl);
-          autoTriggeredRef.current = true;
-          if (res.sinkType === 'service-worker') {
-            triggerBrowserDownload(dlUrl, res.filename);
-          }
-          saveToDownloadsHistory(`dl_${Date.now()}`, dlUrl, manifest.title, videoContainer, res.totalBytes);
-        } else if (res.savedToDiskDirectly) {
-          autoTriggeredRef.current = true;
-          saveToDownloadsHistory(`dl_${Date.now()}`, '', manifest.title, videoContainer, res.totalBytes);
-        }
-        setSubmitting(false);
-        return;
-      } catch (streamInitErr) {
-        console.warn('[StreamEngine] Client stream failed, falling back to server job:', streamInitErr);
-        setClientStreamProgress(null);
-      }
+    if (!manifest.isLocalUpload && !captchaToken) {
+      setErrorMessage('Please wait a moment for browser verification to complete, then click Retry.');
+      setChallengeNonce((n) => n + 1);
+      setSubmitting(false);
+      return;
     }
 
-    const rawDirectStreamUrl = isAudioOnly
-      ? (manifest.audioStreams?.[0]?.url || manifest.directStreamUrl)
-      : (selectedVideoOption?.stream?.url || manifest.directStreamUrl);
-    const directStreamUrl =
-      rawDirectStreamUrl && !/^blob:/i.test(rawDirectStreamUrl) ? rawDirectStreamUrl : undefined;
-
+    // Submit real tracked job -> HomePage opens JobProgress with live percentage & ETA
     try {
+      const shouldMute = !isAudioOnly && muteVideo;
       const job = await api.createJob({
         sourceUrl: manifest.sourceUrl,
         mediaUrl: manifest.sourceUrl,
@@ -743,93 +702,32 @@ export default function AdaptiveMediaCard({
         targetResolution,
         formatId: selectedVideoOption?.formatId,
         videoFormatId: selectedVideoOption?.formatId,
-        audioFormatId: manifest.audioStreams?.[0]?.formatId || 'ba/b',
+        ...(shouldMute
+          ? { muteVideo: true, noAudio: true }
+          : { audioFormatId: manifest.audioStreams?.[0]?.formatId || 'ba/b' }),
+        captchaToken: captchaToken || undefined,
         title: manifest.title,
-        directStreamUrl,
-        directMimeType: (manifest as any).directMimeType || 'video/mp4',
         fileSizeBytes: selectedVideoOption?.estimatedSizeBytes || manifest.fileSizeBytes,
       } as any);
 
       if (job && job.id) {
         setActiveJobId(job.id);
         onJobStarted?.(job);
-
-        // Zero-Hop Client Handover: direct origin CDN stream
-        if (job.deliveryMode === 'zero-hop') {
-          const streamUrl = job.directStreamUrl || job.downloadUrl || directStreamUrl;
-          if (streamUrl && typeof document !== 'undefined') {
-            const filename = job.outputFilename || `${manifest.title}.${targetFormat}`;
-            const a = document.createElement('a');
-            a.href = streamUrl;
-            a.download = filename;
-            a.rel = 'noreferrer';
-            a.referrerPolicy = 'no-referrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-
-            setFallbackDownloadUrl(streamUrl);
-            autoTriggeredRef.current = true;
-            saveToDownloadsHistory(
-              job.id,
-              streamUrl,
-              manifest.title,
-              targetFormat,
-              job.fileSizeBytes || job.outputSizeBytes || 45 * 1024 * 1024
-            );
-            return;
-          }
-        }
-
-        // Instant Download Fast-Path: If ready or downloadUrl returned immediately
-        const readyUrl =
-          job.downloadUrl ||
-          (job as any).url ||
-          (job.status === 'READY' ? `/api/v1/jobs/${encodeURIComponent(job.id)}/download` : null);
-
-        if (readyUrl && job.status === 'READY') {
-          setFallbackDownloadUrl(readyUrl);
-          autoTriggeredRef.current = true;
-          triggerBrowserDownload(readyUrl, job.outputFilename);
-          saveToDownloadsHistory(
-            job.id,
-            readyUrl,
-            manifest.title,
-            targetFormat,
-            job.outputSizeBytes || job.artifact?.size || 45 * 1024 * 1024
-          );
-        }
+      } else {
+        throw new Error('Could not create download job.');
       }
     } catch (err: unknown) {
-      if (directStreamUrl) {
-        console.info('[MUXARO Stream] Direct browser stream active from origin CDN.');
-        setFallbackDownloadUrl(directStreamUrl);
-        autoTriggeredRef.current = true;
-        triggerBrowserDownload(directStreamUrl);
-        saveToDownloadsHistory(
-          `dl_${Date.now()}`,
-          directStreamUrl,
-          manifest.title,
-          targetFormat,
-          selectedVideoOption?.estimatedSizeBytes || 45 * 1024 * 1024
-        );
-        setErrorMessage(null);
-      } else {
-        const isBlocked = /(?:youtube\.com|youtu\.be|instagram\.com|instagr\.am)/i.test(manifest.sourceUrl || '');
-        if (isBlocked && isMobile) {
-          console.warn('[MUXARO Handover] Media host blocks datacenter IPs. Desktop Direct or custom worker required.');
-          setErrorMessage('This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.');
-        } else {
-          const displayErr = extractDisplayError(
-            err,
-            isBlocked
-              ? 'This host blocks free cloud servers. Use Desktop Direct or connect a custom worker.'
-              : 'Direct stream available below. Click Save File Now to proceed.'
-          );
-          console.error('[MUXARO Download Error]', displayErr, err);
-          setErrorMessage(displayErr);
-        }
+      const displayErr = extractDisplayError(
+        err,
+        'Download failed to start. Please verify the link and try again.'
+      );
+      const errStatus = (err as { status?: number } | null)?.status;
+      if (errStatus === 403 && /verification|captcha/i.test(displayErr)) {
+        setCaptchaToken(null);
+        setChallengeNonce((n) => n + 1);
       }
+      console.error('[MUXARO Download Error]', displayErr, err);
+      setErrorMessage(displayErr);
     } finally {
       setSubmitting(false);
     }
@@ -889,15 +787,15 @@ export default function AdaptiveMediaCard({
 
   const activeChoiceHeading = useMemo(() => {
     if (activeTab === 'video') {
-      return `${selectedTierName} ${videoContainer.toUpperCase()} · ${selectedVideoSize}`;
+      return `${selectedTierName} ${videoContainer.toUpperCase()}${muteVideo ? ' (Muted)' : ''} — ${selectedVideoSize}`;
     }
     if (activeTab === 'audio') {
-      return `${selectedAudioPreset.label} · ${audioEstSize}`;
+      return `${selectedAudioPreset.label} — ${audioEstSize}`;
     }
     if (activeTab === 'subtitles') {
-      return `${selectedSubtitleLang} Subtitles · .${selectedSubtitleExt.toUpperCase()}`;
+      return `${selectedSubtitleLang} Subtitles (.${selectedSubtitleExt.toUpperCase()})`;
     }
-    return `Carousel Archive · ${selectedCarouselItems.size || manifest.items?.length || 0} Items`;
+    return `Carousel Archive (${selectedCarouselItems.size || manifest.items?.length || 0} items)`;
   }, [
     activeTab,
     selectedTierName,
@@ -913,6 +811,9 @@ export default function AdaptiveMediaCard({
 
   const activeChoiceSubline = useMemo(() => {
     if (activeTab === 'video') {
+      if (muteVideo) {
+        return 'Video stream only · Audio track stripped cleanly';
+      }
       const is8K = Boolean(selectedVideoOption && selectedVideoOption.height >= 4320);
       const is4K = Boolean(selectedVideoOption && selectedVideoOption.height >= 2160 && selectedVideoOption.height < 4320);
       if (is8K) {
@@ -982,7 +883,7 @@ export default function AdaptiveMediaCard({
         <div className="flex items-center gap-3 min-w-0">
           {/* 16px Minimal Radio Indicator */}
           <div
-            className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-all ${
+            className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-[background-color,border-color] duration-150 ${
               isSelected
                 ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white'
                 : 'border-black/20 dark:border-white/20 bg-transparent'
@@ -997,36 +898,26 @@ export default function AdaptiveMediaCard({
           </span>
 
           {/* Technical Spec Inline in Refined Muted Text */}
-          <div className="flex items-center gap-1.5 text-xs text-content-secondary tabular-nums min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-content-secondary tabular-nums min-w-0">
             <span>{opt.height}p</span>
-            <span className="text-content-muted">·</span>
-            <span>{framerate}</span>
-            <span className="text-content-muted">·</span>
-            <span>{humanizeCodec(opt.codec)}</span>
+            <span className="text-content-muted">{framerate}</span>
+            <span className="text-content-muted">{humanizeCodec(opt.codec)}</span>
 
             {/* Clear Tier Badge */}
-            <span className="text-content-muted">·</span>
             <span className={`text-[10px] px-2 py-0.5 rounded ${badge.className}`}>
               {badge.label}
             </span>
 
             {opt.hdr && (
-              <>
-                <span className="text-content-muted">·</span>
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
-                  HDR
-                </span>
-              </>
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                HDR
+              </span>
             )}
 
             {opt.recommended && (
-              <>
-                <span className="text-content-muted hidden sm:inline">·</span>
-                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-normal text-content-secondary">
-                  <span className="w-1.5 h-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500" />
-                  Best balance
-                </span>
-              </>
+              <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-surface-elevated border border-line-subtle text-content-secondary">
+                Recommended
+              </span>
             )}
           </div>
         </div>
@@ -1090,7 +981,7 @@ export default function AdaptiveMediaCard({
               )}
               {manifest.author && <span className="text-content-muted">·</span>}
               <a
-                href={manifest.sourceUrl}
+                href={sanitizeSafeNavigationUrl(manifest.sourceUrl) ?? '#'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-block truncate max-w-[180px] sm:max-w-[240px] md:max-w-[280px] font-mono text-[11px] text-content-secondary hover:text-content hover:underline"
@@ -1152,7 +1043,7 @@ export default function AdaptiveMediaCard({
               aria-selected={isActive}
               aria-controls={`panel-${tab.id}`}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-all text-center flex items-center justify-center gap-1.5 select-none ${
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-[background-color,color,box-shadow] duration-150 text-center flex items-center justify-center gap-1.5 select-none ${
                 isActive
                   ? 'bg-white dark:bg-zinc-900 text-content shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-black/[0.06] dark:ring-white/[0.1] font-semibold'
                   : 'text-content-secondary hover:text-content'
@@ -1165,53 +1056,49 @@ export default function AdaptiveMediaCard({
         })}
       </div>
 
-      {/* Processing Architecture & Execution Lane Indicator */}
-      <div className="p-3.5 sm:p-4 rounded-xl border border-black/[0.08] dark:border-white/[0.08] bg-surface-elevated/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-        <div className="flex items-start sm:items-center gap-2.5 min-w-0">
-          <div className="w-7 h-7 rounded-lg bg-black/[0.05] dark:bg-white/[0.08] flex items-center justify-center shrink-0 mt-0.5 sm:mt-0 text-content">
-            <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-          </div>
-          <div className="space-y-0.5 min-w-0">
-            <div className="font-semibold text-content flex items-center gap-2">
-              <span>Processing Routing Architecture</span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/[0.06] dark:bg-white/[0.08] text-content-secondary font-normal">
-                Auto-Routed
-              </span>
-            </div>
-            <p className="text-content-secondary text-[11px] sm:text-xs leading-relaxed">
-              <strong className="font-semibold text-content">≤ 2K (1440p) & Audio:</strong> Instant cloud-side processing with zero wait time.
-              <span className="mx-1.5 text-content-muted hidden sm:inline">|</span>
-              <br className="sm:hidden" />
-              <strong className="font-semibold text-content">8K & 4K:</strong> Executes locally with direct zero-loss stream pairing for maximum fidelity.
-            </p>
-          </div>
-        </div>
-        <div className="shrink-0 self-start sm:self-auto pl-9 sm:pl-0">
-          {activeTab === 'audio' || (selectedVideoOption && selectedVideoOption.height <= 1440) ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-[11px] font-mono font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-              Instant Cloud Stream
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-[11px] font-mono font-semibold shadow-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 dark:bg-emerald-500 animate-pulse shrink-0" />
-              8K Local Ultra HD Engine
-            </span>
-          )}
-        </div>
-      </div>
-
       {/* 3. Tab Panel 1: Video High-Density Architectural Resolution Ledger */}
       {activeTab === 'video' && (
-        <div id="panel-video" role="tabpanel" aria-labelledby="tab-video" className="space-y-3">
+        <div id="panel-video" role="tabpanel" aria-labelledby="tab-video" className="muxaro-panel-swap space-y-3">
           {/* Header Toolbar Row */}
-          <div className="flex items-center justify-between gap-3 pb-1">
-            <span className="text-xs font-medium uppercase tracking-[0.08em] text-content-secondary">
-              Resolution
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-semibold text-content-secondary">
+                Resolution
+              </span>
+              {selectedVideoOption && selectedVideoOption.height <= 1440 ? (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 text-[11px] font-mono font-medium">
+                  Instant Cloud Stream
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-[11px] font-mono font-semibold">
+                  Local Direct Stream
+                </span>
+              )}
+            </div>
 
-            {/* Container Format Selector */}
-            <div className="flex items-center p-0.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] text-xs font-medium">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Mute Sound Toggle */}
+              <button
+                type="button"
+                aria-pressed={muteVideo}
+                onClick={() => setMuteVideo((prev) => !prev)}
+                title={muteVideo ? 'Audio will be stripped (video only)' : 'Include original audio track'}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  muteVideo
+                    ? 'bg-content text-base border-content font-semibold'
+                    : 'bg-black/[0.04] dark:bg-white/[0.06] border-black/[0.06] dark:border-white/[0.08] text-content-secondary hover:text-content'
+                }`}
+              >
+                {muteVideo ? (
+                  <VolumeX className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                )}
+                <span>{muteVideo ? 'Sound Muted' : 'Mute Sound'}</span>
+              </button>
+
+              {/* Container Format Selector */}
+              <div className="flex items-center p-0.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/[0.08] text-xs font-medium">
               {(['mp4', 'mkv', 'webm'] as VideoContainer[]).map((c) => (
                 <button
                   key={c}
@@ -1226,6 +1113,7 @@ export default function AdaptiveMediaCard({
                   {c}
                 </button>
               ))}
+              </div>
             </div>
           </div>
 
@@ -1257,8 +1145,8 @@ export default function AdaptiveMediaCard({
 
                     {rawVariants.length > 0 && (
                       <div className="p-3 bg-black/[0.02] dark:bg-white/[0.02] space-y-1">
-                        <div className="text-[10px] font-medium text-content-secondary uppercase tracking-wider px-1">
-                          Alternative Stream Codecs
+                        <div className="text-[11px] font-medium text-content-secondary px-1">
+                          Alternative stream codecs
                         </div>
                         <div className="divide-y divide-black/[0.04] dark:divide-white/[0.04]">
                           {rawVariants.map((opt) => {
@@ -1293,21 +1181,21 @@ export default function AdaptiveMediaCard({
               </div>
             )}
 
-            {/* Desktop 8K/4K Direct Banner - Strictly client-side to prevent SSR hydration mismatch */}
+            {/* Desktop 8K/4K Direct Banner */}
             {isDeviceLoaded && isDesktop && selectedVideoOption && selectedVideoOption.height > 1440 && (
               <div className="p-3.5 rounded-xl border border-line bg-surface-elevated text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 text-content">
-                  <Zap className="w-4 h-4 text-brand-violet shrink-0" aria-hidden="true" />
+                  <Zap className="w-4 h-4 text-content shrink-0" aria-hidden="true" />
                   <span>
                     {isDirectBridgeInstalled
-                      ? '⚡ MUXARO Direct Active — 8K/4K processes locally in your browser with zero cloud restrictions.'
-                      : '8K/4K media requires MUXARO Direct companion for in-browser local stream processing.'}
+                      ? 'MUXARO Direct Active — 8K/4K streams locally in your browser without cloud caps.'
+                      : '8K/4K streams route locally via MUXARO Direct companion.'}
                   </span>
                 </div>
                 {!isDirectBridgeInstalled && (
                   <Link
                     href={`/tools/direct-helper?url=${encodeURIComponent(manifest.sourceUrl)}`}
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-violet hover:underline shrink-0"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-content hover:underline shrink-0"
                   >
                     <span>Install Helper Script</span>
                     <ArrowDown className="w-3 h-3" />
@@ -1316,10 +1204,10 @@ export default function AdaptiveMediaCard({
               </div>
             )}
 
-            {/* Mobile Device 2K Notice - Strictly client-side to prevent SSR hydration mismatch */}
+            {/* Mobile Device Up to 8K Notice */}
             {isDeviceLoaded && isMobile && (
               <div className="p-3 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-center gap-2">
-                <span>📱 Mobile Mode: Server-side stream copy (Up to 2K). Files download natively without browser extensions.</span>
+                <span>Mobile Mode: Full up to 8K cloud remux &amp; lossless downloads saved directly to your device.</span>
               </div>
             )}
           </div>
@@ -1328,10 +1216,10 @@ export default function AdaptiveMediaCard({
 
       {/* 4. Tab Panel 2: Audio Extraction Matrix Ledger */}
       {activeTab === 'audio' && (
-        <div id="panel-audio" role="tabpanel" aria-labelledby="tab-audio" className="space-y-3">
+        <div id="panel-audio" role="tabpanel" aria-labelledby="tab-audio" className="muxaro-panel-swap space-y-3">
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-medium uppercase tracking-[0.08em] text-content-secondary">
-              Audio Quality
+            <span className="text-xs font-semibold text-content-secondary">
+              Audio quality
             </span>
           </div>
 
@@ -1353,7 +1241,7 @@ export default function AdaptiveMediaCard({
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div
-                      className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-all ${
+                      className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-[background-color,border-color] duration-150 ${
                         isSelected
                           ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white'
                           : 'border-black/20 dark:border-white/20 bg-transparent'
@@ -1366,14 +1254,12 @@ export default function AdaptiveMediaCard({
                       {preset.label}
                     </span>
 
-                    <div className="flex items-center gap-1.5 text-xs text-content-secondary tabular-nums min-w-0 truncate">
+                    <div className="flex items-center gap-2 text-xs text-content-secondary tabular-nums min-w-0 truncate">
                       <span>{preset.bitrate}</span>
-                      <span className="text-content-muted">·</span>
                       <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 shrink-0">
                         {preset.badge}
                       </span>
-                      <span className="text-content-muted hidden md:inline">·</span>
-                      <span className="hidden md:inline truncate">{preset.desc}</span>
+                      <span className="hidden md:inline text-content-muted truncate">{preset.desc}</span>
                     </div>
                   </div>
 
@@ -1391,9 +1277,9 @@ export default function AdaptiveMediaCard({
 
       {/* 5. Tab Panel 3: Subtitles Ledger */}
       {activeTab === 'subtitles' && (
-        <div id="panel-subtitles" role="tabpanel" aria-labelledby="tab-subtitles" className="space-y-3">
+        <div id="panel-subtitles" role="tabpanel" aria-labelledby="tab-subtitles" className="muxaro-panel-swap space-y-3">
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-medium uppercase tracking-[0.08em] text-content-secondary">
+            <span className="text-xs font-semibold text-content-secondary">
               Subtitles
             </span>
 
@@ -1430,7 +1316,7 @@ export default function AdaptiveMediaCard({
                 >
                   <div className="flex items-center gap-3">
                     <div
-                      className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-all ${
+                      className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 border transition-[background-color,border-color] duration-150 ${
                         isSelected
                           ? 'border-zinc-950 dark:border-white bg-zinc-950 dark:bg-white'
                           : 'border-black/20 dark:border-white/20 bg-transparent'
@@ -1452,10 +1338,10 @@ export default function AdaptiveMediaCard({
 
       {/* 6. Tab Panel 4: Carousel Grid (Only if multi-item carousel) */}
       {activeTab === 'carousel' && hasCarousel && (
-        <div id="panel-carousel" role="tabpanel" aria-labelledby="tab-carousel" className="space-y-3">
+        <div id="panel-carousel" role="tabpanel" aria-labelledby="tab-carousel" className="muxaro-panel-swap space-y-3">
           <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-medium uppercase tracking-[0.08em] text-content-secondary">
-              Carousel Items
+            <span className="text-xs font-semibold text-content-secondary">
+              Carousel items
             </span>
             <button
               type="button"
@@ -1489,7 +1375,7 @@ export default function AdaptiveMediaCard({
                       return next;
                     });
                   }}
-                  className={`aspect-square rounded-xl overflow-hidden relative border cursor-pointer select-none transition-all ${
+                  className={`aspect-square rounded-xl overflow-hidden relative border cursor-pointer select-none transition-[border-color,transform] duration-150 ${
                     isChecked
                       ? 'border-zinc-950 dark:border-white ring-1 ring-zinc-950 dark:ring-white'
                       : 'border-black/[0.08] dark:border-white/[0.08] hover:border-black/20'
@@ -1608,7 +1494,7 @@ export default function AdaptiveMediaCard({
               ) : showDirectSave ? (
                 <button
                   type="button"
-                  onClick={handleStartDownload}
+                  onClick={() => void handleStartDownload()}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-950 dark:bg-white text-white dark:text-zinc-950 text-xs font-medium shadow-xs"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -1695,12 +1581,12 @@ export default function AdaptiveMediaCard({
               </button>
 
               <a
-                href={fallbackDownloadUrl}
+                href={sanitizeSafeNavigationUrl(fallbackDownloadUrl) ?? '#'}
                 download
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => triggerBrowserDownload(fallbackDownloadUrl)}
-                className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-all inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+                className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-[background-color,opacity,transform] duration-150 inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Save File to Disk</span>
@@ -1708,6 +1594,20 @@ export default function AdaptiveMediaCard({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Browser Security Gate (Turnstile when key set, or silent SHA-256 PoW shield) */}
+      {!manifest.isLocalUpload && !isReady && (
+        <TurnstileChallenge
+          key={challengeNonce}
+          onVerify={(tok) => {
+            setCaptchaToken(tok);
+            setErrorMessage((prev) =>
+              prev && /verification|captcha/i.test(prev) ? null : prev
+            );
+          }}
+          onReset={() => setCaptchaToken(null)}
+        />
       )}
 
       {/* 8. Sticky Bottom Action Dock (Instant Download Access) */}
@@ -1736,9 +1636,9 @@ export default function AdaptiveMediaCard({
 
           <button
             type="button"
-            onClick={handleStartDownload}
+            onClick={() => void handleStartDownload()}
             disabled={submitting || (!isReady && isMuxing)}
-            className="w-full sm:w-auto h-11 px-6 rounded-xl font-medium text-sm flex items-center justify-center gap-2 active:scale-[0.985] transition-all duration-150 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+            className="w-full sm:w-auto h-11 px-6 rounded-xl font-medium text-sm flex items-center justify-center gap-2 active:scale-[0.985] transition-[background-color,opacity,transform] duration-150 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
           >
             {isMuxing ? (
               <>

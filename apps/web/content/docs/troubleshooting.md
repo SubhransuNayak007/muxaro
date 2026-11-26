@@ -4,7 +4,7 @@ slug: "troubleshooting"
 description: "Resolve common digital media engineering issues including audio/video sync drift, PTS/DTS misalignment, variable frame rates, corrupted moov atoms, and network rate limits."
 author: "MUXARO Media Architecture Team"
 publishedAt: "2026-11-18"
-updatedAt: "2026-11-18"
+updatedAt: "2026-11-26"
 category: "Diagnostics & Operations"
 keywords: ["audio video sync fix", "pts dts drift", "corrupted moov atom", "variable frame rate fix", "ffmpeg troubleshooting", "429 rate limit"]
 ---
@@ -24,8 +24,8 @@ This diagnostic manual details the technical causes and definitive engineering f
 | **Audio and video drift out of sync over time** | Variable Frame Rate (VFR) or Presentation Timestamp (PTS) offset | Enforce Constant Frame Rate (CFR) or resample audio with timestamp synchronization |
 | **"moov atom not found" / Video won't play in browser** | Index atom placed at end of file, or file download was truncated | Run faststart remuxing (`-movflags +faststart`) or check download completeness |
 | **"Could not write header for output file"** | Codec incompatible with target container format (e.g. Opus in legacy MP4) | Select Matroska (MKV/WebM) or transcode audio to AAC |
-| **HTTP 429 "Too Many Requests" / Quota Exceeded** | Upstream CDN or local 24-hour rolling rate limits triggered | Implement exponential backoff with full jitter; observe rolling quota status |
-| **Processing job terminated abruptly / Worker timeout** | Bounded scratch disk limit or process timeout (default: 300s) | Reduce output bitrate, split batches, or verify source file accessibility |
+| **HTTP 429 "Too Many Requests"** | Upstream video CDN rate limit triggered | Use Desktop Direct residential mode or a private custom worker |
+| **Browser WASM out-of-memory on large PDFs/videos** | Input exceeds 350 MB Tier-1 WASM memory ceiling or very high DPI OCR | Use Cloud FFmpeg worker for videos `> 350 MB`, or lower PDF OCR/export DPI from 300 to 150 |
 
 ---
 
@@ -137,10 +137,10 @@ Free shared cloud servers (AWS, Vercel, Oracle, Render) frequently encounter bot
 2. **Custom Worker (Cobalt Model):** If you are on mobile or prefer self-hosting, run your own Docker media-worker container (`ghcr.io/muxaro/media-worker`) on a home server or private VPS and save the endpoint in [Settings > Custom Worker](/settings?tab=instances). MUXARO stores this in your browser's `localStorage` and routes all requests through your private endpoint.
 
 ### MUXARO's Resilient Handling
-Our backend integration adapters execute all network transfers with strict architectural defenses:
-1. **Exponential Backoff with Full Jitter:** When a 429 response is detected, retry delays are calculated using randomized exponential increments ($T_{\text{wait}} = \text{random}(0, 2^{\text{retry}} \times 1000\text{ms})$) to avoid synchronized retry stampedes.
-2. **Chunked Streaming Pipelines:** Files are streamed through bounded Node.js `Transform` streams rather than buffered into main application memory.
-3. **Transparent Quota Feedback:** If your Muxaro daily allowance is reached (10 individual video jobs or 1 playlist job per rolling 24-hour window), our API returns a clear HTTP 429 payload indicating the exact second your next credit restores.
+Our integration adapters execute network transfers with strict architectural defenses:
+1. **Exponential Backoff with Full Jitter:** When an upstream CDN returns HTTP 429, retry delays scale with randomized exponential increments ($T_{\text{wait}} = \text{random}(0, 2^{\text{retry}} \times 1000\text{ms})$) to prevent retry stampedes.
+2. **Chunked Streaming Pipelines:** Files stream through bounded transforms rather than buffering entire gigabyte payloads into memory.
+3. **Local-First Fallback:** Whenever a file is `<= 350 MB` or a PDF workflow is selected, processing stays inside your browser tab and avoids network rate limits completely.
 
 ---
 

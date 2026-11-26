@@ -109,3 +109,19 @@ ehthumbs.db
 *.swp
 *.swo
 *~
+
+# Desktop (.exe) & Android (.apk) Native Build Outputs & Downloaded Tool Binaries
+apps/desktop/web-dist/
+apps/desktop/release/
+apps/desktop/bin/
+apps/desktop/assets/*.png
+apps/mobile/www/
+apps/mobile/dist/
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/capacitor-cordova-android-plugins/
+apps/mobile/android/local.properties
+*.apk
+*.aab
+*.exe

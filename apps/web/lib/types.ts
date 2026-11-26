@@ -107,6 +107,7 @@ export interface ProcessingJob {
   error?: string;
   errorMessage?: string;
   userMessage?: string;
+  ffmpegCommand?: string;
   expiresAt?: string;
   createdAt: string;
   completedAt?: string;

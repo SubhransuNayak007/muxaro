@@ -238,7 +238,7 @@ export default function WhyChooseMuxaro() {
             >
               <div className="border-b border-line pb-2 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-content">{row.feature}</h3>
-                <span className="text-[10px] font-mono text-content-secondary uppercase tracking-wider font-semibold">
+                <span className="text-[11px] font-mono text-content-secondary font-medium">
                   {row.category}
                 </span>
               </div>
@@ -258,14 +258,14 @@ export default function WhyChooseMuxaro() {
               {/* Other Solutions */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div className="p-2.5 rounded-lg bg-surface/50 border border-line/60">
-                  <p className="text-[10px] font-semibold text-content-secondary uppercase tracking-wider mb-0.5">
-                    Standard Downloaders
+                  <p className="text-[11px] font-semibold text-content-secondary mb-0.5">
+                    Standard downloaders
                   </p>
                   <p className="font-medium text-content text-[11px]">{row.downloaders.spec}</p>
                 </div>
                 <div className="p-2.5 rounded-lg bg-surface/50 border border-line/60">
-                  <p className="text-[10px] font-semibold text-content-secondary uppercase tracking-wider mb-0.5">
-                    Cloud Converters
+                  <p className="text-[11px] font-semibold text-content-secondary mb-0.5">
+                    Cloud converters
                   </p>
                   <p className="font-medium text-content text-[11px]">{row.cloudConverters.spec}</p>
                 </div>

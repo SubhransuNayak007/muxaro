@@ -310,9 +310,9 @@ const CONVERSION_PAIRS: Record<string, ConversionDefinition> = {
 };
 
 interface Props {
-  params: {
+  params: Promise<{
     slug: string;
-  };
+  }>;
 }
 
 export function generateStaticParams() {
@@ -321,13 +321,14 @@ export function generateStaticParams() {
   }));
 }
 
-export function generateMetadata({ params }: Props): Metadata {
-  const item = CONVERSION_PAIRS[params.slug];
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const item = CONVERSION_PAIRS[slug];
   if (!item) {
     return constructMetadata({
       title: 'Format Converter — MUXARO',
       description: 'Universal media format converter.',
-      path: `/convert/${params.slug}`,
+      path: `/convert/${slug}`,
       noIndex: true,
     });
   }
@@ -347,8 +348,9 @@ export function generateMetadata({ params }: Props): Metadata {
   });
 }
 
-export default function ConversionPairPage({ params }: Props) {
-  const item = CONVERSION_PAIRS[params.slug];
+export default async function ConversionPairPage({ params }: Props) {
+  const { slug } = await params;
+  const item = CONVERSION_PAIRS[slug];
   if (!item) {
     notFound();
   }
@@ -372,7 +374,10 @@ export default function ConversionPairPage({ params }: Props) {
     steps: item.steps,
   });
 
-  const faqJsonLd = buildFaqJsonLd(item.faqs);
+  const faqJsonLd = buildFaqJsonLd(item.faqs, {
+    path: `/convert/${item.slug}`,
+    name: `${item.sourceFormat} to ${item.targetFormat} FAQ`,
+  });
 
   const breadcrumbsJsonLd = buildBreadcrumbsJsonLd([
     { name: 'Home', path: '/' },

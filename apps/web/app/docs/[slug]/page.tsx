@@ -18,11 +18,13 @@ import {
   buildBreadcrumbsJsonLd,
   buildFaqJsonLd,
 } from '@/lib/seo';
+import { parseMarkdownBlocks, stripFrontmatter } from '@/lib/markdown';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 
 interface Props {
-  params: {
+  params: Promise<{
     slug: string;
-  };
+  }>;
 }
 
 export function generateStaticParams() {
@@ -31,13 +33,14 @@ export function generateStaticParams() {
   }));
 }
 
-export function generateMetadata({ params }: Props) {
-  const doc = DOCS_REGISTRY[params.slug];
+export async function generateMetadata({ params }: Props) {
+  const { slug } = await params;
+  const doc = DOCS_REGISTRY[slug];
   if (!doc) {
     return constructMetadata({
       title: 'Guide Not Found — MUXARO',
       description: 'The requested engineering guide could not be found.',
-      path: `/docs/${params.slug}`,
+      path: `/docs/${slug}`,
       noIndex: true,
     });
   }
@@ -71,238 +74,39 @@ function readMarkdownFile(filePathFromRoot: string): string | null {
   return null;
 }
 
-function stripFrontmatter(raw: string): string {
-  const trimmed = raw.replace(/\r\n/g, '\n');
-  if (trimmed.startsWith('---\n')) {
-    const endIdx = trimmed.indexOf('\n---\n', 4);
-    if (endIdx !== -1) {
-      return trimmed.slice(endIdx + 5).trim();
-    }
-  }
-  return trimmed.trim();
-}
+const UPDATED_FAQ_SCHEMA_ITEMS = [
+  {
+    question: 'Are there any daily credits, paywalls, or ads?',
+    answer:
+      'No. Daily credits and rewarded ads have been completely removed. MUXARO runs with zero display ads, zero watermarks, and zero account walls.',
+  },
+  {
+    question: 'Which tools run 100% locally with zero server upload?',
+    answer:
+      'All 38 PDF Studio tools and Tier-1 video/audio tools (Metadata Scrubber, Video Frame Grabber, Subtitle Timing Shifter, Lossless Stream-Copy Trimmer, Container Remux, and Stream-Copy Audio Extraction up to 350 MB) run directly inside your browser.',
+  },
+  {
+    question: 'How long are Cloud worker files kept?',
+    answer:
+      'Files processed by Cloud FFmpeg workers remain in isolated temporary scratch storage only long enough for downloads and zero-reupload tool chaining, and are automatically deleted within 60 minutes.',
+  },
+  {
+    question: 'What is coming in the Audio Studio suite?',
+    answer:
+      'The upcoming Audio Studio expands MUXARO beyond Audio Extractor and Loudness Normalizer with local stem separation, voice de-noise/de-reverb, waveform silence trimming, and podcast mastering.',
+  },
+];
 
-function normalizeHref(href: string): string {
-  if (href === '/legal/terms') return '/terms';
-  if (href === '/legal/privacy') return '/privacy';
-  if (href === '/legal/dmca') return '/dmca';
-  return href;
-}
-
-function renderInline(text: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-    const token = match[0];
-    if (token.startsWith('**') && token.endsWith('**')) {
-      nodes.push(
-        <strong key={key++} className="font-semibold text-content">
-          {token.slice(2, -2)}
-        </strong>
-      );
-    } else if (token.startsWith('`') && token.endsWith('`')) {
-      nodes.push(
-        <code
-          key={key++}
-          className="px-1.5 py-0.5 rounded-sm bg-surface-elevated border border-line-subtle font-mono text-[0.85em] text-content"
-        >
-          {token.slice(1, -1)}
-        </code>
-      );
-    } else if (token.startsWith('[')) {
-      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-      if (linkMatch) {
-        const label = linkMatch[1];
-        const href = normalizeHref(linkMatch[2]);
-        if (href.startsWith('/')) {
-          nodes.push(
-            <Link
-              key={key++}
-              href={href}
-              className="text-brand font-medium hover:underline underline-offset-2"
-            >
-              {label}
-            </Link>
-          );
-        } else {
-          nodes.push(
-            <a
-              key={key++}
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brand font-medium hover:underline underline-offset-2"
-            >
-              {label}
-            </a>
-          );
-        }
-      } else {
-        nodes.push(token);
-      }
-    }
-    lastIndex = pattern.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-  return nodes;
-}
-
-type MarkdownBlock =
-  | { type: 'h2' | 'h3' | 'h4'; text: string }
-  | { type: 'hr' }
-  | { type: 'code'; lang: string; content: string }
-  | { type: 'blockquote'; lines: string[] }
-  | { type: 'table'; headers: string[]; rows: string[][] }
-  | { type: 'ul'; items: string[] }
-  | { type: 'ol'; items: string[] }
-  | { type: 'p'; text: string };
-
-function parseMarkdownBlocks(source: string): MarkdownBlock[] {
-  const lines = source.split('\n');
-  const blocks: MarkdownBlock[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (trimmed === '' || trimmed.startsWith('# ')) {
-      i++;
-      continue;
-    }
-
-    if (trimmed === '---' || trimmed === '***') {
-      blocks.push({ type: 'hr' });
-      i++;
-      continue;
-    }
-
-    if (trimmed.startsWith('```')) {
-      const lang = trimmed.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].trim().startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing fence
-      blocks.push({ type: 'code', lang, content: codeLines.join('\n') });
-      continue;
-    }
-
-    if (trimmed.startsWith('#### ')) {
-      blocks.push({ type: 'h4', text: trimmed.slice(5).trim() });
-      i++;
-      continue;
-    }
-    if (trimmed.startsWith('### ')) {
-      blocks.push({ type: 'h3', text: trimmed.slice(4).trim() });
-      i++;
-      continue;
-    }
-    if (trimmed.startsWith('## ')) {
-      blocks.push({ type: 'h2', text: trimmed.slice(3).trim() });
-      i++;
-      continue;
-    }
-
-    if (trimmed.startsWith('> ')) {
-      const quoteLines: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith('>')) {
-        const cleaned = lines[i].trim().replace(/^>\s?/, '').trim();
-        if (cleaned && !/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$/.test(cleaned)) {
-          quoteLines.push(cleaned);
-        }
-        i++;
-      }
-      if (quoteLines.length > 0) {
-        blocks.push({ type: 'blockquote', lines: quoteLines });
-      }
-      continue;
-    }
-
-    if (trimmed.startsWith('|') && i + 1 < lines.length && lines[i + 1].trim().startsWith('|') && lines[i + 1].includes('---')) {
-      const parseRow = (row: string) =>
-        row
-          .trim()
-          .replace(/^\|/, '')
-          .replace(/\|$/, '')
-          .split('|')
-          .map((cell) => cell.trim());
-
-      const headers = parseRow(lines[i]);
-      i += 2; // skip header + separator
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].trim().startsWith('|')) {
-        rows.push(parseRow(lines[i]));
-        i++;
-      }
-      blocks.push({ type: 'table', headers, rows });
-      continue;
-    }
-
-    if (/^[-*]\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*]\s+/, ''));
-        i++;
-      }
-      blocks.push({ type: 'ul', items });
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(trimmed)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
-        i++;
-      }
-      blocks.push({ type: 'ol', items });
-      continue;
-    }
-
-    const paraLines: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== '' &&
-      !lines[i].trim().startsWith('#') &&
-      !lines[i].trim().startsWith('```') &&
-      !lines[i].trim().startsWith('> ') &&
-      !lines[i].trim().startsWith('|') &&
-      !/^[-*]\s+/.test(lines[i].trim()) &&
-      !/^\d+\.\s+/.test(lines[i].trim()) &&
-      lines[i].trim() !== '---'
-    ) {
-      paraLines.push(lines[i].trim());
-      i++;
-    }
-    if (paraLines.length > 0) {
-      blocks.push({ type: 'p', text: paraLines.join(' ') });
-    }
-  }
-
-  return blocks;
-}
-
-export default function DocDetailPage({ params }: Props) {
-  const doc = DOCS_REGISTRY[params.slug];
+export default async function DocDetailPage({ params }: Props) {
+  const { slug } = await params;
+  const doc = DOCS_REGISTRY[slug];
   if (!doc) notFound();
 
   const rawContent = readMarkdownFile(doc.filePath);
   const bodyMarkdown = rawContent
     ? stripFrontmatter(rawContent)
     : `${doc.description}`;
-  const blocks = parseMarkdownBlocks(bodyMarkdown);
+  const { blocks, headings } = parseMarkdownBlocks(bodyMarkdown);
 
   const currentIdx = ALL_DOCS.findIndex((item) => item.slug === doc.slug);
   const prevDoc = currentIdx > 0 ? ALL_DOCS[currentIdx - 1] : null;
@@ -322,36 +126,13 @@ export default function DocDetailPage({ params }: Props) {
     updatedAt: `${doc.lastUpdated}T00:00:00.000Z`,
   });
 
-  const faqJsonLd = doc.slug === 'faq' ? buildFaqJsonLd([
-    {
-      question: 'What do the MUXARO consumer processing presets do?',
-      answer: 'MUXARO provides four one-click presets: Best Quality (highest available resolution up to 8K), Balanced (1080p optimized for compact file size and high fidelity), Audio-Only (native bitstream Opus/AAC or MP3 extraction), and Lossless Stream Copy (direct container remuxing with zero re-encoding and zero quality degradation in seconds).'
-    },
-    {
-      question: 'How does the daily processing quota work?',
-      answer: 'Every user receives 10 individual video processing jobs and 1 batch playlist job (up to 50 items) per rolling 24-hour window. Quotas are calculated continuously: each consumed credit restores exactly 24 hours after completion rather than resetting at arbitrary midnight boundaries.'
-    },
-    {
-      question: 'Can MUXARO upsample 128kbps audio to 320kbps or FLAC lossless?',
-      answer: 'No. We practice strict technical honesty. In lossy compression (such as 128kbps AAC or Opus), high-frequency acoustic harmonics and psychoacoustically masked data are discarded permanently. Converting lossy audio to 320kbps MP3 or 1411kbps FLAC merely inflates file size without restoring lost acoustic information.'
-    },
-    {
-      question: 'Why are 1080p, 4K, and 8K videos stored as separate streams on modern video platforms?',
-      answer: 'Modern streaming platforms utilize Dynamic Adaptive Streaming over HTTP (DASH) and HLS protocols. To optimize bandwidth, high-resolution video streams and audio tracks are stored as disjoint files. To obtain a standalone 1080p or 4K file, disjoint streams must be multiplexed (merged) into a container.'
-    },
-    {
-      question: 'Why is stream-copy remuxing so much faster than video transcoding?',
-      answer: 'Stream-copy remuxing (equivalent to FFmpeg -c copy) avoids decoding and re-encoding individual video frames. Raw compressed packets are transferred directly into the output container, bypassing CPU-intensive motion estimation and completing in seconds.'
-    },
-    {
-      question: 'How long are uploaded or converted files stored on MUXARO servers?',
-      answer: 'Files are stored strictly on ephemeral scratch storage during processing and automatically purged upon download or within 60 minutes. Files are never stored permanently, never analyzed for commercial targeting, and never used to train machine learning models.'
-    },
-    {
-      question: 'What is the policy regarding copyright and unauthorized downloading?',
-      answer: 'MUXARO operates in strict compliance with international copyright treaties and Section 512 of the Digital Millennium Copyright Act (DMCA). The platform is intended exclusively for user-owned content, public domain works, Creative Commons media, and authorized archival tasks.'
-    }
-  ]) : null;
+  const faqJsonLd =
+    doc.slug === 'faq'
+      ? buildFaqJsonLd(UPDATED_FAQ_SCHEMA_ITEMS, {
+          path: '/docs/faq',
+          name: 'MUXARO Frequently Asked Questions',
+        })
+      : null;
 
   return (
     <div className="min-h-screen bg-base">
@@ -369,11 +150,12 @@ export default function DocDetailPage({ params }: Props) {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
         />
       )}
+
       {/* Editorial Header */}
       <section className="muxaro-hero-surface border-b border-line">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-14">
           <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-content-secondary mb-5">
-            <Link href="/docs" className="hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:opacity-90 rounded-sm transition-colors font-medium">
+            <Link href="/docs" className="hover:text-brand rounded-sm transition-colors font-medium">
               Documentation
             </Link>
             <ChevronRight className="w-4 h-4 text-content-muted" aria-hidden="true" />
@@ -381,7 +163,7 @@ export default function DocDetailPage({ params }: Props) {
           </nav>
 
           <div className="max-w-3xl">
-            <h1 className="text-3xl sm:text-4xl font-extrabold text-content tracking-tight leading-tight">
+            <h1 className="text-3xl sm:text-4xl lg:text-[2.75rem] font-display font-medium text-content tracking-[-0.025em] leading-[1.08]">
               {doc.title}
             </h1>
             <p className="text-base text-content-secondary mt-3 leading-relaxed">
@@ -393,11 +175,11 @@ export default function DocDetailPage({ params }: Props) {
                 <BookOpen className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
                 <span>{doc.category}</span>
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 font-mono">
                 <Clock className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
                 <span>{doc.readingTime}</span>
               </span>
-              <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1.5 font-mono">
                 <Calendar className="w-3.5 h-3.5 text-content-muted" aria-hidden="true" />
                 <span>Updated {doc.lastUpdated}</span>
               </span>
@@ -406,13 +188,13 @@ export default function DocDetailPage({ params }: Props) {
         </div>
       </section>
 
-      {/* Main Content + Sidebar */}
+      {/* Main 3-Column Documentation Workspace */}
       <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Sidebar Navigation */}
+          {/* Left Guide Navigation */}
           <aside className="lg:col-span-3 lg:sticky lg:top-24 space-y-4">
-            <div className="muxaro-card p-4">
-              <h2 className="text-sm font-semibold text-content mb-3 px-2">
+            <div className="rounded-2xl border border-line bg-surface p-4">
+              <h2 className="text-sm font-semibold text-content mb-3 px-2 font-sans">
                 All guides
               </h2>
               <nav aria-label="Documentation guides" className="space-y-1">
@@ -422,10 +204,10 @@ export default function DocDetailPage({ params }: Props) {
                     <Link
                       key={item.slug}
                       href={`/docs/${item.slug}`}
-                      className={`block px-3 py-2 rounded-sm text-sm transition-colors ${
+                      className={`block px-3 py-2 rounded-lg text-xs sm:text-sm transition-colors ${
                         isActive
-                          ? 'bg-surface-muted text-brand font-semibold'
-                          : 'text-content-secondary hover:bg-surface-elevated hover:text-content'
+                          ? 'bg-surface-elevated text-brand font-semibold'
+                          : 'text-content-secondary hover:bg-surface-elevated/60 hover:text-content'
                       }`}
                     >
                       {item.title}
@@ -435,148 +217,46 @@ export default function DocDetailPage({ params }: Props) {
               </nav>
             </div>
 
-            <div className="muxaro-card p-5">
-              <h2 className="text-sm font-semibold text-content mb-1.5">
-                Ready to process media?
+            <div className="rounded-2xl border border-line bg-surface p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-content font-sans">
+                Open a studio suite
               </h2>
-              <p className="text-xs text-content-secondary leading-relaxed mb-4">
-                Inspect streams, extract audio without re-encoding, or merge video and audio in seconds.
-              </p>
-              <Link
-                href="/"
-                className="muxaro-btn-primary w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm"
-              >
-                <span>Open workspace</span>
-                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
-              </Link>
+              <div className="flex flex-col gap-2">
+                <Link
+                  href="/tools?section=video"
+                  className="inline-flex items-center justify-between px-3 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand/40"
+                >
+                  <span>Video Studio (14)</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
+                </Link>
+                <Link
+                  href="/tools/pdf"
+                  className="inline-flex items-center justify-between px-3 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand/40"
+                >
+                  <span>PDF Studio (38)</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
+                </Link>
+                <Link
+                  href="/tools?section=audio"
+                  className="inline-flex items-center justify-between px-3 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content hover:border-brand/40"
+                >
+                  <span>Audio Roadmap</span>
+                  <ArrowUpRight className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
+                </Link>
+              </div>
             </div>
           </aside>
 
-          {/* Editorial Article Surface */}
-          <article className="lg:col-span-9 muxaro-card p-6 sm:p-8 md:p-10">
-            <div className="max-w-3xl text-sm sm:text-base text-content-secondary leading-relaxed space-y-4">
-              {blocks.map((block, idx) => {
-                switch (block.type) {
-                  case 'h2':
-                    return (
-                      <h2
-                        key={idx}
-                        className="text-xl sm:text-2xl font-bold text-content tracking-tight mt-10 mb-3 pt-6 border-t border-line-subtle first:mt-0 first:pt-0 first:border-t-0"
-                      >
-                        {renderInline(block.text)}
-                      </h2>
-                    );
-                  case 'h3':
-                    return (
-                      <h3
-                        key={idx}
-                        className="text-base sm:text-lg font-semibold text-content mt-7 mb-2"
-                      >
-                        {renderInline(block.text)}
-                      </h3>
-                    );
-                  case 'h4':
-                    return (
-                      <h4
-                        key={idx}
-                        className="text-sm sm:text-base font-semibold text-content mt-5 mb-1.5"
-                      >
-                        {renderInline(block.text)}
-                      </h4>
-                    );
-                  case 'hr':
-                    return <hr key={idx} className="my-6 border-line-subtle" />;
-                  case 'code':
-                    return (
-                      <pre
-                        key={idx}
-                        className="rounded-md bg-surface-elevated border border-line p-4 overflow-x-auto text-xs sm:text-sm font-mono text-content leading-relaxed my-4"
-                      >
-                        <code>{block.content}</code>
-                      </pre>
-                    );
-                  case 'blockquote':
-                    return (
-                      <blockquote
-                        key={idx}
-                        className="border-l-2 border-brand bg-surface-elevated rounded-r-md px-4 py-3 text-sm text-content-secondary space-y-1.5 my-4"
-                      >
-                        {block.lines.map((line, lIdx) => (
-                          <p key={lIdx}>{renderInline(line)}</p>
-                        ))}
-                      </blockquote>
-                    );
-                  case 'table':
-                    return (
-                      <div
-                        key={idx}
-                        className="overflow-x-auto rounded-md border border-line my-5"
-                      >
-                        <table className="w-full text-left border-collapse text-xs sm:text-sm">
-                          <thead>
-                            <tr className="bg-surface-elevated border-b border-line">
-                              {block.headers.map((header, hIdx) => (
-                                <th
-                                  key={hIdx}
-                                  className="px-4 py-2.5 font-semibold text-content whitespace-nowrap"
-                                >
-                                  {renderInline(header)}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-line-subtle bg-surface">
-                            {block.rows.map((row, rIdx) => (
-                              <tr key={rIdx} className="hover:bg-surface-elevated transition-colors">
-                                {row.map((cell, cIdx) => (
-                                  <td key={cIdx} className="px-4 py-2.5 text-content-secondary align-top">
-                                    {renderInline(cell)}
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  case 'ul':
-                    return (
-                      <ul key={idx} className="list-disc pl-5 space-y-2 text-content-secondary">
-                        {block.items.map((item, iIdx) => (
-                          <li key={iIdx} className="leading-relaxed">
-                            {renderInline(item)}
-                          </li>
-                        ))}
-                      </ul>
-                    );
-                  case 'ol':
-                    return (
-                      <ol key={idx} className="list-decimal pl-5 space-y-2 text-content-secondary">
-                        {block.items.map((item, iIdx) => (
-                          <li key={iIdx} className="leading-relaxed">
-                            {renderInline(item)}
-                          </li>
-                        ))}
-                      </ol>
-                    );
-                  case 'p':
-                    return (
-                      <p key={idx} className="text-content-secondary leading-relaxed">
-                        {renderInline(block.text)}
-                      </p>
-                    );
-                  default:
-                    return null;
-                }
-              })}
-            </div>
+          {/* Center Article Surface */}
+          <article className="lg:col-span-9 xl:col-span-7 rounded-2xl border border-line bg-surface p-6 sm:p-8 md:p-10">
+            <MarkdownRenderer blocks={blocks} />
 
             {/* Previous / Next Guide Navigation */}
             <div className="mt-12 pt-6 border-t border-line grid grid-cols-1 sm:grid-cols-2 gap-4">
               {prevDoc ? (
                 <Link
                   href={`/docs/${prevDoc.slug}`}
-                  className="muxaro-card-interactive p-4 flex items-center gap-3 group"
+                  className="rounded-xl border border-line bg-surface-elevated/40 hover:border-line-hover p-4 flex items-center gap-3 group transition-colors"
                 >
                   <ChevronLeft className="w-4 h-4 text-content-muted group-hover:text-brand shrink-0 transition-colors" aria-hidden="true" />
                   <div className="min-w-0">
@@ -593,7 +273,7 @@ export default function DocDetailPage({ params }: Props) {
               {nextDoc ? (
                 <Link
                   href={`/docs/${nextDoc.slug}`}
-                  className="muxaro-card-interactive p-4 flex items-center justify-between gap-3 text-right group"
+                  className="rounded-xl border border-line bg-surface-elevated/40 hover:border-line-hover p-4 flex items-center justify-between gap-3 text-right group transition-colors"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-content-muted">Next guide</div>
@@ -608,6 +288,30 @@ export default function DocDetailPage({ params }: Props) {
               )}
             </div>
           </article>
+
+          {/* Right Sticky "On This Page" TOC */}
+          {headings.length > 0 && (
+            <aside className="hidden xl:block xl:col-span-2 xl:sticky xl:top-24">
+              <div className="border-l border-line pl-4 space-y-2.5">
+                <div className="text-xs font-semibold text-content">
+                  On this page
+                </div>
+                <nav aria-label="On this page" className="space-y-1.5">
+                  {headings.map((h) => (
+                    <a
+                      key={h.id}
+                      href={`#${h.id}`}
+                      className={`block text-xs text-content-secondary hover:text-brand transition-colors leading-snug ${
+                        h.level === 3 ? 'pl-3 text-[11px]' : 'font-medium'
+                      }`}
+                    >
+                      {h.text}
+                    </a>
+                  ))}
+                </nav>
+              </div>
+            </aside>
+          )}
         </div>
       </div>
     </div>

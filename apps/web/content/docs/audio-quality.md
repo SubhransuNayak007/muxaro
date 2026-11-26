@@ -33,8 +33,7 @@ Analog Sound Wave ──► [ ADC (Analog-to-Digital) ] ──► Uncompressed P
 ```
 
 ### 1.1 Uncompressed Audio (Linear PCM)
-CD-quality digital audio is sampled at **44,100 Hz** with a **16-bit** depth per sample across two stereo channels:
-$$\text{Bitrate} = 44,100\text{ samples/sec} \times 16\text{ bits/sample} \times 2\text{ channels} = 1,411,200\text{ bps (1,411.2 kbps)}$$
+CD-quality digital audio is sampled at **44,100 Hz** with a **16-bit** depth per sample across two stereo channels (`44,100 samples/sec × 16 bits/sample × 2 channels = 1,411.2 kbps`).
 
 A 4-minute uncompressed song consumes approximately **42.3 MB** of raw data.
 

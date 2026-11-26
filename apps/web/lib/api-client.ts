@@ -24,6 +24,7 @@ import type {
   AdminAuditLog,
   AdminSecurityEvent,
 } from './types.ts';
+import { generateSecureId, sanitizeSafeNavigationUrl } from './url-utils.ts';
 import {
   circuitBreaker,
   withCircuitBreaker,
@@ -56,8 +57,11 @@ function normalizeApiBase(raw: string): string {
 }
 
 export function getApiBaseUrl(): string {
-  // 1. In browser, check custom self-hosted worker endpoint from localStorage first
+  // 1. In browser / native shells
   if (typeof window !== 'undefined') {
+    if ((window as any).muxaroDesktop?.isDesktop) {
+      return '/api/v1';
+    }
     try {
       const customWorker = window.localStorage.getItem('muxaro_custom_worker_url')?.trim();
       if (customWorker && !isDeadOrUnresolvableHost(customWorker)) {
@@ -152,6 +156,38 @@ export function isClientOnlyAssetId(id?: string | null): boolean {
 }
 
 let cachedCsrfToken: string | null = null;
+let cachedClientGuestId: string | null = null;
+
+export function getOrCreateClientGuestId(): string | null {
+  if (typeof window === 'undefined') return null;
+  if (cachedClientGuestId) return cachedClientGuestId;
+  const STORAGE_KEY = 'muxaro_guest_id';
+  try {
+    const existing = window.localStorage.getItem(STORAGE_KEY);
+    if (existing && /^guest_[a-f0-9]{16,64}$/i.test(existing)) {
+      cachedClientGuestId = existing;
+      return existing;
+    }
+  } catch {
+    // Ignore storage read blocks
+  }
+  const bytes = new Uint8Array(16);
+  const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+  let generated: string;
+  if (cryptoObj && typeof cryptoObj.getRandomValues === 'function') {
+    cryptoObj.getRandomValues(bytes);
+    generated = `guest_${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  } else {
+    generated = generateSecureId('guest_');
+  }
+  cachedClientGuestId = generated;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, generated);
+  } catch {
+    // Ignore storage write blocks
+  }
+  return generated;
+}
 
 export function readCsrfTokenFromCookie(): string | null {
   if (typeof document === 'undefined' || !document.cookie) {
@@ -194,7 +230,15 @@ type FastifyJobOperation =
   | 'REMUX_STREAM_COPY'
   | 'TRANSCODE_VIDEO'
   | 'CONVERT_FORMAT'
-  | 'MERGE_AUDIO_VIDEO';
+  | 'MERGE_AUDIO_VIDEO'
+  | 'CONCAT_VIDEO'
+  | 'COMPRESS_TARGET'
+  | 'TRIM_SPLIT'
+  | 'VIDEO_TO_GIF'
+  | 'LOUDNORM_AUDIO'
+  | 'BURN_SUBTITLES'
+  | 'SCRUB_METADATA'
+  | 'ASPECT_RATIO_PAD';
 
 const FASTIFY_OPERATIONS = new Set<FastifyJobOperation>([
   'EXTRACT_AUDIO',
@@ -202,10 +246,33 @@ const FASTIFY_OPERATIONS = new Set<FastifyJobOperation>([
   'TRANSCODE_VIDEO',
   'CONVERT_FORMAT',
   'MERGE_AUDIO_VIDEO',
+  'CONCAT_VIDEO',
+  'COMPRESS_TARGET',
+  'TRIM_SPLIT',
+  'VIDEO_TO_GIF',
+  'LOUDNORM_AUDIO',
+  'BURN_SUBTITLES',
+  'SCRUB_METADATA',
+  'ASPECT_RATIO_PAD',
 ]);
 
-const AUDIO_FORMATS = new Set(['mp3', 'flac', 'wav', 'opus', 'm4a', 'aac']);
-const ALLOWED_FORMATS = new Set(['mp4', 'mkv', 'webm', 'mp3', 'flac', 'wav', 'm4a', 'opus', 'aac']);
+const AUDIO_FORMATS = new Set([
+  'mp3', 'flac', 'wav', 'opus', 'm4a', 'aac', 'ogg', 'oga', 'wma', 'aiff',
+  'aif', 'aifc', 'alac', 'ac3', 'eac3', 'dts', 'amr', 'au', 'caf', 'mka',
+  'mp2', 'spx', 'tta', 'wv', 'voc', 'snd', 'gsm', 'mlp', 'truehd', 'sbc',
+  'adts', 'latm', 'aptx', 'dfpwm', 'w64', 'rf64', 'ast', 'ircam', 'sox',
+  'oma', 'm4b', 'm4r', 's16le', 's16be', 's24le', 's32le', 'f32le', 'f64le',
+  'u8', 'alaw', 'mulaw', 'native',
+]);
+const ALLOWED_FORMATS = new Set([
+  ...Array.from(AUDIO_FORMATS),
+  'mp4', 'mkv', 'webm', 'mov', 'avi', 'm4v', 'flv', 'wmv', 'ogv', 'ts',
+  'm2ts', 'mts', '3gp', '3g2', '3gp2', 'mpg', 'mpeg', 'vob', 'asf', 'f4v',
+  'mxf', 'gxf', 'nut', 'ivf', 'y4m', 'swf', 'dv', 'ismv', 'wtv', 'roq',
+  'h264', '264', 'hevc', 'h265', 'mjpeg', 'm1v', 'm2v', 'mp4v', 'psp',
+  'av1', 'prores', 'dnxhd', 'm3u8', 'gif', 'apng', 'webp', 'avif', 'png',
+  'jpg', 'bmp', 'tiff', 'tga', 'ppm',
+]);
 
 const VALID_JOB_STATES = new Set<JobState>([
   'CREATED',
@@ -223,6 +290,7 @@ const VALID_LANES = new Set<ProcessingLane>(['instant', 'smart', 'power']);
 
 export interface CreateJobParams {
   mediaAssetId?: string;
+  sourceJobId?: string;
   mediaUrl?: string;
   sourceUrl?: string;
   audioUrl?: string;
@@ -238,6 +306,9 @@ export interface CreateJobParams {
   normalizeLoudness?: boolean;
   metadata?: Record<string, unknown>;
   streamCopy?: boolean;
+  muteVideo?: boolean;
+  noAudio?: boolean;
+  captchaToken?: string;
   audioDelayMs?: number;
   title?: string;
   idempotencyKey?: string;
@@ -270,8 +341,8 @@ function normalizeTargetFormat(
     return 'mp4';
   }
 
-  if (cleaned === 'mpeg') return 'mp4';
   if (ALLOWED_FORMATS.has(cleaned)) return cleaned;
+  if (/^[a-z0-9]{2,8}$/.test(cleaned)) return cleaned;
   return isAudioJob ? 'mp3' : 'mp4';
 }
 
@@ -446,6 +517,8 @@ function normalizeJob(
     error: errorMessage,
     errorMessage,
     userMessage,
+    ffmpegCommand:
+      typeof raw?.ffmpegCommand === 'string' && raw.ffmpegCommand ? raw.ffmpegCommand : undefined,
     expiresAt: raw?.expiresAt || undefined,
     createdAt: raw?.createdAt || new Date().toISOString(),
     completedAt:
@@ -902,9 +975,11 @@ class ApiClient {
     const method = String(options.method || 'GET').toUpperCase();
     const isBinaryBody = typeof Blob !== 'undefined' && options.body instanceof Blob;
     const csrfToken = MUTATING_METHODS.has(method) ? readCsrfTokenFromCookie() : null;
+    const guestId = getOrCreateClientGuestId();
     const headers: Record<string, string> = {
       Accept: 'application/json',
       ...(options.body && !isBinaryBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(guestId ? { 'x-guest-id': guestId } : {}),
       ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
       ...((options.headers as Record<string, string>) || {}),
     };
@@ -979,6 +1054,13 @@ class ApiClient {
       const err = new ApiClientError(classified);
       (err as any).status = response.status;
       (err as any).code = parsed?.error?.code;
+      const retryAfterHeader = response.headers.get('retry-after');
+      if (retryAfterHeader) {
+        const secs = Number(retryAfterHeader);
+        if (Number.isFinite(secs) && secs > 0) {
+          (err as any).retryAfterMs = Math.min(secs * 1000, 10_000);
+        }
+      }
       throw err;
     }
 
@@ -1034,11 +1116,51 @@ class ApiClient {
       return null;
     };
 
+    const probeWithTransientBackoff = async (): Promise<any> => {
+      const maxRetries = 2;
+      let delayMs = 800;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          return await this.requestStrict<any>('/probe', {
+            method: 'POST',
+            body: JSON.stringify({ url: normalizedUrl }),
+          });
+        } catch (attemptErr: any) {
+          const status = Number(attemptErr?.status || 0);
+          const code = String(attemptErr?.code || '').toUpperCase();
+          const msg = String(attemptErr?.message || '');
+          const isPermanentOrConfiguredBlock =
+            code === 'ERR_BACKEND_NOT_CONFIGURED' ||
+            code === 'HOST_BLOCKED' ||
+            code === 'ERR_BOT_VERIFICATION_REQUIRED' ||
+            code === 'INVALID_URL' ||
+            code === 'SSRF_BLOCKED' ||
+            (status >= 400 && status < 500 && status !== 408 && status !== 429);
+
+          const isTransientFailure =
+            !isPermanentOrConfiguredBlock &&
+            (status === 502 ||
+              status === 504 ||
+              status === 408 ||
+              Boolean(attemptErr?.isTimeout) ||
+              /timed out|timeout/i.test(msg));
+
+          if (!isTransientFailure || attempt === maxRetries) {
+            throw attemptErr;
+          }
+
+          const waitMs = Math.min(
+            Number(attemptErr?.retryAfterMs) > 0 ? Number(attemptErr.retryAfterMs) : delayMs,
+            5000
+          );
+          await sleepMs(waitMs);
+          delayMs *= 2;
+        }
+      }
+    };
+
     try {
-      const raw: any = await this.requestStrict<any>('/probe', {
-        method: 'POST',
-        body: JSON.stringify({ url: normalizedUrl }),
-      });
+      const raw: any = await probeWithTransientBackoff();
       if (raw && typeof raw === 'object') {
         if (raw.code === 'ERR_BACKEND_NOT_CONFIGURED' || raw.error?.code === 'ERR_BACKEND_NOT_CONFIGURED') {
           const direct = await tryDirectClientExtraction();
@@ -1486,7 +1608,7 @@ class ApiClient {
 
       const manifestId = resolvedServerId
         ? String(resolvedServerId)
-        : `client_local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        : generateSecureId('client_local_');
 
       registerLocalFile(manifestId, file);
 
@@ -1635,6 +1757,57 @@ class ApiClient {
   }
 
   /**
+   * Plane 2 Zero-Disk Tunnel Resolver (POST /api/v1/tunnel/resolve).
+   * Resolves up to 4K/8K adaptive streams in-process and returns an instant streaming URL.
+   */
+  async resolveFastTunnel(params: {
+    url: string;
+    quality?: string;
+    codec?: 'auto' | 'h264' | 'vp9' | 'av1';
+    format?: 'auto' | 'mp4' | 'mkv' | 'webm';
+    formatId?: string;
+    isAudioOnly?: boolean;
+    audioFormat?: string;
+    title?: string;
+  }): Promise<{
+    tunnelUrl: string;
+    filename: string;
+    ext: string;
+    resolution?: string;
+    estimatedSizeBytes?: number;
+  }> {
+    const base = getApiBaseUrl();
+    const endpoint = `${base.replace(/\/+$/, '')}/tunnel/resolve`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(params),
+    });
+    const json = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok || !json?.success || !json?.data?.tunnelPath) {
+      throw new ApiClientError(
+        json?.error?.message || 'Fast tunnel resolution failed',
+        res.status || 502,
+        { code: json?.error?.code || 'ERR_TUNNEL_RESOLVE' }
+      );
+    }
+    const rawPath = String(json.data.tunnelPath);
+    const originBase = base.replace(/\/api\/v1\/?$/i, '');
+    const tunnelUrl = /^https?:\/\//i.test(rawPath)
+      ? rawPath
+      : `${originBase}${rawPath.startsWith('/') ? '' : '/'}${rawPath}`;
+
+    return {
+      tunnelUrl,
+      filename: json.data.filename || 'muxaro_video.mkv',
+      ext: json.data.ext || 'mkv',
+      resolution: json.data.resolution,
+      estimatedSizeBytes: json.data.estimatedSizeBytes,
+    };
+  }
+
+  /**
    * Submit a real media processing job to POST /api/v1/jobs.
    */
   async createJob(params: CreateJobParams): Promise<ProcessingJob> {
@@ -1659,7 +1832,7 @@ class ApiClient {
     const fastifyOperation = resolveFastifyOperation(params, targetFormat);
     const idempotencyKey =
       params.idempotencyKey ||
-      `idem_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      generateSecureId('idem_');
 
     let tool: 'convert_video' | 'extract_audio' | 'merge_av' | 'batch_playlist' = 'convert_video';
     if (params.jobType === 'extract_audio' || fastifyOperation === 'EXTRACT_AUDIO' || isAudioRequest) {
@@ -1702,13 +1875,23 @@ class ApiClient {
     if (resolvedAssetId) {
       payload.mediaAssetId = resolvedAssetId;
     }
+    const resolvedSourceJobId =
+      typeof params.sourceJobId === 'string' ? params.sourceJobId.trim() : '';
+    if (resolvedSourceJobId) {
+      payload.sourceJobId = resolvedSourceJobId;
+    }
 
     if (isHttpUrl) {
       payload.sourceUrl = resolvedUrl;
       payload.mediaUrl = resolvedUrl;
-    } else if (!payload.mediaAssetId && !payload.uploadSessionId) {
+    } else if (
+      !payload.mediaAssetId &&
+      !payload.uploadSessionId &&
+      !payload.sourceJobId &&
+      fastifyOperation !== 'BURN_SUBTITLES'
+    ) {
       throw new ApiClientError(
-        'Cannot submit job without a valid HTTP(S) media URL or uploaded mediaAssetId.',
+        'Cannot submit job without a valid HTTP(S) media URL, uploaded file, or chained job ID.',
         400,
         { code: 'ERR_INVALID_SOURCE' }
       );
@@ -1751,11 +1934,87 @@ class ApiClient {
     if ((params as any).fileSizeBytes) {
       payload.fileSizeBytes = (params as any).fileSizeBytes;
     }
+    if (params.targetVideoCodec) {
+      payload.targetVideoCodec = params.targetVideoCodec;
+    }
+    if ((params as any).qualityPreset) {
+      payload.qualityPreset = (params as any).qualityPreset;
+    }
+    if (params.targetAudioBitrate) {
+      payload.targetAudioBitrate = params.targetAudioBitrate;
+    }
+    if (params.audioChannels !== undefined) {
+      payload.audioChannels = params.audioChannels;
+    }
+    if (typeof params.normalizeLoudness === 'boolean') {
+      payload.normalizeLoudness = params.normalizeLoudness;
+    }
+    if (params.metadata) {
+      payload.metadata = params.metadata;
+    }
+    if (Array.isArray((params as any).clipUrls)) {
+      payload.clipUrls = (params as any).clipUrls;
+    }
+    if (params.audioDelayMs !== undefined) {
+      payload.audioOffsetMs = params.audioDelayMs;
+    }
+    if ((params as any).audioOffsetMs !== undefined) {
+      payload.audioOffsetMs = (params as any).audioOffsetMs;
+    }
+    if (typeof params.muteVideo === 'boolean') {
+      payload.muteVideo = params.muteVideo;
+    }
+    if (typeof params.noAudio === 'boolean') {
+      payload.noAudio = params.noAudio;
+    }
+    if (params.captchaToken) {
+      payload.captchaToken = params.captchaToken;
+    }
+    // Forward studio tool parameters cleanly
+    for (const extraKey of [
+      'targetSizeMb',
+      'maxResolution',
+      'startTime',
+      'endTime',
+      'trimStart',
+      'trimEnd',
+      'trimMode',
+      'mode',
+      'segmentSeconds',
+      'fps',
+      'width',
+      'dither',
+      'loop',
+      'quality',
+      'targetLufs',
+      'truePeak',
+      'lra',
+      'subtitleText',
+      'offsetMs',
+      'fontSize',
+      'position',
+      'primaryColor',
+      'bold',
+      'action',
+      'aspectRatio',
+      'fillMode',
+      'blurStrength',
+      'fadeInSec',
+      'fadeOutSec',
+      'coverAssetId',
+      'clipAssetIds',
+    ]) {
+      const val = (params as Record<string, unknown>)[extraKey];
+      if (val !== undefined) {
+        payload[extraKey] = val;
+      }
+    }
 
     const raw = await this.requestStrict<any>('/jobs', {
       method: 'POST',
       headers: {
         'Idempotency-Key': idempotencyKey,
+        ...(params.captchaToken ? { 'x-captcha-token': params.captchaToken } : {}),
       },
       body: JSON.stringify(payload),
     });

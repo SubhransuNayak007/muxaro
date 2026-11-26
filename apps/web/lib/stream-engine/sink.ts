@@ -216,13 +216,17 @@ export class ServiceWorkerStreamSink implements StreamSink {
       throw new Error('Service worker port not open');
     }
 
-    // Post chunk as transferable Uint8Array buffer
+    // Slice exact view bounds so offset Uint8Arrays don't transfer extra underlying bytes
+    const sliced =
+      chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
+        ? chunk.slice().buffer
+        : chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
     this.port.postMessage(
       {
         type: 'CHUNK',
-        chunk: chunk.buffer,
+        chunk: sliced,
       },
-      [chunk.buffer]
+      [sliced]
     );
 
     this.bytesWritten += chunk.byteLength;

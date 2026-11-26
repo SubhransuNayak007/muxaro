@@ -17,6 +17,7 @@ import { createOptimalSink } from './sink.ts';
 import { HardwareGpuTranscoder, isWebCodecsSupported } from './webcodecs-transcoder.ts';
 import { FFmpegWorkerClient } from '../ffmpeg/ffmpeg-client.ts';
 import type { FFmpegTaskResult } from '../ffmpeg/types.ts';
+import { spliceDashStreams } from '../media-splicer/index.ts';
 import type {
   StreamEngineOptions,
   StreamPipelineController,
@@ -373,110 +374,199 @@ export class StreamMuxerEngine implements StreamPipelineController {
 
       if (isContainerizedDash) {
         // ----------------------------------------------------
-        // DASH Containerized Path: parallel track download + FFmpegWorkerClient stream-copy mux
+        // DASH Containerized Path:
+        // Zero-Copy DashBoxSplicer (constant <=32MB RAM, 0s merge wait) when stream-copying,
+        // falling back to FFmpegWorkerClient only if transcoding is requested or splicing fails.
         // ----------------------------------------------------
         this.setStage('pipelining');
 
-        const videoExt = videoKind === 'webm' ? 'webm' : 'mp4';
-        const audioExt = audioKind === 'webm' ? 'webm' : 'm4a';
-        const videoMime = videoExt === 'webm' ? 'video/webm' : 'video/mp4';
-        const audioMime = audioExt === 'webm' ? 'audio/webm' : 'audio/mp4';
-
-        let videoBytesCount = 0;
-        let audioBytesCount = 0;
-        const updateTrackBytes = (role: 'video' | 'audio', bytes: number) => {
-          if (role === 'video') videoBytesCount = bytes;
-          else audioBytesCount = bytes;
-          this.downloadedBytes = videoBytesCount + audioBytesCount;
-          this.notifyProgress();
-        };
-
-        const downloadVideoPromise = this.downloadTrackBlob(
-          videoTargetUrl,
-          this.options.videoSizeBytes || (!audioTargetUrl ? this.totalExpectedBytes : undefined),
-          'video',
-          videoMime,
-          (b) => updateTrackBytes('video', b)
-        );
-
-        const downloadAudioPromise = audioTargetUrl
-          ? this.downloadTrackBlob(
-              audioTargetUrl,
-              this.options.audioSizeBytes,
-              'audio',
-              audioMime,
-              (b) => updateTrackBytes('audio', b)
-            )
-          : Promise.resolve<Blob | null>(null);
-
-        const [videoBlob, audioBlob] = await Promise.all([downloadVideoPromise, downloadAudioPromise]);
-
-        if (this.abortController.signal.aborted) {
-          throw new Error('Stream aborted');
-        }
-
-        this.setStage('finalizing');
-
-        const ffmpegClient = FFmpegWorkerClient.getInstance();
         const targetFormat = (this.options.format || 'mp4').toLowerCase();
-        const muxContainer = targetFormat === 'webm' ? 'webm' : 'mp4';
+        const sameFamilyDash =
+          !needsTranscode &&
+          targetFormat !== 'mp3' &&
+          (!audioTargetUrl || videoKind === audioKind || (videoKind !== 'unknown' && audioKind === 'unknown'));
 
-        let workerResult: FFmpegTaskResult;
-        if (audioBlob) {
-          workerResult = await ffmpegClient.merge({
-            videoFile: videoBlob,
-            videoFileName: `track_video.${videoExt}`,
-            audioFile: audioBlob,
-            audioFileName: `track_audio.${audioExt}`,
-            targetContainer: muxContainer,
-            streamCopy: !needsTranscode,
-            signal: this.abortController.signal,
-            onProgress: () => this.notifyProgress(),
-          });
-        } else if (targetFormat === 'mp3') {
-          workerResult = await ffmpegClient.extractAudio({
-            file: videoBlob,
-            fileName: `track_input.${videoExt}`,
-            targetFormat: 'mp3',
-            streamCopy: false,
-            signal: this.abortController.signal,
-            onProgress: () => this.notifyProgress(),
-          });
-        } else {
-          workerResult = await ffmpegClient.convert({
-            file: videoBlob,
-            fileName: `track_input.${videoExt}`,
-            targetContainer: muxContainer,
-            streamCopy: !needsTranscode,
-            videoCodec: this.options.videoCodec,
-            audioCodec: this.options.audioCodec,
-            signal: this.abortController.signal,
-            onProgress: () => this.notifyProgress(),
-          });
+        let splicedDirectly = false;
+        if (sameFamilyDash) {
+          try {
+            let videoBytesCount = 0;
+            let audioBytesCount = 0;
+            const updateTrackBytes = (role: 'video' | 'audio', bytes: number) => {
+              if (role === 'video') videoBytesCount = bytes;
+              else audioBytesCount = bytes;
+              this.downloadedBytes = videoBytesCount + audioBytesCount;
+              this.notifyProgress();
+            };
+
+            const streamTrackIterable = (
+              url: string,
+              totalBytes: number | undefined,
+              role: 'video' | 'audio'
+            ): AsyncIterable<Uint8Array> => {
+              const pipeline = new ParallelRangePipeline({
+                url,
+                totalBytes,
+                initialChunkSize: role === 'audio' ? 512 * 1024 : this.options.initialChunkSize,
+                initialConcurrency: role === 'audio' ? 2 : this.options.initialConcurrency,
+                maxBufferBytes: role === 'audio' ? 8 * 1024 * 1024 : (this.options.maxBufferBytes || 16 * 1024 * 1024),
+                streamType: role,
+                signal: this.abortController.signal,
+                onProgress: (p) => updateTrackBytes(role, p.downloadedBytes || 0),
+              });
+              if (role === 'video') this.videoPipeline = pipeline;
+              else this.audioPipeline = pipeline;
+
+              return {
+                [Symbol.asyncIterator]: () => {
+                  const startPromise = pipeline.start();
+                  startPromise.catch(() => {});
+                  const ring = pipeline.getRingBuffer();
+                  let finished = false;
+                  return {
+                    async next() {
+                      if (finished) return { value: undefined as any, done: true };
+                      const chunk = await ring.popNextOrderedChunk();
+                      if (!chunk) {
+                        finished = true;
+                        await startPromise;
+                        return { value: undefined as any, done: true };
+                      }
+                      return { value: chunk.data, done: false };
+                    },
+                  };
+                },
+              };
+            };
+
+            const videoIter = streamTrackIterable(
+              videoTargetUrl,
+              this.options.videoSizeBytes || (!audioTargetUrl ? this.totalExpectedBytes : undefined),
+              'video'
+            );
+            const audioIter = audioTargetUrl
+              ? streamTrackIterable(audioTargetUrl, this.options.audioSizeBytes, 'audio')
+              : null;
+
+            await spliceDashStreams({
+              videoChunks: videoIter,
+              audioChunks: audioIter,
+              containerHint: videoKind === 'webm' ? 'webm' : 'isom',
+              signal: this.abortController.signal,
+              sink: {
+                write: (chunk) => this.sink!.write(chunk),
+                close: () => this.sink!.close(),
+              },
+            });
+
+            finalDownloadUrl = this.sink.getDownloadUrl?.();
+            splicedDirectly = true;
+          } catch (spliceErr) {
+            if (this.abortController.signal.aborted) throw spliceErr;
+            console.warn('[StreamEngine] DashBoxSplicer failed, falling back to FFmpegWorkerClient:', spliceErr);
+          }
         }
 
-        const outBlob = workerResult.blob;
-        this.totalExpectedBytes = outBlob.size || this.totalExpectedBytes;
-        const WRITE_CHUNK_BYTES = 2 * 1024 * 1024;
-        for (let offset = 0; offset < outBlob.size; offset += WRITE_CHUNK_BYTES) {
+        if (!splicedDirectly) {
+          const videoExt = videoKind === 'webm' ? 'webm' : 'mp4';
+          const audioExt = audioKind === 'webm' ? 'webm' : 'm4a';
+          const videoMime = videoExt === 'webm' ? 'video/webm' : 'video/mp4';
+          const audioMime = audioExt === 'webm' ? 'audio/webm' : 'audio/mp4';
+
+          let videoBytesCount = 0;
+          let audioBytesCount = 0;
+          const updateTrackBytes = (role: 'video' | 'audio', bytes: number) => {
+            if (role === 'video') videoBytesCount = bytes;
+            else audioBytesCount = bytes;
+            this.downloadedBytes = videoBytesCount + audioBytesCount;
+            this.notifyProgress();
+          };
+
+          const downloadVideoPromise = this.downloadTrackBlob(
+            videoTargetUrl,
+            this.options.videoSizeBytes || (!audioTargetUrl ? this.totalExpectedBytes : undefined),
+            'video',
+            videoMime,
+            (b) => updateTrackBytes('video', b)
+          );
+
+          const downloadAudioPromise = audioTargetUrl
+            ? this.downloadTrackBlob(
+                audioTargetUrl,
+                this.options.audioSizeBytes,
+                'audio',
+                audioMime,
+                (b) => updateTrackBytes('audio', b)
+              )
+            : Promise.resolve<Blob | null>(null);
+
+          const [videoBlob, audioBlob] = await Promise.all([downloadVideoPromise, downloadAudioPromise]);
+
           if (this.abortController.signal.aborted) {
             throw new Error('Stream aborted');
           }
-          const slice = outBlob.slice(offset, Math.min(offset + WRITE_CHUNK_BYTES, outBlob.size));
-          const chunkBuf = new Uint8Array(await slice.arrayBuffer());
-          await this.sink.write(chunkBuf);
-        }
 
-        await this.sink.close();
-        const sinkUrl = this.sink.getDownloadUrl?.();
-        if (sinkUrl && workerResult.url) {
-          try {
-            URL.revokeObjectURL(workerResult.url);
-          } catch {
-            // Ignored
+          this.setStage('finalizing');
+
+          const ffmpegClient = FFmpegWorkerClient.getInstance();
+          const muxContainer = targetFormat === 'webm' ? 'webm' : 'mp4';
+
+          let workerResult: FFmpegTaskResult;
+          if (audioBlob) {
+            workerResult = await ffmpegClient.merge({
+              videoFile: videoBlob,
+              videoFileName: `track_video.${videoExt}`,
+              audioFile: audioBlob,
+              audioFileName: `track_audio.${audioExt}`,
+              targetContainer: muxContainer,
+              streamCopy: !needsTranscode,
+              signal: this.abortController.signal,
+              onProgress: () => this.notifyProgress(),
+            });
+          } else if (targetFormat === 'mp3') {
+            workerResult = await ffmpegClient.extractAudio({
+              file: videoBlob,
+              fileName: `track_input.${videoExt}`,
+              targetFormat: 'mp3',
+              streamCopy: false,
+              signal: this.abortController.signal,
+              onProgress: () => this.notifyProgress(),
+            });
+          } else {
+            workerResult = await ffmpegClient.convert({
+              file: videoBlob,
+              fileName: `track_input.${videoExt}`,
+              targetContainer: muxContainer,
+              streamCopy: !needsTranscode,
+              videoCodec: this.options.videoCodec,
+              audioCodec: this.options.audioCodec,
+              signal: this.abortController.signal,
+              onProgress: () => this.notifyProgress(),
+            });
           }
+
+          const outBlob = workerResult.blob;
+          this.totalExpectedBytes = outBlob.size || this.totalExpectedBytes;
+          const WRITE_CHUNK_BYTES = 2 * 1024 * 1024;
+          for (let offset = 0; offset < outBlob.size; offset += WRITE_CHUNK_BYTES) {
+            if (this.abortController.signal.aborted) {
+              throw new Error('Stream aborted');
+            }
+            const slice = outBlob.slice(offset, Math.min(offset + WRITE_CHUNK_BYTES, outBlob.size));
+            const chunkBuf = new Uint8Array(await slice.arrayBuffer());
+            await this.sink.write(chunkBuf);
+          }
+
+          await this.sink.close();
+          const sinkUrl = this.sink.getDownloadUrl?.();
+          if (sinkUrl && workerResult.url) {
+            try {
+              URL.revokeObjectURL(workerResult.url);
+            } catch {
+              // Ignored
+            }
+          }
+          finalDownloadUrl = sinkUrl || workerResult.url;
         }
-        finalDownloadUrl = sinkUrl || workerResult.url;
       } else {
         // ----------------------------------------------------
         // Elementary Stream Path: Stage 3 StreamingRemuxer + Stage 5 WebCodecs

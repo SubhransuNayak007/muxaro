@@ -87,11 +87,14 @@ export async function verifyTurnstileToken(
     return { success: false, error: 'Turnstile verification token is missing.' };
   }
 
-  // Allow bypass for automated test suites or Cloudflare's documented dummy test token
+  // Allow bypass strictly in non-production test/development environments
+  const isNonProd =
+    process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development';
   if (
-    process.env.NODE_ENV === 'test' ||
-    trimmedToken === 'XXXX.DUMMY.TOKEN.XXXX' ||
-    trimmedToken === 'test-turnstile-token'
+    isNonProd &&
+    (process.env.NODE_ENV === 'test' ||
+      trimmedToken === 'XXXX.DUMMY.TOKEN.XXXX' ||
+      trimmedToken === 'test-turnstile-token')
   ) {
     return {
       success: true,
