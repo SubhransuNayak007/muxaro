@@ -30,6 +30,13 @@ import {
   Clock,
 } from 'lucide-react';
 import PdfToolShell from './PdfToolShell';
+import GoogleDriveModal from '@/components/native/GoogleDriveModal';
+import {
+  captureDesktopScreenFile,
+  captureNativeCameraPhoto,
+  isDesktopApp,
+  isNativeAppRuntime,
+} from '@/lib/native-bridge';
 import { formatBytes } from '@/lib/formatters';
 import {
   addPageNumbersToPdf,
@@ -71,7 +78,13 @@ interface ScanPoint {
 }
 
 type ScanQuad = [ScanPoint, ScanPoint, ScanPoint, ScanPoint]; // TL, TR, BR, BL
-type ScanFilterPreset = 'original' | 'magic-color' | 'bw-document' | 'grayscale';
+type ScanFilterPreset =
+  | 'original'
+  | 'magic-color'
+  | 'vivid'
+  | 'lighten'
+  | 'bw-document'
+  | 'grayscale';
 
 interface ScanPageItem {
   id: string;
@@ -287,6 +300,32 @@ function applyScanFilterInPlace(img: ImageData, filter: ScanFilterPreset) {
       data[i] = v;
       data[i + 1] = v;
       data[i + 2] = v;
+    }
+    return;
+  }
+
+  if (filter === 'lighten') {
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = Math.min(255, Math.round(Math.pow(data[i] / 255, 0.72) * 255 + 14));
+      data[i + 1] = Math.min(255, Math.round(Math.pow(data[i + 1] / 255, 0.72) * 255 + 14));
+      data[i + 2] = Math.min(255, Math.round(Math.pow(data[i + 2] / 255, 0.72) * 255 + 14));
+    }
+    return;
+  }
+
+  if (filter === 'vivid') {
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const avg = (r + g + b) / 3;
+      const sat = 1.32;
+      const nr = (avg + (r - avg) * sat - 128) * 1.24 + 136;
+      const ng = (avg + (g - avg) * sat - 128) * 1.24 + 136;
+      const nb = (avg + (b - avg) * sat - 128) * 1.24 + 136;
+      data[i] = Math.max(0, Math.min(255, Math.round(nr)));
+      data[i + 1] = Math.max(0, Math.min(255, Math.round(ng)));
+      data[i + 2] = Math.max(0, Math.min(255, Math.round(nb)));
     }
     return;
   }
@@ -530,6 +569,12 @@ export function PdfMakeFromCameraTool() {
   const [draftFilter, setDraftFilter] = useState<ScanFilterPreset>('magic-color');
   const [draggingCornerIdx, setDraggingCornerIdx] = useState<number | null>(null);
   const [applyingEdit, setApplyingEdit] = useState(false);
+  const [driveModalOpen, setDriveModalOpen] = useState(false);
+  const [nativeAppMode, setNativeAppMode] = useState(false);
+
+  useEffect(() => {
+    setNativeAppMode(isNativeAppRuntime());
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -798,16 +843,28 @@ export function PdfMakeFromCameraTool() {
         onPaste={handlePaste}
         className="p-5 rounded-2xl border border-line bg-surface space-y-4"
       >
+        <GoogleDriveModal
+          open={driveModalOpen}
+          onClose={() => setDriveModalOpen(false)}
+          onImported={(file) => void ingestFiles([file], 'magic-color')}
+        />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
             {!stream ? (
               <button
                 type="button"
-                onClick={startCamera}
+                onClick={async () => {
+                  const nativeSnap = await captureNativeCameraPhoto();
+                  if (nativeSnap) {
+                    void ingestFiles([nativeSnap], 'magic-color');
+                    return;
+                  }
+                  void startCamera();
+                }}
                 className="px-3.5 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-semibold inline-flex items-center gap-1.5"
               >
-                <Camera className="w-4 h-4" aria-hidden="true" />
-                <span>Open camera scanner</span>
+                <Camera className="w-4 h-4 text-emerald-500" aria-hidden="true" />
+                <span>{nativeAppMode ? 'Take Camera Photo' : 'Open camera scanner'}</span>
               </button>
             ) : (
               <>
@@ -825,6 +882,32 @@ export function PdfMakeFromCameraTool() {
                 >
                   Close camera
                 </button>
+              </>
+            )}
+
+            {nativeAppMode && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setDriveModalOpen(true)}
+                  className="px-3.5 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <FolderOpen className="w-4 h-4 text-brand" aria-hidden="true" />
+                  <span>Google Drive</span>
+                </button>
+                {isDesktopApp() && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const shot = await captureDesktopScreenFile();
+                      if (shot) void ingestFiles([shot], 'original');
+                    }}
+                    className="px-3.5 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-semibold inline-flex items-center gap-1.5"
+                  >
+                    <ScanLine className="w-4 h-4 text-brand" aria-hidden="true" />
+                    <span>Capture Screen</span>
+                  </button>
+                )}
               </>
             )}
 
@@ -997,7 +1080,9 @@ export function PdfMakeFromCameraTool() {
                   [
                     { id: 'original', label: 'Original' },
                     { id: 'magic-color', label: 'Magic Color' },
-                    { id: 'bw-document', label: 'B&W Document' },
+                    { id: 'vivid', label: 'Vivid Docs' },
+                    { id: 'lighten', label: 'Lighten' },
+                    { id: 'bw-document', label: 'B&W Crisp' },
                     { id: 'grayscale', label: 'Grayscale' },
                   ] as const
                 ).map((preset) => (
@@ -1119,7 +1204,9 @@ export function PdfMakeFromCameraTool() {
                   >
                     <option value="original">Original</option>
                     <option value="magic-color">Magic Color</option>
-                    <option value="bw-document">B&amp;W Document</option>
+                    <option value="vivid">Vivid Docs</option>
+                    <option value="lighten">Lighten</option>
+                    <option value="bw-document">B&amp;W Crisp</option>
                     <option value="grayscale">Grayscale</option>
                   </select>
                   <button

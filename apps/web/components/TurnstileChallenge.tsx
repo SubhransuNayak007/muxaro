@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ShieldCheck, RefreshCw, AlertCircle } from 'lucide-react';
 import { getApiBaseUrl } from '@/lib/api-client';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
 
 interface TurnstileApi {
   render: (
@@ -174,6 +175,7 @@ export default function TurnstileChallenge({
   const [status, setStatus] = useState<'ready' | 'verifying' | 'verified' | 'error'>('verifying');
   const [solveMs, setSolveMs] = useState<number | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [isNativeApp, setIsNativeApp] = useState(false);
 
   const runPowVerification = useCallback(async () => {
     setStatus('verifying');
@@ -239,6 +241,13 @@ export default function TurnstileChallenge({
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (isNativeAppRuntime()) {
+      setIsNativeApp(true);
+      setStatus('verified');
+      setSolveMs(0);
+      onVerifyRef.current?.('native-local-verified');
+      return;
+    }
     let cancelled = false;
 
     if (!resolvedSiteKey) {
@@ -346,6 +355,10 @@ export default function TurnstileChallenge({
     }
     void runPowVerification();
   };
+
+  if (isNativeApp) {
+    return null;
+  }
 
   return (
     <div

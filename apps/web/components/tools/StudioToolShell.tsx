@@ -25,7 +25,8 @@ import {
   runLocalStudioJobFallback,
   type LocalProcessResult,
 } from '@/lib/tier1-local';
-import { isCapacitorApp } from '@/lib/native-bridge';
+import { isCapacitorApp, isNativeAppRuntime } from '@/lib/native-bridge';
+import GoogleDriveModal from '@/components/native/GoogleDriveModal';
 import { useOpenedArtifact, type OpenedArtifact } from '@/lib/opened-artifact';
 import TurnstileChallenge from '@/components/TurnstileChallenge';
 import CommandPreviewDrawer from './CommandPreviewDrawer';
@@ -137,7 +138,15 @@ export default function StudioToolShell({
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const localAbortRef = useRef<AbortController | null>(null);
 
+  const [isNativeApp, setIsNativeApp] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
+
+  useEffect(() => {
+    if (isNativeAppRuntime()) {
+      setIsNativeApp(true);
+      setCaptchaToken('native-local-verified');
+    }
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ProcessingJob | null>(null);
@@ -183,7 +192,7 @@ export default function StudioToolShell({
 
   const effectiveLocalRunner =
     localRunner ??
-    (typeof window !== 'undefined' && isCapacitorApp() && !localOnlyWithoutFile
+    (isNativeApp && isCapacitorApp() && !localOnlyWithoutFile
       ? async (
           file: File | null,
           onProg: (pct: number) => void,
@@ -358,13 +367,14 @@ export default function StudioToolShell({
       }
     }
 
-    if (!captchaToken) {
+    const effectiveToken = captchaToken || (isNativeAppRuntime() ? 'native-local-verified' : '');
+    if (!effectiveToken) {
       setSubmitting(false);
       setErrorMessage('Please complete the verification check below before starting a Cloud job.');
       return;
     }
 
-    const sourcePayload: StudioSourcePayload = { captchaToken };
+    const sourcePayload: StudioSourcePayload = { captchaToken: effectiveToken };
 
     if (inputMode === 'chain') {
       if (!chainedJobId.trim()) {
@@ -426,16 +436,18 @@ export default function StudioToolShell({
     ? Boolean(selectedFile)
     : Boolean(uploadedAssetId);
 
-  const needsCaptcha = !qualifiesForTier1;
+  const needsCaptcha = !qualifiesForTier1 && !isNativeApp;
 
-  const statusLabel = qualifiesForTier1
+  const statusLabel = isNativeApp
+    ? 'On-Device Local Engine'
+    : qualifiesForTier1
     ? 'Browser Local, Instant'
     : executionNote ||
       (executionMode === 'hybrid'
         ? 'Hybrid: Local <= 350 MB / Cloud FFmpeg 8'
         : 'Cloud FFmpeg 8 (60m auto-delete)');
 
-  const statusTone = qualifiesForTier1
+  const statusTone = isNativeApp || qualifiesForTier1
     ? 'local'
     : executionMode === 'hybrid'
     ? 'hybrid'
@@ -579,27 +591,36 @@ export default function StudioToolShell({
                   className="hidden"
                 />
                 {!selectedFile ? (
-                  <button
-                    type="button"
-                    data-dropzone="true"
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      handleFileSelect(e.dataTransfer.files?.[0]);
-                    }}
-                    className="w-full py-8 px-4 rounded-xl border border-dashed border-line bg-surface-elevated/50 hover:bg-surface-elevated hover:border-line-hover transition-colors flex flex-col items-center justify-center gap-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    <UploadCloud className="w-7 h-7 text-content-secondary" aria-hidden="true" />
-                    <span className="text-sm font-semibold text-content whitespace-nowrap">
-                      Drop or select media
-                    </span>
-                    <span className="text-xs text-content-secondary">
-                      {localRunner
-                        ? 'Files up to 350 MB run locally when supported; larger files stream via Cloud (60m auto-delete).'
-                        : 'Resumable chunked upload, auto-deleted after 60 minutes.'}
-                    </span>
-                  </button>
+                  <div className="space-y-2.5">
+                    <button
+                      type="button"
+                      data-dropzone="true"
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        handleFileSelect(e.dataTransfer.files?.[0]);
+                      }}
+                      className="w-full py-8 px-4 rounded-xl border border-dashed border-line bg-surface-elevated/50 hover:bg-surface-elevated hover:border-line-hover transition-colors flex flex-col items-center justify-center gap-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                    >
+                      <UploadCloud className="w-7 h-7 text-content-secondary" aria-hidden="true" />
+                      <span className="text-sm font-semibold text-content whitespace-nowrap">
+                        Drop or select media
+                      </span>
+                      <span className="text-xs text-content-secondary">
+                        {isNativeApp
+                          ? 'Processed locally on your device via bundled FFmpeg engine.'
+                          : localRunner
+                          ? 'Files up to 350 MB run locally when supported; larger files stream via Cloud (60m auto-delete).'
+                          : 'Resumable chunked upload, auto-deleted after 60 minutes.'}
+                      </span>
+                    </button>
+                    {isNativeApp && (
+                      <div className="flex justify-end">
+                        <DriveQuickButton onImported={(file) => void handleFileSelect(file)} />
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <div className="p-3.5 rounded-xl border border-line bg-surface-elevated flex items-center justify-between gap-3">
@@ -818,5 +839,25 @@ export default function StudioToolShell({
         </div>
       )}
     </UnifiedToolWorkspace>
+  );
+}
+
+function DriveQuickButton({ onImported }: { onImported: (file: File) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="px-3.5 py-2 rounded-xl border border-brand/30 bg-brand/10 text-brand text-xs font-semibold hover:bg-brand/15 transition-colors"
+      >
+        Import from Google Drive
+      </button>
+      <GoogleDriveModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onImported={onImported}
+      />
+    </>
   );
 }

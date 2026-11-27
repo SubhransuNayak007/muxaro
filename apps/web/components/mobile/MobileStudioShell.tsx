@@ -26,6 +26,10 @@ import {
   Sliders,
   X,
   Download,
+  Cloud,
+  Link2,
+  ArrowRight,
+  Loader2,
 } from 'lucide-react';
 import {
   CREATOR_TOOLS_CATALOG,
@@ -44,7 +48,12 @@ import {
   saveOrShareArtifact,
   triggerHapticTap,
   isCapacitorApp,
+  fetchRemoteUrlToFile,
+  resolveGoogleDriveDownloadUrl,
+  captureNativeCameraPhoto,
 } from '@/lib/native-bridge';
+import GoogleDriveModal from '@/components/native/GoogleDriveModal';
+import { matchCopilotActions } from '@/lib/native-copilot';
 import { formatBytes } from '@/lib/formatters';
 
 type MobileTab = 'studio' | 'pdf' | 'media' | 'saved';
@@ -59,7 +68,7 @@ const PDF_FILTERS: Array<'All' | PdfToolCategory> = [
 ];
 
 const QUICK_MOBILE_TOOLS = [
-  { href: '/tools/pdf/scan', title: 'Scan to PDF', sub: 'Auto crop + flatten', icon: Camera, accent: 'text-emerald-500' },
+  { href: '/tools/pdf/make-pdf', title: 'Scan to PDF', sub: 'Auto crop + 6 filters', icon: Camera, accent: 'text-emerald-500' },
   { href: '/tools/pdf/merge', title: 'Merge PDF', sub: 'Files & page order', icon: Layers, accent: 'text-brand' },
   { href: '/tools/pdf/compress', title: 'Compress PDF', sub: 'QPDF lossless shrink', icon: Minimize2, accent: 'text-amber-500' },
   { href: '/tools/pdf/sign', title: 'Sign PDF', sub: 'Draw, type or stamp', icon: PenTool, accent: 'text-brand' },
@@ -82,6 +91,10 @@ export default function MobileStudioShell() {
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>([]);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [isNativeMobile, setIsNativeMobile] = useState(false);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [quickLink, setQuickLink] = useState('');
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
     setRecentHrefs(getRecentToolHrefs());
@@ -139,12 +152,7 @@ export default function MobileStudioShell() {
     setPinnedHrefs(togglePinnedTool(href));
   };
 
-  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    void triggerHapticTap();
-
+  const routeLocalFile = (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const isPdf = ext === 'pdf' || file.type === 'application/pdf';
     const isImage = ['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext) || file.type.startsWith('image/');
@@ -156,11 +164,52 @@ export default function MobileStudioShell() {
     if (isPdf) {
       openTool('/tools/pdf/view?handoff=1');
     } else if (isImage) {
-      openTool('/tools/pdf/image-to-pdf?handoff=1');
+      openTool('/tools/pdf/make-pdf?handoff=1');
     } else if (isAudio) {
       openTool('/tools/audio-extractor?handoff=1');
     } else {
       openTool('/tools/video-trimmer?handoff=1');
+    }
+  };
+
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    void triggerHapticTap();
+    routeLocalFile(file);
+  };
+
+  const handleQuickCameraCapture = async () => {
+    void triggerHapticTap();
+    const photo = await captureNativeCameraPhoto();
+    if (photo) {
+      routeLocalFile(photo);
+      return;
+    }
+    openTool('/tools/pdf/make-pdf');
+  };
+
+  const handleQuickLinkImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = quickLink.trim();
+    if (!raw) return;
+    void triggerHapticTap();
+    setLinkError(null);
+    setLinkLoading(true);
+    try {
+      const driveInfo = resolveGoogleDriveDownloadUrl(raw);
+      if (driveInfo.isDrive || /\.(pdf|mp4|mkv|webm|mp3|wav|flac|jpg|jpeg|png)(\?|$)/i.test(raw)) {
+        const file = await fetchRemoteUrlToFile(raw);
+        setQuickLink('');
+        routeLocalFile(file);
+      } else {
+        setLinkError('Paste a Google Drive link or direct file URL to import offline.');
+      }
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Import failed.');
+    } finally {
+      setLinkLoading(false);
     }
   };
 
@@ -198,6 +247,8 @@ export default function MobileStudioShell() {
         item.keywords.some((k) => k.includes(q))
     );
   }, [query, isNativeMobile]);
+
+  const copilotResults = useMemo(() => matchCopilotActions(query), [query]);
 
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -239,6 +290,12 @@ export default function MobileStudioShell() {
         onChange={handleFilePick}
         className="hidden"
         aria-label="Open file from device"
+      />
+
+      <GoogleDriveModal
+        open={driveOpen}
+        onClose={() => setDriveOpen(false)}
+        onImported={(file) => routeLocalFile(file)}
       />
 
       {/* Sticky Top Glass Instrument Bar */}
@@ -307,7 +364,28 @@ export default function MobileStudioShell() {
             </div>
             {query.trim().length > 0 && (
               <div className="max-h-60 overflow-y-auto space-y-1">
-                {searchResults.length === 0 ? (
+                {copilotResults.map((act) => (
+                  <button
+                    key={act.id}
+                    type="button"
+                    onClick={() => {
+                      if (act.kind === 'drive') {
+                        setSearchOpen(false);
+                        setDriveOpen(true);
+                      } else if (act.href) {
+                        openTool(act.href);
+                      }
+                    }}
+                    className="muxaro-spring-tap w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-brand/10 border border-brand/25 text-left"
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-brand">{act.label}</div>
+                      <div className="text-[11px] text-content-secondary">{act.subtitle}</div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-brand" />
+                  </button>
+                ))}
+                {searchResults.length === 0 && copilotResults.length === 0 ? (
                   <div className="text-xs text-content-secondary px-2 py-3 text-center">
                     No matching tools found.
                   </div>
@@ -343,21 +421,68 @@ export default function MobileStudioShell() {
 
         {/* TAB 1: STUDIO HOME */}
         {tab === 'studio' && (
-          <div key="studio" className="muxaro-sheet-enter space-y-5">
-            {/* Primary Thumb Actions */}
-            <div className="grid grid-cols-2 gap-3">
+          <div key="studio" className="muxaro-sheet-enter space-y-4">
+            {/* Smart Google Drive / Direct File Bar */}
+            <form onSubmit={handleQuickLinkImport} className="muxaro-liquid-glass rounded-2xl p-2 flex items-center gap-2">
+              <div className="flex-1 flex items-center gap-2 px-2.5">
+                <Link2 className="w-4 h-4 text-content-tertiary shrink-0" />
+                <input
+                  type="url"
+                  value={quickLink}
+                  onChange={(e) => setQuickLink(e.target.value)}
+                  placeholder="Paste Google Drive link or file URL…"
+                  className="w-full bg-transparent text-xs text-content placeholder:text-content-tertiary focus:outline-none py-1.5"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={linkLoading || !quickLink.trim()}
+                aria-label="Import link"
+                className="muxaro-spring-tap w-9 h-9 rounded-xl bg-brand text-white flex items-center justify-center shrink-0 disabled:opacity-40"
+              >
+                {linkLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+              </button>
+            </form>
+
+            {linkError && (
+              <div className="rounded-xl px-3.5 py-2 bg-error-bg border border-error/30 text-xs text-error">
+                {linkError}
+              </div>
+            )}
+
+            {/* Primary Thumb Actions (3 Cards: Camera Scan, Google Drive, Open File) */}
+            <div className="grid grid-cols-3 gap-2.5">
               <button
                 type="button"
-                onClick={() => openTool('/tools/pdf/scan')}
-                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-4 text-left flex flex-col justify-between min-h-[132px] relative overflow-hidden"
+                onClick={() => void handleQuickCameraCapture()}
+                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
               >
-                <div className="w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500">
-                  <Camera className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500">
+                  <Camera className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-content">Camera Scan</div>
-                  <div className="text-[11px] text-content-secondary mt-0.5">
-                    Flatten pages to PDF
+                  <div className="text-xs font-semibold text-content">Camera</div>
+                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
+                    Scan &amp; filters
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  void triggerHapticTap();
+                  setDriveOpen(true);
+                }}
+                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
+              >
+                <div className="w-10 h-10 rounded-xl bg-brand/15 border border-brand/30 flex items-center justify-center text-brand">
+                  <Cloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-content">Drive</div>
+                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
+                    Import file
                   </div>
                 </div>
               </button>
@@ -368,15 +493,15 @@ export default function MobileStudioShell() {
                   void triggerHapticTap();
                   fileInputRef.current?.click();
                 }}
-                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-4 text-left flex flex-col justify-between min-h-[132px]"
+                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
               >
-                <div className="w-11 h-11 rounded-2xl bg-brand/15 border border-brand/30 flex items-center justify-center text-brand">
-                  <FolderOpen className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500">
+                  <FolderOpen className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-content">Open File</div>
-                  <div className="text-[11px] text-content-secondary mt-0.5">
-                    PDF, Video, Audio, Photo
+                  <div className="text-xs font-semibold text-content">Device</div>
+                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
+                    Open local
                   </div>
                 </div>
               </button>

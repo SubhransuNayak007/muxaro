@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('muxaroDesktop', {
   }) => ipcRenderer.invoke('muxaro:download-local', opts),
   saveBlob: (opts: DesktopSaveRequest) => ipcRenderer.invoke('muxaro:save-blob', opts),
   openDownloadsFolder: (): Promise<void> => ipcRenderer.invoke('muxaro:open-downloads'),
+  captureScreenPng: (): Promise<{ ok: boolean; bytes?: Uint8Array; error?: string }> =>
+    ipcRenderer.invoke('muxaro:capture-screen'),
 });

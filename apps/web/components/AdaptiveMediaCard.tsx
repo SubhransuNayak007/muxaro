@@ -33,6 +33,7 @@ import {
 import { startZeroWaitStream } from '@/lib/stream-engine';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
 import { sanitizeSafeNavigationUrl } from '@/lib/url-utils';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
 import { ResumableMultipartUploader } from '@/lib/multipart-uploader';
 import {
   normalizeVideoOptions,
@@ -135,7 +136,7 @@ export function getResolutionTierName(height: number): string {
   return `${height}p`;
 }
 
-export function getTierBadge(height: number): { label: string; className: string } {
+export function getTierBadge(height: number, isNativeApp = false): { label: string; className: string } {
   if (height >= 4320) {
     return {
       label: 'Local Ultra HD',
@@ -150,25 +151,13 @@ export function getTierBadge(height: number): { label: string; className: string
   }
   if (height >= 1440) {
     return {
-      label: 'Cloud & Local Ready',
+      label: isNativeApp ? 'Local Ready' : 'Cloud & Local Ready',
       className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-medium',
     };
   }
-  if (height >= 1080) {
+  if (height >= 1080 || height >= 720 || height >= 480) {
     return {
-      label: 'Cloud Ready',
-      className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
-    };
-  }
-  if (height >= 720) {
-    return {
-      label: 'Cloud Ready',
-      className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
-    };
-  }
-  if (height >= 480) {
-    return {
-      label: 'Cloud Ready',
+      label: isNativeApp ? 'Local Ready' : 'Cloud Ready',
       className: 'bg-black/[0.04] dark:bg-white/[0.06] text-content-secondary border border-black/[0.06] dark:border-white/[0.08] font-medium',
     };
   }
@@ -238,6 +227,7 @@ export default function AdaptiveMediaCard({
   const { isDesktop, isMobile, isLoaded: isDeviceLoaded } = useDeviceDetection();
   const { isInstalled: isDirectBridgeInstalled } = useMuxaroBridge();
   const { settings, mounted: settingsMounted } = useMuxaroSettings();
+  const isNativeApp = isNativeAppRuntime();
 
   // Normalize Video & Audio Options (Full 8K support on both Mobile & Desktop)
   const allVideoOptions = useMemo(() => normalizeVideoOptions(manifest), [manifest]);
@@ -260,7 +250,9 @@ export default function AdaptiveMediaCard({
   const [videoContainer, setVideoContainer] = useState<VideoContainer>('mp4');
   const [muteVideo, setMuteVideo] = useState<boolean>(() => initialPreset === 'mute');
   const [showAllStreams, setShowAllStreams] = useState<boolean>(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(() =>
+    isNativeAppRuntime() ? 'native-local-verified' : null
+  );
   const [challengeNonce, setChallengeNonce] = useState<number>(0);
 
   // Audio State
@@ -684,7 +676,8 @@ export default function AdaptiveMediaCard({
       }
     }
 
-    if (!manifest.isLocalUpload && !captchaToken) {
+    const activeCaptchaToken = captchaToken || (isNativeApp ? 'native-local-verified' : null);
+    if (!manifest.isLocalUpload && !activeCaptchaToken) {
       setErrorMessage('Please wait a moment for browser verification to complete, then click Retry.');
       setChallengeNonce((n) => n + 1);
       setSubmitting(false);
@@ -705,7 +698,7 @@ export default function AdaptiveMediaCard({
         ...(shouldMute
           ? { muteVideo: true, noAudio: true }
           : { audioFormatId: manifest.audioStreams?.[0]?.formatId || 'ba/b' }),
-        captchaToken: captchaToken || undefined,
+        captchaToken: activeCaptchaToken || undefined,
         title: manifest.title,
         fileSizeBytes: selectedVideoOption?.estimatedSizeBytes || manifest.fileSizeBytes,
       } as any);
@@ -826,12 +819,17 @@ export default function AdaptiveMediaCard({
         videoContainer === 'mkv' ||
         videoContainer === 'webm' ||
         (selectedVideoOption?.codec && selectedVideoOption.codec.toLowerCase().includes('avc'));
+      if (isNativeApp) {
+        return 'Local on-device extraction & FFmpeg muxing';
+      }
       return isDirectRemux
         ? 'Instant cloud-side stream copy · 60m secure retention'
         : 'Instant cloud-side remux · Lossless video · 60m secure retention';
     }
     if (activeTab === 'audio') {
-      return 'Instant cloud-side audio extraction · 60m secure retention';
+      return isNativeApp
+        ? 'Local on-device audio extraction'
+        : 'Instant cloud-side audio extraction · 60m secure retention';
     }
     if (activeTab === 'subtitles') {
       return 'Timed caption track · Instant download';
@@ -868,7 +866,7 @@ export default function AdaptiveMediaCard({
         )
       : '~640 MB';
 
-    const badge = getTierBadge(opt.height);
+    const badge = getTierBadge(opt.height, isNativeApp);
 
     return (
       <div
@@ -1181,18 +1179,20 @@ export default function AdaptiveMediaCard({
               </div>
             )}
 
-            {/* Desktop 8K/4K Direct Banner */}
+            {/* Desktop 8K/4K Direct Banner (hidden/replaced with Local Engine note inside native EXE/APK) */}
             {isDeviceLoaded && isDesktop && selectedVideoOption && selectedVideoOption.height > 1440 && (
               <div className="p-3.5 rounded-xl border border-line bg-surface-elevated text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2 text-content">
                   <Zap className="w-4 h-4 text-content shrink-0" aria-hidden="true" />
                   <span>
-                    {isDirectBridgeInstalled
+                    {isNativeApp
+                      ? 'Local Engine Active — 8K/4K streams extract and mux directly on your device.'
+                      : isDirectBridgeInstalled
                       ? 'MUXARO Direct Active — 8K/4K streams locally in your browser without cloud caps.'
                       : '8K/4K streams route locally via MUXARO Direct companion.'}
                   </span>
                 </div>
-                {!isDirectBridgeInstalled && (
+                {!isNativeApp && !isDirectBridgeInstalled && (
                   <Link
                     href={`/tools/direct-helper?url=${encodeURIComponent(manifest.sourceUrl)}`}
                     className="inline-flex items-center gap-1 text-xs font-semibold text-content hover:underline shrink-0"
@@ -1207,7 +1207,11 @@ export default function AdaptiveMediaCard({
             {/* Mobile Device Up to 8K Notice */}
             {isDeviceLoaded && isMobile && (
               <div className="p-3 rounded-xl border border-line bg-surface-elevated text-xs text-content-secondary flex items-center gap-2">
-                <span>Mobile Mode: Full up to 8K cloud remux &amp; lossless downloads saved directly to your device.</span>
+                <span>
+                  {isNativeApp
+                    ? 'On-Device Mode: Direct local processing and save.'
+                    : 'Mobile Mode: Full up to 8K cloud remux & lossless downloads saved directly to your device.'}
+                </span>
               </div>
             )}
           </div>
@@ -1596,8 +1600,8 @@ export default function AdaptiveMediaCard({
         </div>
       )}
 
-      {/* Browser Security Gate (Turnstile when key set, or silent SHA-256 PoW shield) */}
-      {!manifest.isLocalUpload && !isReady && (
+      {/* Browser Security Gate (Never rendered inside native EXE or APK apps) */}
+      {!isNativeApp && !manifest.isLocalUpload && !isReady && (
         <TurnstileChallenge
           key={challengeNonce}
           onVerify={(tok) => {

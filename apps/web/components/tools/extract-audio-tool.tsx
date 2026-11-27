@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
 import TurnstileChallenge from '@/components/TurnstileChallenge';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { ResumableMultipartUploader, MultipartUploadStats } from '@/lib/multipart-uploader';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
@@ -90,6 +91,12 @@ export function ExtractAudioTool() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [captchaToken, setCaptchaToken] = useState<string>('');
   const [backendDisconnected, setBackendDisconnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isNativeAppRuntime()) {
+      setCaptchaToken('native-local-verified');
+    }
+  }, []);
 
   const jobStream = useJobStream(submittedJobId);
 

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { formatBytes } from '@/lib/formatters';
 import { useOpenedArtifact, type OpenedArtifact } from '@/lib/opened-artifact';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
+import GoogleDriveModal from '@/components/native/GoogleDriveModal';
 import {
   type PdfProcessResult,
   sanitizeFilenameStem,
@@ -88,6 +90,12 @@ export default function PdfToolShell({
   const [progressText, setProgressText] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [internalResult, setInternalResult] = useState<PdfProcessResult | null>(null);
+  const [isNativeApp, setIsNativeApp] = useState(false);
+  const [driveOpen, setDriveOpen] = useState(false);
+
+  useEffect(() => {
+    setIsNativeApp(isNativeAppRuntime());
+  }, []);
 
   const activeResult = externalResult ?? internalResult;
 
@@ -258,13 +266,26 @@ export default function PdfToolShell({
       backLabel="All PDF Tools"
       historyHref="/tools/pdf/recent"
       historyLabel="Local History"
-      statusLabel="Browser Local, 0 bytes uploaded"
+      statusLabel={isNativeApp ? 'On-Device Local Engine · 100% Offline' : 'Browser Local, 0 bytes uploaded'}
       statusTone="local"
       activeLoadedNames={selectedFiles.map((f) => f.name)}
       onSelectSessionArtifact={
         onFilesSelected ? (item) => handleUseArtifact(item) : undefined
       }
     >
+      <GoogleDriveModal
+        open={driveOpen}
+        onClose={() => setDriveOpen(false)}
+        onImported={(file) => {
+          if (!onFilesSelected) return;
+          setErrorMsg(null);
+          setInternalResult(null);
+          onClearExternalResult?.();
+          const domain: OpenedArtifact['domain'] = file.type.startsWith('image/') ? 'image' : 'pdf';
+          setArtifactFromFile(file, domain, currentHref);
+          onFilesSelected(multiple ? [...selectedFiles, file] : [file]);
+        }}
+      />
       <form onSubmit={handleExecute} className="space-y-6">
         {/* Quick 1-click Handoff from Previous Tool */}
         {showHandoffBanner && artifact && (
@@ -355,7 +376,19 @@ export default function PdfToolShell({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {isNativeApp && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDriveOpen(true);
+                    }}
+                    className="px-3 py-2 rounded-xl border border-brand/30 bg-brand/10 text-brand text-xs font-semibold whitespace-nowrap hover:bg-brand/15"
+                  >
+                    Google Drive
+                  </button>
+                )}
                 <span className="px-4 py-2 rounded-xl border border-line bg-surface-elevated text-xs sm:text-sm font-semibold text-content whitespace-nowrap">
                   {selectedFiles.length > 0 ? (multiple ? '+ Add files' : 'Replace file') : 'Choose file'}
                 </span>

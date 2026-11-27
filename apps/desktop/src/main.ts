@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, shell } from 'electron';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -373,7 +373,42 @@ function buildFfmpegArgsForLocalJob(
     };
   }
 
-  // Generic Transcode / Convert / Scrub
+  // Lossless Trimmer
+  if (tool.includes('trim')) {
+    const args = ['-y'];
+    if (body.startTime !== undefined && body.startTime !== '') args.push('-ss', String(body.startTime));
+    args.push('-i', inputPath);
+    if (body.endTime !== undefined && body.endTime !== '') args.push('-to', String(body.endTime));
+    args.push('-c', 'copy', '-avoid_negative_ts', 'make_zero');
+    if (targetFmt === 'mp4') args.push('-movflags', '+faststart');
+    args.push(outputPath);
+    return { args, label: 'Trimming media cleanly locally…' };
+  }
+
+  // Metadata Scrubber
+  if (tool.includes('scrub') || tool.includes('metadata')) {
+    return {
+      args: [
+        '-y',
+        '-i',
+        inputPath,
+        '-map',
+        '0:V?',
+        '-map',
+        '0:a?',
+        '-map_metadata',
+        '-1',
+        '-map_chapters',
+        '-1',
+        '-c',
+        'copy',
+        outputPath,
+      ],
+      label: 'Scrubbing metadata cleanly locally…',
+    };
+  }
+
+  // Generic Transcode / Convert
   return {
     args: ['-y', '-i', inputPath, '-movflags', '+faststart', outputPath],
     label: `Converting media locally to .${targetFmt}…`,
@@ -573,21 +608,101 @@ function createLocalServer(webDistDir: string): http.Server {
         }
 
         if (pathname === '/api/v1/security/challenge') {
+          const cid = crypto.randomUUID();
+          const salt = crypto.randomBytes(12).toString('hex');
           return sendJson(res, 200, {
             ok: true,
-            challengeId: crypto.randomUUID(),
-            salt: crypto.randomBytes(12).toString('hex'),
-            difficulty: 2,
-            expiresAt: Date.now() + 300_000,
+            success: true,
+            data: {
+              challengeToken: cid,
+              alreadyVerified: true,
+              captchaToken: `desktop_local_${crypto.randomBytes(16).toString('hex')}`,
+              pow: { salt, difficultyBits: 8 },
+            },
           });
         }
 
         if (pathname === '/api/v1/security/verify-challenge' && req.method === 'POST') {
+          const tok = `desktop_local_${crypto.randomBytes(16).toString('hex')}`;
           return sendJson(res, 200, {
             ok: true,
-            token: `desktop_local_${crypto.randomBytes(16).toString('hex')}`,
-            expiresInSec: 3600,
+            success: true,
+            token: tok,
+            data: { captchaToken: tok },
           });
+        }
+
+        if (pathname === '/api/v1/native/fetch-url' && req.method === 'POST') {
+          const body = await readJsonBody(req);
+          const rawUrl = String(body?.url || '').trim();
+          const parsed = validateHttpUrl(rawUrl);
+          const host = parsed.hostname.toLowerCase();
+          if (
+            host === 'localhost' ||
+            host === '127.0.0.1' ||
+            host === '::1' ||
+            host.startsWith('10.') ||
+            host.startsWith('192.168.') ||
+            host.startsWith('169.254.') ||
+            /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+          ) {
+            return sendJson(res, 403, {
+              ok: false,
+              error: { code: 'SSRF_BLOCKED', message: 'Private or loopback addresses are blocked.' },
+            });
+          }
+
+          const headers: Record<string, string> = {
+            'User-Agent': 'MUXARO-Desktop/1.0',
+          };
+          if (body?.authorization && typeof body.authorization === 'string') {
+            headers['Authorization'] = body.authorization;
+          }
+
+          let upstream = await fetch(parsed.toString(), { headers, redirect: 'follow' });
+          let ct = upstream.headers.get('content-type') || 'application/octet-stream';
+
+          // Handle Google Drive virus-scan confirmation page for larger files
+          if (
+            upstream.ok &&
+            ct.includes('text/html') &&
+            parsed.hostname.includes('drive.google.com')
+          ) {
+            const html = await upstream.text();
+            const confirmMatch =
+              html.match(/name="confirm"\s+value="([^"]+)"/i) ||
+              html.match(/confirm=([0-9A-Za-z_-]+)/i);
+            const uuidMatch = html.match(/name="uuid"\s+value="([^"]+)"/i);
+            const idMatch = parsed.searchParams.get('id') || '';
+            if (confirmMatch && idMatch) {
+              const confirmUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(idMatch)}&export=download&confirm=${encodeURIComponent(confirmMatch[1])}${uuidMatch ? `&uuid=${encodeURIComponent(uuidMatch[1])}` : ''}`;
+              upstream = await fetch(confirmUrl, { headers, redirect: 'follow' });
+              ct = upstream.headers.get('content-type') || 'application/octet-stream';
+            } else {
+              throw new Error('Google Drive link is not public or requires sign-in.');
+            }
+          }
+
+          if (!upstream.ok) {
+            return sendJson(res, upstream.status, {
+              ok: false,
+              error: { code: 'FETCH_FAILED', message: `Remote host returned ${upstream.status}` },
+            });
+          }
+
+          const disp = upstream.headers.get('content-disposition') || '';
+          const fnMatch = disp.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)/i);
+          const urlName = path.basename(parsed.pathname) || 'imported-file';
+          const outFilename = sanitizeFileName(fnMatch?.[1] ? decodeURIComponent(fnMatch[1]) : urlName);
+          const buf = Buffer.from(await upstream.arrayBuffer());
+          res.writeHead(200, {
+            'Content-Type': ct,
+            'Content-Length': buf.length,
+            'X-Muxaro-Filename': encodeURIComponent(outFilename),
+            'Cache-Control': 'no-store',
+          });
+          res.end(buf);
+          return;
         }
 
         // Local Upload Sessions (/api/v1/uploads/init + /api/v1/media/upload/*)
@@ -674,30 +789,33 @@ function createLocalServer(webDistDir: string): http.Server {
           });
         }
 
-        if (pathname === '/api/v1/analyse' && req.method === 'POST') {
+        if ((pathname === '/api/v1/analyse' || pathname === '/api/v1/probe') && req.method === 'POST') {
           const body = await readJsonBody(req);
           if (!body?.url) {
-            return sendJson(res, 400, { ok: false, error: { code: 'ERR_MISSING_URL', message: 'URL is required' } });
+            return sendJson(res, 400, { ok: false, success: false, error: { code: 'ERR_MISSING_URL', message: 'URL is required' } });
           }
           const manifest = await runYtdlpProbe(String(body.url));
-          return sendJson(res, 200, { ok: true, manifest, ...manifest });
+          return sendJson(res, 200, { ok: true, success: true, data: manifest, manifest, ...manifest });
         }
 
         if (pathname === '/api/v1/jobs' && req.method === 'POST') {
           const body = await readJsonBody(req);
           const job = startLocalProcessingJob(body || {});
+          const jobObj = {
+            id: job.id,
+            state: job.state,
+            status: job.state,
+            progressPct: job.progressPct,
+            stage: job.stage,
+            title: job.title,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+          };
           return sendJson(res, 201, {
             ok: true,
-            job: {
-              id: job.id,
-              state: job.state,
-              status: job.state,
-              progressPct: job.progressPct,
-              stage: job.stage,
-              title: job.title,
-              createdAt: job.createdAt,
-              updatedAt: job.updatedAt,
-            },
+            success: true,
+            data: jobObj,
+            job: jobObj,
           });
         }
 
@@ -740,8 +858,7 @@ function createLocalServer(webDistDir: string): http.Server {
           if (!job) {
             return sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Job not found' } });
           }
-          return sendJson(res, 200, {
-            ok: true,
+          const jobObj = {
             id: job.id,
             state: job.state,
             status: job.state,
@@ -751,6 +868,12 @@ function createLocalServer(webDistDir: string): http.Server {
             filename: job.filename,
             sizeBytes: job.sizeBytes,
             error: job.error,
+          };
+          return sendJson(res, 200, {
+            ok: true,
+            success: true,
+            data: jobObj,
+            ...jobObj,
           });
         }
 
@@ -855,6 +978,28 @@ function registerIpcHandlers(): void {
   ipcMain.handle('muxaro:open-downloads', async () => {
     await shell.openPath(getUserMuxaroDownloadsDir());
   });
+
+  ipcMain.handle('muxaro:capture-screen', async () => {
+    try {
+      const display = screen.getPrimaryDisplay();
+      const { width, height } = display.size;
+      const scale = display.scaleFactor || 1;
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: Math.min(2560, Math.round(width * scale)),
+          height: Math.min(1440, Math.round(height * scale)),
+        },
+      });
+      if (!sources.length) {
+        return { ok: false, error: 'No display source available.' };
+      }
+      const pngBuf = sources[0].thumbnail.toPNG();
+      return { ok: true, bytes: new Uint8Array(pngBuf) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 }
 
 async function bootDesktopApp(): Promise<void> {
@@ -907,7 +1052,7 @@ async function bootDesktopApp(): Promise<void> {
     }
   });
 
-  await mainWindow.loadURL(`http://127.0.0.1:${localPort}/`);
+  await mainWindow.loadURL(`http://127.0.0.1:${localPort}/app/`);
 }
 
 app.whenReady().then(() => {
