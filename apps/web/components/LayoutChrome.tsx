@@ -50,28 +50,28 @@ export function LayoutHeader() {
               className="muxaro-spring-tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-elevated border border-line text-xs font-semibold text-content hover:border-line-hover"
             >
               <Home className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-              <span>Studio Desk</span>
+              <span>Workstation</span>
             </Link>
             <Link
               href="/tools/pdf/make-pdf"
               className="muxaro-spring-tap hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated"
             >
               <Camera className="w-3.5 h-3.5 text-emerald-500" aria-hidden="true" />
-              <span>Camera -&gt; PDF</span>
+              <span>Camera Scan</span>
             </Link>
             <Link
-              href="/tools/pdf"
+              href="/tools/pdf/view"
               className="muxaro-spring-tap hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated"
             >
               <FileText className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-              <span>PDF (38)</span>
+              <span>Reader</span>
             </Link>
             <Link
               href="/tools"
               className="muxaro-spring-tap hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-content-secondary hover:text-content hover:bg-surface-elevated"
             >
               <Film className="w-3.5 h-3.5 text-amber-500" aria-hidden="true" />
-              <span>Media (14)</span>
+              <span>All Tools</span>
             </Link>
           </div>
 
@@ -91,22 +91,25 @@ export function LayoutHeader() {
     );
   }
 
-  // Dedicated Compact Mobile Header when inside APK sub-tools
+  // Unified Mobile Header when inside APK sub-tools (matches /m MUXARO branding cleanly)
   if (nativeMode === 'apk') {
     return (
       <header
-        className="sticky top-0 z-40 w-full border-b border-line bg-surface/85 backdrop-blur-xl"
+        className="sticky top-0 z-40 w-full border-b border-line bg-surface/90 backdrop-blur-xl"
         style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
-        <div className="px-4 h-12 flex items-center justify-between gap-2">
-          <Link
-            href="/m"
-            onClick={() => void triggerHapticTap()}
-            className="muxaro-spring-tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-elevated border border-line text-xs font-semibold text-content"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-            <span>Mobile Hub</span>
-          </Link>
+        <div className="px-4 h-12 flex items-center justify-between gap-2 max-w-2xl mx-auto">
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/m"
+              onClick={() => void triggerHapticTap()}
+              className="muxaro-spring-tap inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-elevated border border-line text-xs font-semibold text-content"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
+              <span>Studio</span>
+            </Link>
+            <span className="text-xs font-semibold text-content-secondary tracking-tight">MUXARO</span>
+          </div>
           <ThemeToggle />
         </div>
       </header>
@@ -141,20 +144,46 @@ export function LayoutFooter() {
 
   if (nativeMode === 'apk') {
     return (
-      <div
-        className="fixed bottom-4 left-4 z-50"
+      <nav
+        aria-label="Mobile workspace bar"
+        className="fixed bottom-3 left-4 right-4 z-50 max-w-md mx-auto"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
-        <Link
-          href="/m"
-          onClick={() => void triggerHapticTap()}
-          className="muxaro-liquid-glass muxaro-spring-tap inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-xs font-semibold text-content shadow-lg border border-line"
-        >
-          <ArrowLeft className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-          <Smartphone className="w-3.5 h-3.5 text-brand" aria-hidden="true" />
-          <span>Mobile Hub</span>
-        </Link>
-      </div>
+        <div className="muxaro-dock-glass rounded-full p-1.5 grid grid-cols-4 border border-line shadow-lg">
+          <Link
+            href="/m?tab=studio"
+            onClick={() => void triggerHapticTap()}
+            className="py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-content-secondary hover:text-brand"
+          >
+            <Home className="w-4 h-4" aria-hidden="true" />
+            <span>Studio</span>
+          </Link>
+          <Link
+            href="/m?tab=pdf"
+            onClick={() => void triggerHapticTap()}
+            className="py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-brand font-semibold"
+          >
+            <FileText className="w-4 h-4" aria-hidden="true" />
+            <span>PDF</span>
+          </Link>
+          <Link
+            href="/m?tab=media"
+            onClick={() => void triggerHapticTap()}
+            className="py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-content-secondary hover:text-brand"
+          >
+            <Film className="w-4 h-4" aria-hidden="true" />
+            <span>Media</span>
+          </Link>
+          <Link
+            href="/m?tab=saved"
+            onClick={() => void triggerHapticTap()}
+            className="py-1.5 rounded-full flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-content-secondary hover:text-brand"
+          >
+            <FolderDown className="w-4 h-4" aria-hidden="true" />
+            <span>Files</span>
+          </Link>
+        </div>
+      </nav>
     );
   }
 

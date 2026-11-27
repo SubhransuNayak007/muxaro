@@ -9,6 +9,16 @@ const nextConfig = {
   experimental: {
     externalDir: true,
   },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        sharp$: false,
+        'onnxruntime-node$': false,
+      };
+    }
+    return config;
+  },
   images: {
     remotePatterns: [
       {
@@ -52,7 +62,7 @@ const nextConfig = {
           },
           {
             key: 'Permissions-Policy',
-            value: 'camera=(self), microphone=(), geolocation=(), payment=(), usb=()',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
           },
           {
             key: 'Referrer-Policy',

@@ -10,8 +10,8 @@
     "test": "tsx --test --test-force-exit tests/v1-api.test.ts tests/po-token-cookie.test.ts tests/turboflow.test.ts tests/egress-tunnel.test.ts"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Subhransu Nayak",
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1173.0",

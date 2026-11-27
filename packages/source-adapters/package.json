@@ -35,8 +35,8 @@
     "oembed",
     "metadata-inspection"
   ],
-  "author": "AGENT 05: Source Integrations and Rights Engineer",
-  "license": "MIT",
+  "author": "Subhransu Nayak",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.0.0"
   },

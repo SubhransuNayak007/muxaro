@@ -14,6 +14,7 @@ import {
   setAutoDownloadPreference,
   mapFriendlyError,
 } from '@/lib/background-download';
+import { isDesktopApp, isNativeAppRuntime } from '@/lib/native-bridge';
 import {
   CheckCircle2,
   Check,
@@ -196,8 +197,12 @@ export default function JobProgress({
   const [showPreview, setShowPreview] = useState<boolean>(false);
   const [serverlessRoutingDetected, setServerlessRoutingDetected] = useState<boolean>(false);
   const [isMobileDevice, setIsMobileDevice] = useState<boolean>(false);
+  const [isNativeApp, setIsNativeApp] = useState<boolean>(false);
+  const [isDesktopExe, setIsDesktopExe] = useState<boolean>(false);
 
   useEffect(() => {
+    setIsNativeApp(isNativeAppRuntime());
+    setIsDesktopExe(isDesktopApp());
     if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
     const ua = navigator.userAgent || '';
     const isDesktopOS = /Windows NT|Macintosh|X11; Linux x86_64/i.test(ua);
@@ -968,7 +973,11 @@ export default function JobProgress({
 
           {/* Subtle card footer: One understated 12px line */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            {job.deliveryMode === 'zero-hop' || isRateLimitedOrChallenged ? (
+            {isDesktopExe ? (
+              <span>Processing locally on your computer with bundled FFmpeg and yt-dlp. Outputs save into Downloads/MUXARO.</span>
+            ) : isNativeApp ? (
+              <span>Processing locally on your device. Keep this screen open until the file is ready to save.</span>
+            ) : job.deliveryMode === 'zero-hop' || isRateLimitedOrChallenged ? (
               <span>Direct browser streams process inside your active tab. Keep this page open until your download starts.</span>
             ) : (
               <span>
@@ -1056,8 +1065,18 @@ export default function JobProgress({
               ) : (
                 <Download className="w-4 h-4" aria-hidden="true" />
               )}
-              <span>{downloadInitiated ? 'Saving to browser…' : downloadLabel}</span>
+              <span>{downloadInitiated ? 'Saving…' : isDesktopExe ? 'Save Copy' : downloadLabel}</span>
             </a>
+
+            {isDesktopExe && (
+              <button
+                type="button"
+                onClick={() => void window.muxaroDesktop?.openDownloadsFolder()}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-elevated text-xs font-medium text-content transition-colors select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+              >
+                <span>Open MUXARO Folder</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -1154,7 +1173,11 @@ export default function JobProgress({
 
           {/* Subtle card footer */}
           <div className="pt-3 border-t border-line/60 text-[12px] text-content-secondary/80">
-            {isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
+            {isDesktopExe ? (
+              <span>Saved locally on your PC in Downloads/MUXARO. Zero cloud uploads.</span>
+            ) : isNativeApp ? (
+              <span>Processed locally on your device. Tap Save Copy to export to device storage.</span>
+            ) : isRateLimitedOrChallenged || job.deliveryMode === 'zero-hop' ? (
               <span>Direct browser streams process inside your active tab. File saved directly to your device.</span>
             ) : (
               <span>
@@ -1272,7 +1295,7 @@ export default function JobProgress({
               </div>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
-                {!isMobileDevice ? (
+                {!isNativeApp && !isMobileDevice ? (
                   <Link
                     href={directHelperHref}
                     className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold hover:opacity-90 transition-opacity"
@@ -1292,6 +1315,16 @@ export default function JobProgress({
                     <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
                     <span>Download Direct Stream</span>
                   </a>
+                ) : isNativeApp ? (
+                  <button
+                    type="button"
+                    disabled={retrying}
+                    onClick={handleRetry}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-content text-base text-xs sm:text-sm font-semibold transition-opacity disabled:opacity-50"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 ${retrying ? 'animate-spin' : ''}`} />
+                    <span>{retryButtonLabel}</span>
+                  </button>
                 ) : (
                   <Link
                     href="/settings"
@@ -1326,10 +1359,12 @@ export default function JobProgress({
                 )}
               </div>
 
-              <TurnstileChallenge
-                title="Human verification"
-                subtitle="Complete the verification check below if prompted, then retry."
-              />
+              {!isNativeApp && (
+                <TurnstileChallenge
+                  title="Human verification"
+                  subtitle="Complete the verification check below if prompted, then retry."
+                />
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1375,7 +1410,8 @@ export default function JobProgress({
                     <Download className="w-3.5 h-3.5" />
                     <span>Save directly</span>
                   </a>
-                ) : !isMobileDevice &&
+                ) : !isNativeApp &&
+                  !isMobileDevice &&
                   job.sourceUrl &&
                   /^https?:\/\//i.test(job.sourceUrl) &&
                   ![

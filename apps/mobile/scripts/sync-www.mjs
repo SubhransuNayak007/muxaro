@@ -15,15 +15,24 @@ if (fs.existsSync(wwwDir)) {
 
 fs.cpSync(webOutDir, wwwDir, { recursive: true });
 
-// Keep root /studio-web backup and make default mobile entry redirect instantaneously into /m/
+// Keep root /desktop-home.html backup and make root index.html boot directly into the pre-rendered /m/ Mobile Studio
+// IMPORTANT: Capacitor WebViewLocalServer (html5mode: true) maps extensionless routes like /m/ back to /index.html.
+// Serving a redirect to /m/ in /index.html caused an infinite redirect loop and black screen on Android!
 const rootIndex = path.join(wwwDir, 'index.html');
+const mobileIndex = path.join(wwwDir, 'm', 'index.html');
+if (!fs.existsSync(mobileIndex)) {
+  throw new Error(`Missing exported mobile entry at ${mobileIndex}. Check apps/web/app/m/page.tsx build.`);
+}
 if (fs.existsSync(rootIndex)) {
   fs.copyFileSync(rootIndex, path.join(wwwDir, 'desktop-home.html'));
-  fs.writeFileSync(
-    rootIndex,
-    `<!DOCTYPE html><html lang="en" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta http-equiv="refresh" content="0;url=/m/"><title>MUXARO</title><style>body{margin:0;background:#0B0C0F;color:#F0F2F5;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}</style><script>window.location.replace('/m/');</script></head><body>MUXARO Studio…</body></html>`,
-    'utf8'
-  );
 }
+let mobileHtml = fs.readFileSync(mobileIndex, 'utf8');
+const bootScript = `<script>(function(){try{if(window.location.pathname==='/'||window.location.pathname==='/index.html'){window.history.replaceState(null,'','/m/');}}catch(e){}})();</script>`;
+if (mobileHtml.includes('<head>')) {
+  mobileHtml = mobileHtml.replace('<head>', `<head>${bootScript}`);
+} else {
+  mobileHtml = `${bootScript}${mobileHtml}`;
+}
+fs.writeFileSync(rootIndex, mobileHtml, 'utf8');
 
 console.log('[sync-www] Synced offline static bundle to apps/mobile/www cleanly.');

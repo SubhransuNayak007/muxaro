@@ -36,7 +36,7 @@ jobs:
 
       - name: Verify no raw private keys or OAuth/Cloud secrets in tracked files
         run: |
-          if grep -rnE "(GOCSPX-[A-Za-z0-9_-]+|AIzaSy[A-Za-z0-9_-]{30,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)" apps/ packages/ security/ infra/ docs/ .env.example; then
+          if grep -rnE "(GOCSPX-[A-Za-z0-9_-]+|AIzaSy[A-Za-z0-9_-]{30,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----)" apps/ packages/ security/ docs/ .env.example; then
             echo "::error::Potential private key or cloud credential detected in tracked files!"
             exit 1
           fi

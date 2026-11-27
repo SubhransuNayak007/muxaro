@@ -23,6 +23,7 @@ service-account*.json
 **/.storage/
 storage/
 *.mp4
+!assets/animations/*.mp4
 *.mkv
 *.webm
 *.part

@@ -552,7 +552,9 @@ function normalizeStream(s: any, indexFallback: number): MediaStream {
     s?.resolutionLabel ||
     s?.resolution ||
     (height
-      ? height >= 4320
+      ? height >= 6480
+        ? '6480p'
+        : height >= 4320
         ? '4320p'
         : height >= 2160
         ? '2160p'
@@ -605,7 +607,7 @@ function normalizeStream(s: any, indexFallback: number): MediaStream {
   };
 }
 
-function normalizeManifest(
+export function normalizeManifest(
   rawInput: any,
   fallbacks: {
     sourceUrl: string;
@@ -651,7 +653,17 @@ function normalizeManifest(
         const height = typeof f.height === 'number' ? f.height : 0;
         const resolutionLabel =
           f.resolution ||
-          (height >= 4320 ? '8K' : height >= 2160 ? '4K' : height >= 1440 ? '1440p' : height ? `${height}p` : undefined);
+          (height >= 6480
+            ? '12K'
+            : height >= 4320
+            ? '8K'
+            : height >= 2160
+            ? '4K'
+            : height >= 1440
+            ? '1440p'
+            : height
+            ? `${height}p`
+            : undefined);
         videoStreams.push(
           normalizeStream(
             {
@@ -667,7 +679,7 @@ function normalizeManifest(
               bitrateKbps: f.bitrate ? Math.round(f.bitrate / 1000) : (f.tbr ? Math.round(f.tbr) : undefined),
               estimatedSizeBytes: f.estBytes || f.filesize,
               isStreamCopyCandidate: true,
-              recommended: idx === 0 || f.resolution === '1080p' || f.height === 1080,
+              recommended: idx === 0,
               url: f.url,
             },
             idx
@@ -1083,15 +1095,34 @@ class ApiClient {
         body: JSON.stringify({ url: normalizedUrl, rightsDeclared: true }),
       });
 
-      if (raw && typeof raw === 'object') {
+      if (raw && typeof raw === 'object' && (raw.title || Array.isArray(raw.videoFormats) || Array.isArray(raw.formats))) {
         return normalizeManifest(raw, { sourceUrl: normalizedUrl, isLocalUpload: false });
       }
-      throw new Error('Media inspection returned an empty manifest.');
+      const { classifyMediaSourceUrl } = await import('./media/source-resolver.ts');
+      const classified = classifyMediaSourceUrl(normalizedUrl);
+      const err = new ApiClientError(
+        classified.blockedReason ||
+          `Could not inspect ${classified.platformLabel} (${classified.host}). Upload a local media file or use Desktop Studio.`,
+        422,
+        { code: 'SOURCE_UNSUPPORTED' }
+      );
+      (err as any).classifiedSource = classified;
+      throw err;
     } catch (primaryErr: any) {
+      if (primaryErr?.classifiedSource) {
+        throw primaryErr;
+      }
+      const { classifyMediaSourceUrl } = await import('./media/source-resolver.ts');
+      const classified = classifyMediaSourceUrl(normalizedUrl);
+      if (classified.requiresNativeOrWorker && /empty manifest|404|405|failed|fetch/i.test(String(primaryErr?.message || ''))) {
+        const friendly = new ApiClientError(classified.blockedReason || primaryErr.message, 422, {
+          code: 'SOURCE_UNSUPPORTED',
+        });
+        (friendly as any).classifiedSource = classified;
+        throw friendly;
+      }
       throw primaryErr;
     }
-
-    throw new Error('Could not read media details from this link.');
   }
 
   /**
@@ -1101,6 +1132,11 @@ class ApiClient {
   async probeUrl(url: string): Promise<MediaManifest> {
     const trimmed = (url || '').trim();
     const normalizedUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+
+    if (typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.())) {
+      const { probeApkMediaUrl } = await import('./media/apk-extractor');
+      return await probeApkMediaUrl(normalizedUrl);
+    }
 
     const tryDirectClientExtraction = async (): Promise<MediaManifest | null> => {
       if (typeof window === 'undefined') return null;

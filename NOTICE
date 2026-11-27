@@ -1,41 +1,59 @@
-MUXARO — Your Media. One Powerful Workspace.
-Copyright 2026 SubhransuNayak007 and MUXARO Contributors
+MUXARO
+Copyright 2026 Subhransu Nayak (@SubhransuNayak007)
 
-This product includes software developed for the MUXARO project
-(https://github.com/SubhransuNayak007/muxaro) and licensed under the
-Apache License, Version 2.0 (see LICENSE).
+This product includes software developed by Subhransu Nayak and contributors
+to the MUXARO open-source project (https://github.com/SubhransuNayak007/muxaro).
 
-===============================================================================
-THIRD-PARTY SOFTWARE & EXTERNAL TOOLS
-===============================================================================
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use these files except in compliance with the License.
+You may obtain a copy of the License at
 
-1. Third-Party JavaScript/TypeScript Dependencies, Fonts, and Icons
-   MUXARO uses permissively licensed open-source packages (MIT, ISC,
-   Apache-2.0, BSD-3-Clause, BlueOak-1.0.0, 0BSD, CC-BY-4.0), SIL OFL-1.1
-   typefaces (Inter, JetBrains Mono), and ISC-licensed icons (Lucide).
-   See THIRD_PARTY_NOTICES.md for the complete attribution registry.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-2. External Out-of-Process CLI Binaries (Not Bundled in Source)
-   MUXARO invokes external system utilities (`ffmpeg`, `ffprobe`, and `yt-dlp`)
-   strictly as independent out-of-process executables via OS pipes (`execFile` /
-   `spawn`) without static or dynamic linking to their libraries:
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-   - FFmpeg / FFprobe (https://ffmpeg.org/)
-     Upstream FFmpeg is licensed under LGPL-2.1+ or GPL-2.0+/GPL-3.0 depending
-     on build configuration. MUXARO does not redistribute FFmpeg source or
-     binaries in this Git repository. Operators who build and redistribute
-     container images (e.g., via `infra/Dockerfile.api`, `infra/Dockerfile.worker`,
-     or `infra/Dockerfile.media`) that install Debian's `ffmpeg` package (which
-     is compiled under GPL-3.0) are responsible for complying with the
-     corresponding-source and attribution requirements of FFmpeg and Debian
-     for those distributed container images.
+================================================================================
+NOTICES AND ARCHITECTURE BOUNDARIES
+================================================================================
 
-   - yt-dlp (https://github.com/yt-dlp/yt-dlp)
-     Licensed under The Unlicense (public domain dedication). Downloaded only
-     at container build time or installed independently by the operator.
+1. First-Party Workspaces (Apache-2.0)
+   - `apps/web`: Next.js 16 (App Router) unified workspace housing 52 local
+     PDF & Media tools, on-device RAG, semantic intent routing, and Voice Orb UI.
+   - `apps/desktop`: Electron 35 local desktop workstation (`MUXARO-Studio-Windows-x64.exe`).
+   - `apps/mobile`: Capacitor 7 Android application (`MUXARO-Studio.apk`).
+   - `apps/api` & `apps/media-worker`: Fastify 5 self-hostable REST/SSE API and
+     media processing microservice.
+   - `packages/*` & `security/`: Shared contracts, entitlements, source adapters,
+     and defense-in-depth security utilities.
+
+2. Out-of-Process Native & WebAssembly Tool Boundaries
+   MUXARO invokes external native binaries and WebAssembly workers strictly
+   out-of-process without statically or dynamically linking copyleft libraries
+   into first-party TypeScript/Java sources:
+
+   - FFmpeg / FFprobe (`https://ffmpeg.org/`)
+     Executed as external child processes (`execFile` / `spawn`, `shell: false`)
+     in `apps/desktop` and `apps/api`, and inside sandboxed browser Web Workers
+     via `@ffmpeg/ffmpeg` (MIT) and `@ffmpeg/core` (LGPL-2.1+ / GPL-2.0+
+     depending on build flags). Distributed Windows releases that bundle
+     `ffmpeg.exe` comply with upstream FFmpeg source-offer and attribution
+     notices documented in `THIRD_PARTY_NOTICES.md`.
+
+   - yt-dlp (`https://github.com/yt-dlp/yt-dlp`)
+     Licensed under The Unlicense; invoked strictly out-of-process in
+     `apps/desktop` and `apps/api` or used for stream metadata inspection.
+
+   - Local AI & Speech Tooling (`@huggingface/transformers`, `whisper.cpp`, `Piper`, `Ollama`)
+     `@huggingface/transformers` is licensed under Apache-2.0; optional user-installed
+     offline Voice Packs (`whisper.cpp` MIT, `Piper` MIT) and local LLMs (`Ollama` MIT)
+     are downloaded/executed separately on user request in app data storage.
 
 3. Trademarks
-   "MUXARO", the MUXARO logo marks, and the tagline "Your Media. One Powerful
-   Workspace." are project identifiers reserved under Section 6 of the Apache
-   License, Version 2.0. This license does not grant trademark rights beyond
-   reasonable and customary attribution.
+   "MUXARO", the MUXARO logo marks, and associated product identifiers are
+   reserved under Section 6 of the Apache License, Version 2.0. This license
+   does not grant permission to use MUXARO trademarks beyond reasonable and
+   customary attribution.

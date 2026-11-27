@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { formatBytes } from '@/lib/formatters';
 import { useOpenedArtifact, type OpenedArtifact } from '@/lib/opened-artifact';
-import { isNativeAppRuntime } from '@/lib/native-bridge';
+import { isNativeAppRuntime, saveOrShareArtifact } from '@/lib/native-bridge';
 import GoogleDriveModal from '@/components/native/GoogleDriveModal';
 import {
   type PdfProcessResult,
@@ -212,9 +212,13 @@ export default function PdfToolShell({
       : `${safeStem}${ext}`;
   };
 
-  const handleDownload = (requestedName: string) => {
+  const handleDownload = async (requestedName: string) => {
     if (!activeResult) return;
     const finalName = resolveOutputName(requestedName);
+    if (isNativeAppRuntime()) {
+      await saveOrShareArtifact(activeResult.blob, finalName, finalName);
+      return;
+    }
     const a = document.createElement('a');
     a.href = activeResult.url;
     a.download = finalName;
@@ -224,9 +228,14 @@ export default function PdfToolShell({
   };
 
   const handleShare = async (requestedName: string) => {
-    if (!activeResult || typeof navigator === 'undefined' || !navigator.share) return;
+    if (!activeResult) return;
+    const finalName = resolveOutputName(requestedName);
+    if (isNativeAppRuntime()) {
+      await saveOrShareArtifact(activeResult.blob, finalName, finalName);
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.share) return;
     try {
-      const finalName = resolveOutputName(requestedName);
       const file = new File([activeResult.blob], finalName, {
         type: activeResult.mimeType,
       });
@@ -370,7 +379,9 @@ export default function PdfToolShell({
                   </div>
                   <div className="text-xs text-content-secondary mt-0.5">
                     {selectedFiles.length > 0
-                      ? `${formatBytes(selectedFiles.reduce((s, f) => s + f.size, 0))} (${fileHelperText})`
+                      ? `${formatBytes(selectedFiles.reduce((s, f) => s + f.size, 0))} · ${isNativeApp ? '100% on-device local' : fileHelperText}`
+                      : isNativeApp
+                      ? 'Processed 100% locally on your device. Zero server uploads.'
                       : fileHelperText}
                   </div>
                 </div>
@@ -466,7 +477,7 @@ export default function PdfToolShell({
           sizeBytes={activeResult.sizeBytes}
           elapsedMs={activeResult.elapsedMs}
           summary={activeResult.summary}
-          statusLabel="Browser Local"
+          statusLabel={isNativeApp ? 'On-Device Local' : 'Browser Local'}
           warnings={activeResult.warnings}
           editableName
           onDownload={handleDownload}

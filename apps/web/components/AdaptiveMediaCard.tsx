@@ -33,7 +33,8 @@ import {
 import { startZeroWaitStream } from '@/lib/stream-engine';
 import { FFmpegWorkerClient } from '@/lib/ffmpeg/ffmpeg-client';
 import { sanitizeSafeNavigationUrl } from '@/lib/url-utils';
-import { isNativeAppRuntime } from '@/lib/native-bridge';
+import { isCapacitorApp, isNativeAppRuntime, saveOrShareArtifact } from '@/lib/native-bridge';
+import { downloadApkMediaToDevice, openApkSavedMedia } from '@/lib/media/apk-extractor';
 import { ResumableMultipartUploader } from '@/lib/multipart-uploader';
 import {
   normalizeVideoOptions,
@@ -261,6 +262,8 @@ export default function AdaptiveMediaCard({
   // Sync with HeroOmnibox preset or persistent user settings
   useEffect(() => {
     const presetTargetMap: Record<string, number> = {
+      '12k': 6480,
+      '10k': 5760,
       '8k': 4320,
       '4k': 2160,
       '2k': 1440,
@@ -311,6 +314,7 @@ export default function AdaptiveMediaCard({
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [copiedDownloadLink, setCopiedDownloadLink] = useState<boolean>(false);
   const [fallbackDownloadUrl, setFallbackDownloadUrl] = useState<string | null>(null);
+  const [apkSavedInfo, setApkSavedInfo] = useState<{ savedPath: string; savedUri: string; mimeType: string } | null>(null);
   const [clientStreamProgress, setClientStreamProgress] = useState<{
     stage: string;
     percent: number;
@@ -321,11 +325,23 @@ export default function AdaptiveMediaCard({
   // Auto-trigger ref to prevent duplicate browser download prompts
   const autoTriggeredRef = useRef<boolean>(false);
 
-  // Trigger browser download immediately
+  // Trigger native or browser download immediately without spawning external tabs in EXE/APK
   const triggerBrowserDownload = useCallback((url: string, filename?: string) => {
     if (typeof window === 'undefined' || !url) return;
     const safeUrl = sanitizeSafeNavigationUrl(url);
     if (!safeUrl) return;
+    if (isNativeAppRuntime()) {
+      void (async () => {
+        try {
+          const res = await fetch(safeUrl);
+          if (!res.ok) return;
+          const blob = await res.blob();
+          const outName = filename || `${manifest.title || 'muxaro-media'}.${activeTab === 'audio' ? selectedAudioId : videoContainer}`;
+          await saveOrShareArtifact(blob, outName, outName);
+        } catch {}
+      })();
+      return;
+    }
     try {
       const link = document.createElement('a');
       link.href = safeUrl;
@@ -342,7 +358,7 @@ export default function AdaptiveMediaCard({
     } catch {
       window.open(safeUrl, '_blank', 'noopener,noreferrer');
     }
-  }, []);
+  }, [manifest.title, activeTab, selectedAudioId, videoContainer]);
 
   // Initialize selections from manifest
   useEffect(() => {
@@ -681,6 +697,86 @@ export default function AdaptiveMediaCard({
       setErrorMessage('Please wait a moment for browser verification to complete, then click Retry.');
       setChallengeNonce((n) => n + 1);
       setSubmitting(false);
+      return;
+    }
+
+    // Native Android APK Direct Device Download (+ hardware MediaMuxer for adaptive HD/4K YouTube)
+    if (isCapacitorApp()) {
+      try {
+        const cleanTitle = (manifest.title || 'muxaro_video')
+          .replace(/[^a-zA-Z0-9._-]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 64) || 'muxaro_video';
+
+        const chosenVideo = selectedVideoOption?.stream;
+        const m4aAudio =
+          manifest.audioStreams?.find((a) => a.notes === 'm4a' || /aac|m4a/i.test(String(a.codec || ''))) ||
+          manifest.audioStreams?.[0];
+
+        let primaryStreamUrl = '';
+        let pairedAudioUrl: string | undefined;
+        let outExt = isAudioOnly ? 'm4a' : 'mp4';
+        let outMime = isAudioOnly ? 'audio/mp4' : 'video/mp4';
+
+        if (isAudioOnly) {
+          primaryStreamUrl = m4aAudio?.url || manifest.directStreamUrl || chosenVideo?.url || '';
+          if (m4aAudio?.codec === 'mp3' || /\.mp3(\?|$)/i.test(primaryStreamUrl)) {
+            outExt = 'mp3';
+            outMime = 'audio/mpeg';
+          }
+        } else {
+          primaryStreamUrl = chosenVideo?.url || manifest.directStreamUrl || '';
+          const needsSeparateAudioMux =
+            !muteVideo &&
+            chosenVideo?.notes === 'adaptive' &&
+            Boolean(m4aAudio?.url) &&
+            m4aAudio?.url !== primaryStreamUrl;
+          if (needsSeparateAudioMux) {
+            pairedAudioUrl = m4aAudio?.url;
+          }
+        }
+
+        if (!primaryStreamUrl || !/^https?:\/\//i.test(primaryStreamUrl)) {
+          throw new Error('Selected quality has no directly playable stream on this device. Try selecting 720p or Audio.');
+        }
+
+        setApkSavedInfo(null);
+        setClientStreamProgress({
+          stage: 'connecting',
+          percent: 4,
+          message: 'Starting direct download on Android…',
+        });
+
+        const res = await downloadApkMediaToDevice({
+          videoUrl: primaryStreamUrl,
+          audioUrl: pairedAudioUrl,
+          filename: `${cleanTitle}.${outExt}`,
+          mimeType: outMime,
+          onProgress: (pct, st, msg) => {
+            setClientStreamProgress({
+              stage: st.toLowerCase(),
+              percent: pct,
+              message: msg || `Downloading (${pct}%)…`,
+            });
+          },
+        });
+
+        setClientStreamProgress(null);
+        setApkSavedInfo({ savedPath: res.savedPath, savedUri: res.savedUri, mimeType: res.mimeType });
+        setFallbackDownloadUrl(res.savedUri);
+        saveToDownloadsHistory(
+          `apk_${Date.now()}`,
+          res.savedUri,
+          manifest.title,
+          outExt,
+          res.sizeBytes || selectedVideoOption?.estimatedSizeBytes || manifest.fileSizeBytes
+        );
+      } catch (apkErr: any) {
+        setClientStreamProgress(null);
+        setErrorMessage(extractDisplayError(apkErr, 'Could not download this video on Android.'));
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -1535,9 +1631,11 @@ export default function AdaptiveMediaCard({
                   </span>
                 </div>
                 <div className="text-xs text-content-secondary mt-0.5">
-                  {selectedVideoOption && selectedVideoOption.height > 1440
-                    ? 'Processed locally with maximum fidelity and zero cloud compression.'
-                    : 'Stream-processed via instant cloud fast-path. File ready for immediate save.'}
+                  {apkSavedInfo
+                    ? `Saved directly to ${apkSavedInfo.savedPath}`
+                    : selectedVideoOption && selectedVideoOption.height > 1440
+                      ? 'Processed locally with maximum fidelity and zero cloud compression.'
+                      : 'Stream-processed via instant fast-path. File ready to open or save.'}
                 </div>
               </div>
             </div>
@@ -1584,17 +1682,28 @@ export default function AdaptiveMediaCard({
                 )}
               </button>
 
-              <a
-                href={sanitizeSafeNavigationUrl(fallbackDownloadUrl) ?? '#'}
-                download
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => triggerBrowserDownload(fallbackDownloadUrl)}
-                className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-[background-color,opacity,transform] duration-150 inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Save File to Disk</span>
-              </a>
+              {apkSavedInfo ? (
+                <button
+                  type="button"
+                  onClick={() => void openApkSavedMedia(apkSavedInfo.savedUri, apkSavedInfo.mimeType)}
+                  className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-[background-color,opacity,transform] duration-150 inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Open / Play File</span>
+                </button>
+              ) : (
+                <a
+                  href={sanitizeSafeNavigationUrl(fallbackDownloadUrl) ?? '#'}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => triggerBrowserDownload(fallbackDownloadUrl)}
+                  className="h-9 px-4 rounded-xl bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 text-xs sm:text-sm font-semibold shadow-sm active:scale-[0.98] transition-[background-color,opacity,transform] duration-150 inline-flex items-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-content"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Save File to Disk</span>
+                </a>
+              )}
             </div>
           </div>
         </div>

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { setLightweightMode } from '@/lib/device-mode';
 
 export type MuxaroTheme = 'auto' | 'light' | 'dark';
-export type VideoQuality = 'auto' | '1080p' | '1440p' | '2160p' | '4320p';
+export type VideoQuality = 'auto' | '1080p' | '1440p' | '2160p' | '4320p' | '6480p';
 export type VideoCodec = 'auto' | 'h264' | 'av1' | 'vp9';
 export type ContainerFormat = 'auto' | 'mp4' | 'mkv' | 'webm';
 export type AudioFormat = 'mp3' | 'flac' | 'm4a' | 'opus' | 'wav';

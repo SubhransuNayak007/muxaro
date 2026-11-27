@@ -29,6 +29,12 @@ import {
   Upload,
   Clock,
 } from 'lucide-react';
+import {
+  ingestImageBatch,
+  processSingleImageRecord,
+  type ImageIngestionRecord,
+  type ImageIngestState,
+} from '@/lib/pdf/image-pipeline';
 import PdfToolShell from './PdfToolShell';
 import GoogleDriveModal from '@/components/native/GoogleDriveModal';
 import {
@@ -95,6 +101,9 @@ interface ScanPageItem {
   filter: ScanFilterPreset;
   corners: ScanQuad;
   processing?: boolean;
+  ingestState?: ImageIngestState;
+  errorMessage?: string;
+  suggestedAction?: string;
 }
 
 const DEFAULT_FULL_QUAD: ScanQuad = [
@@ -421,16 +430,45 @@ async function processScanDocument(
   corners: ScanQuad,
   filter: ScanFilterPreset
 ): Promise<{ file: File; previewUrl: string }> {
-  const bmp = await createImageBitmap(originalFile);
+  let bmp: ImageBitmap | null = null;
+  let objUrlToRevoke = '';
+  let fallbackImg: HTMLImageElement | null = null;
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      bmp = await createImageBitmap(originalFile, { imageOrientation: 'from-image' });
+    } catch {
+      try {
+        bmp = await createImageBitmap(originalFile);
+      } catch {
+        bmp = null;
+      }
+    }
+  }
+
+  if (!bmp) {
+    objUrlToRevoke = URL.createObjectURL(originalFile);
+    fallbackImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error(`Unable to decode ${originalFile.name}`));
+      el.src = objUrlToRevoke;
+    });
+  }
+
   try {
-    const sw = bmp.width;
-    const sh = bmp.height;
+    const sw = bmp ? bmp.width : Math.max(1, fallbackImg?.naturalWidth || 1);
+    const sh = bmp ? bmp.height : Math.max(1, fallbackImg?.naturalHeight || 1);
     const srcCanvas = document.createElement('canvas');
     srcCanvas.width = sw;
     srcCanvas.height = sh;
     const srcCtx = srcCanvas.getContext('2d');
     if (!srcCtx) throw new Error('Canvas unavailable');
-    srcCtx.drawImage(bmp, 0, 0);
+    if (bmp) {
+      srcCtx.drawImage(bmp, 0, 0);
+    } else if (fallbackImg) {
+      srcCtx.drawImage(fallbackImg, 0, 0);
+    }
 
     const isIdentityQuad =
       corners.every((pt, idx) => Math.hypot(pt.x - DEFAULT_FULL_QUAD[idx].x, pt.y - DEFAULT_FULL_QUAD[idx].y) < 0.004);
@@ -538,7 +576,8 @@ async function processScanDocument(
     const outFile = new File([blob], `${stem}-scanned.jpg`, { type: 'image/jpeg' });
     return { file: outFile, previewUrl: URL.createObjectURL(outFile) };
   } finally {
-    bmp.close();
+    bmp?.close();
+    if (objUrlToRevoke) URL.revokeObjectURL(objUrlToRevoke);
   }
 }
 
@@ -571,9 +610,15 @@ export function PdfMakeFromCameraTool() {
   const [applyingEdit, setApplyingEdit] = useState(false);
   const [driveModalOpen, setDriveModalOpen] = useState(false);
   const [nativeAppMode, setNativeAppMode] = useState(false);
+  const [isMobileApk, setIsMobileApk] = useState(false);
+  const [makeSearchableOcr, setMakeSearchableOcr] = useState(false);
+  const [scanPreset, setScanPreset] = useState<'document' | 'receipt' | 'whiteboard'>('document');
 
   useEffect(() => {
     setNativeAppMode(isNativeAppRuntime());
+    setIsMobileApk(
+      typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform?.())
+    );
   }, []);
 
   useEffect(() => {
@@ -662,45 +707,109 @@ export function PdfMakeFromCameraTool() {
   };
 
   const ingestFiles = async (files: File[], defaultFilter: ScanFilterPreset = 'original') => {
+    if (!files.length) return;
+    const isMobileRuntime = isMobileApk || (typeof window !== 'undefined' && window.innerWidth < 768);
+    const records = await ingestImageBatch(files, items.length, undefined, isMobileRuntime ? 2 : 3);
     const created: ScanPageItem[] = [];
-    for (let i = 0; i < files.length; i += 1) {
-      const f = files[i];
-      if (!f.type.startsWith('image/')) continue;
-      const id = `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
-      const originalUrl = URL.createObjectURL(f);
-      createdUrlsRef.current.add(originalUrl);
+
+    for (const rec of records) {
+      if (rec.state === 'failed') {
+        created.push({
+          id: rec.id,
+          originalFile: rec.originalFile,
+          originalUrl: '',
+          file: rec.originalFile,
+          previewUrl: '',
+          filter: defaultFilter,
+          corners: DEFAULT_FULL_QUAD,
+          ingestState: 'failed',
+          errorMessage: rec.errorMessage || `Could not decode "${rec.displayName}".`,
+          suggestedAction: rec.suggestedAction,
+        });
+        continue;
+      }
+
+      const cleanFile = rec.normalizedFile || rec.originalFile;
+      const previewUrl = rec.thumbnailUrl || URL.createObjectURL(cleanFile);
+      if (previewUrl.startsWith('blob:')) createdUrlsRef.current.add(previewUrl);
+
       let detectedCorners = DEFAULT_FULL_QUAD;
       try {
-        const bmp = await createImageBitmap(f);
+        const bmp = await createImageBitmap(cleanFile, { imageOrientation: 'from-image' });
         detectedCorners = detectDocumentQuadFromBitmap(bmp);
         bmp.close();
       } catch {
         detectedCorners = DEFAULT_INSET_QUAD;
       }
-      let outFile = f;
-      let outUrl = originalUrl;
+
+      let outFile = cleanFile;
+      let outUrl = previewUrl;
       if (defaultFilter !== 'original') {
         try {
-          const processed = await processScanDocument(f, detectedCorners, defaultFilter);
+          const processed = await processScanDocument(cleanFile, detectedCorners, defaultFilter);
           outFile = processed.file;
           outUrl = processed.previewUrl;
           createdUrlsRef.current.add(outUrl);
         } catch {
-          // Keep original on filter failure
+          // Keep normalized clean image when scan filter fails
         }
       }
+
       created.push({
-        id,
-        originalFile: f,
-        originalUrl,
+        id: rec.id,
+        originalFile: cleanFile,
+        originalUrl: previewUrl,
         file: outFile,
         previewUrl: outUrl,
         filter: defaultFilter,
         corners: detectedCorners,
+        ingestState: 'ready',
       });
     }
-    if (created.length === 0) return;
-    setItems((prev) => [...prev, ...created]);
+
+    if (created.length > 0) {
+      setItems((prev) => [...prev, ...created]);
+    }
+  };
+
+  const replaceScanItem = async (id: string, replacementFile: File) => {
+    const records = await ingestImageBatch([replacementFile], 0, undefined, 1);
+    const rec = records[0];
+    if (!rec) return;
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        if (it.originalUrl.startsWith('blob:')) URL.revokeObjectURL(it.originalUrl);
+        if (it.previewUrl.startsWith('blob:') && it.previewUrl !== it.originalUrl) {
+          URL.revokeObjectURL(it.previewUrl);
+        }
+        if (rec.state === 'failed') {
+          return {
+            ...it,
+            originalFile: rec.originalFile,
+            originalUrl: '',
+            file: rec.originalFile,
+            previewUrl: '',
+            ingestState: 'failed',
+            errorMessage: rec.errorMessage,
+            suggestedAction: rec.suggestedAction,
+          };
+        }
+        const cleanFile = rec.normalizedFile || rec.originalFile;
+        const preview = rec.thumbnailUrl || URL.createObjectURL(cleanFile);
+        if (preview.startsWith('blob:')) createdUrlsRef.current.add(preview);
+        return {
+          ...it,
+          originalFile: cleanFile,
+          originalUrl: preview,
+          file: cleanFile,
+          previewUrl: preview,
+          ingestState: 'ready',
+          errorMessage: undefined,
+          suggestedAction: undefined,
+        };
+      })
+    );
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -817,27 +926,88 @@ export function PdfMakeFromCameraTool() {
     });
   };
 
+  const rotateScanItem = async (id: string) => {
+    const target = items.find((x) => x.id === id);
+    if (!target) return;
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, processing: true } : x)));
+    try {
+      const bmp = await createImageBitmap(target.originalFile);
+      const canvas = document.createElement('canvas');
+      canvas.width = bmp.height;
+      canvas.height = bmp.width;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas unavailable');
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+      bmp.close();
+      const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', 0.94));
+      canvas.width = 0;
+      canvas.height = 0;
+      if (!blob) throw new Error('Rotate failed');
+      const rotatedOrig = new File([blob], target.originalFile.name, { type: 'image/jpeg' });
+      const rotatedOrigUrl = URL.createObjectURL(rotatedOrig);
+      createdUrlsRef.current.add(rotatedOrigUrl);
+      const processed = await processScanDocument(rotatedOrig, target.corners, target.filter);
+      createdUrlsRef.current.add(processed.previewUrl);
+      setItems((prev) =>
+        prev.map((x) =>
+          x.id === id
+            ? {
+                ...x,
+                originalFile: rotatedOrig,
+                originalUrl: rotatedOrigUrl,
+                file: processed.file,
+                previewUrl: processed.previewUrl,
+                processing: false,
+              }
+            : x
+        )
+      );
+    } catch {
+      setItems((prev) => prev.map((x) => (x.id === id ? { ...x, processing: false } : x)));
+    }
+  };
+
   const editingItem = items.find((x) => x.id === editingId) || null;
+  const presetDefaultFilter: ScanFilterPreset =
+    scanPreset === 'receipt' ? 'bw-document' : scanPreset === 'whiteboard' ? 'vivid' : 'magic-color';
+
+  const validItems = useMemo(() => items.filter((i) => i.ingestState !== 'failed'), [items]);
+  const failedItems = useMemo(() => items.filter((i) => i.ingestState === 'failed'), [items]);
 
   return (
     <PdfToolShell
       title="Create / scan PDF"
-      description="Camera & phone-QR scanner with Sobel auto-edge detection, 4-corner homography dewarp, and adaptive B&W / Magic Color filters."
+      description="Camera & document scanner with auto-edge crop, perspective dewarp, 6 filters, and searchable OCR."
       currentHref="/tools/pdf/make-pdf"
-      accept="image/jpeg,image/png,image/webp"
+      accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png,.webp,.heic"
       multiple
-      selectedFiles={items.map((i) => i.file)}
-      onFilesSelected={(files) => void ingestFiles(files, 'original')}
-      submitLabel={`Create PDF (${items.length} page${items.length === 1 ? '' : 's'})`}
-      canSubmit={items.length > 0}
-      onRun={(onProgress, signal) =>
-        imagesToPdf(
-          items.map((i) => ({ file: i.file, filter: 'none' })),
-          { pageSize, marginPt, fitMode: 'contain' },
-          onProgress,
-          signal
-        )
+      selectedFiles={validItems.map((i) => i.file)}
+      onFilesSelected={(files) => void ingestFiles(files, presetDefaultFilter)}
+      submitLabel={
+        makeSearchableOcr
+          ? `Create Searchable OCR PDF (${validItems.length} page${validItems.length === 1 ? '' : 's'})`
+          : `Create PDF (${validItems.length} page${validItems.length === 1 ? '' : 's'})`
       }
+      canSubmit={validItems.length > 0}
+      onRun={async (onProgress, signal) => {
+        const baseRes = await imagesToPdf(
+          validItems.map((i) => ({ file: i.file, filter: 'none' })),
+          { pageSize, marginPt, fitMode: 'contain' },
+          (pct) => onProgress(makeSearchableOcr ? Math.round(pct * 0.35) : pct, 'Building PDF pages…'),
+          signal
+        );
+        if (!makeSearchableOcr) return baseRes;
+        const pdfFile = new File([baseRes.blob], baseRes.fileName, { type: 'application/pdf' });
+        const ocrRes = await runPdfOcr(
+          pdfFile,
+          { mode: 'ocr', outputFormat: 'searchable-pdf', concurrency: 2 },
+          (pct, status) => onProgress(35 + Math.round(pct * 0.65), status),
+          signal
+        );
+        return ocrRes.result;
+      }}
     >
       <div
         onPaste={handlePaste}
@@ -911,18 +1081,51 @@ export function PdfMakeFromCameraTool() {
               </>
             )}
 
-            <button
-              type="button"
-              onClick={() => setShowQrPanel((v) => !v)}
-              className={`px-3.5 py-2 rounded-xl border text-xs font-semibold inline-flex items-center gap-1.5 ${
-                showQrPanel
-                  ? 'border-brand bg-brand/10 text-brand'
-                  : 'border-line bg-surface-elevated text-content'
-              }`}
-            >
-              <QrCode className="w-4 h-4" aria-hidden="true" />
-              <span>Mobile QR Handoff</span>
-            </button>
+            {!isMobileApk && (
+              <button
+                type="button"
+                onClick={() => setShowQrPanel((v) => !v)}
+                className={`px-3.5 py-2 rounded-xl border text-xs font-semibold inline-flex items-center gap-1.5 ${
+                  showQrPanel
+                    ? 'border-brand bg-brand/10 text-brand'
+                    : 'border-line bg-surface-elevated text-content'
+                }`}
+              >
+                <QrCode className="w-4 h-4" aria-hidden="true" />
+                <span>Mobile QR Handoff</span>
+              </button>
+            )}
+
+            <div className="inline-flex items-center rounded-xl border border-line bg-surface-elevated p-0.5 gap-0.5">
+              {(
+                [
+                  { id: 'document', label: 'Document' },
+                  { id: 'receipt', label: 'Receipt B&W' },
+                  { id: 'whiteboard', label: 'Whiteboard' },
+                ] as const
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setScanPreset(p.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${
+                    scanPreset === p.id ? 'bg-brand text-white' : 'text-content-secondary hover:text-content'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-line bg-surface-elevated text-xs font-semibold text-content cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={makeSearchableOcr}
+                onChange={(e) => setMakeSearchableOcr(e.target.checked)}
+                className="accent-brand rounded"
+              />
+              <span>Offline OCR (Searchable PDF)</span>
+            </label>
 
             {items.length > 0 && (
               <button
@@ -1170,19 +1373,58 @@ export function PdfMakeFromCameraTool() {
           </div>
         )}
 
+        {failedItems.length > 0 && (
+          <div className="rounded-xl border border-amber-500/35 bg-amber-500/8 p-3.5 text-xs space-y-1.5">
+            <div className="font-semibold text-amber-700 dark:text-amber-300">
+              {failedItems.length} file(s) could not be decoded — your {validItems.length} valid page(s) remain preserved in order
+            </div>
+            <div className="text-content-secondary">
+              Replace or remove unsupported images below, or click Create PDF directly to export valid pages.
+            </div>
+          </div>
+        )}
+
         {items.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {items.map((it, idx) => (
               <div
                 key={it.id}
-                className="p-2.5 rounded-xl border border-line bg-surface-elevated space-y-2"
+                className={`p-2.5 rounded-xl border space-y-2 ${
+                  it.ingestState === 'failed'
+                    ? 'border-rose-500/40 bg-rose-500/5'
+                    : 'border-line bg-surface-elevated'
+                }`}
               >
                 <div className="relative">
-                  <img
-                    src={it.previewUrl}
-                    alt={it.file.name}
-                    className="w-full h-36 object-cover rounded-lg bg-white"
-                  />
+                  {it.ingestState === 'failed' || !it.previewUrl ? (
+                    <div className="w-full h-36 rounded-lg bg-surface border border-rose-500/25 p-2.5 flex flex-col justify-between text-[11px]">
+                      <div className="font-semibold text-rose-500 truncate">{it.originalFile.name}</div>
+                      <div className="text-content-secondary line-clamp-3 leading-snug">
+                        {it.errorMessage || 'Image could not be decoded.'}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <label className="px-2 py-1 rounded bg-surface-elevated border border-line text-[10px] font-semibold text-content cursor-pointer">
+                          Replace
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,.jpg,.jpeg,.png,.webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              const nextF = e.target.files?.[0];
+                              e.target.value = '';
+                              if (nextF) void replaceScanItem(it.id, nextF);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : (
+                    <img
+                      src={it.previewUrl}
+                      alt={it.file.name}
+                      className="w-full h-36 object-cover rounded-lg bg-white"
+                    />
+                  )}
                   {it.processing && (
                     <div className="absolute inset-0 bg-black/45 rounded-lg flex items-center justify-center">
                       <Loader2 className="w-5 h-5 text-white animate-spin" />
@@ -1241,6 +1483,15 @@ export function PdfMakeFromCameraTool() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => void rotateScanItem(it.id)}
+                    aria-label={`Rotate scan ${idx + 1} 90 degrees`}
+                    title="Rotate 90°"
+                    className="p-1.5 rounded border border-line bg-surface text-content hover:text-brand text-[10px] font-mono"
+                  >
+                    90°
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => openPerspectiveEditor(it)}
                     aria-label={`Adjust perspective for page ${idx + 1}`}
                     title="Adjust corners & dewarp"
@@ -1277,37 +1528,95 @@ export function PdfMakeFromCameraTool() {
  * iLovePDF Benchmark: Orientation + Margin Presets + Page Size
  */
 export function PdfImageToPdfTool() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [records, setRecords] = useState<ImageIngestionRecord[]>([]);
+  const [ingesting, setIngesting] = useState(false);
   const [pageSize, setPageSize] = useState<PdfPageSizePreset>('a4');
   const [orientation, setOrientation] = useState<'auto' | 'portrait' | 'landscape'>('auto');
   const [marginPt, setMarginPt] = useState(14);
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
 
+  const readyRecords = useMemo(() => records.filter((r) => r.state === 'ready'), [records]);
+  const failedRecords = useMemo(() => records.filter((r) => r.state === 'failed'), [records]);
+
+  const handleAddFiles = async (nextFiles: File[]) => {
+    if (!nextFiles.length) return;
+    setIngesting(true);
+    try {
+      const startIdx = records.length;
+      await ingestImageBatch(
+        nextFiles,
+        startIdx,
+        (batchState) => {
+          setRecords((prev) => {
+            const existing = prev.slice(0, startIdx);
+            return [...existing, ...batchState];
+          });
+        },
+        2
+      );
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const handleRetryRecord = async (id: string) => {
+    const target = records.find((r) => r.id === id);
+    if (!target) return;
+    await processSingleImageRecord(target, (updated) => {
+      setRecords((prev) => prev.map((r) => (r.id === id ? { ...updated } : r)));
+    });
+  };
+
+  const handleReplaceRecord = async (id: string, nextFile: File) => {
+    const target = records.find((r) => r.id === id);
+    if (!target) return;
+    const replacement: ImageIngestionRecord = {
+      ...target,
+      originalFile: nextFile,
+      displayName: nextFile.name,
+      sizeBytes: nextFile.size,
+      detectedFormat: 'unknown',
+      state: 'pending',
+      errorCode: undefined,
+      errorMessage: undefined,
+      suggestedAction: undefined,
+      normalizedFile: undefined,
+      thumbnailUrl: undefined,
+    };
+    await processSingleImageRecord(replacement, (updated) => {
+      setRecords((prev) => prev.map((r) => (r.id === id ? { ...updated } : r)));
+    });
+  };
+
   const moveFile = (idx: number, delta: -1 | 1) => {
     const nextIdx = idx + delta;
-    if (nextIdx < 0 || nextIdx >= files.length) return;
-    setFiles((prev) => {
+    if (nextIdx < 0 || nextIdx >= records.length) return;
+    setRecords((prev) => {
       const copy = [...prev];
       const [m] = copy.splice(idx, 1);
       copy.splice(nextIdx, 0, m);
-      return copy;
+      return copy.map((r, i) => ({ ...r, orderIndex: i }));
     });
   };
 
   return (
     <PdfToolShell
       title="Image to PDF"
-      description="Convert JPG, PNG, WebP, BMP, TIFF, or SVG images with fit modes, orientation, and EXIF rotation."
+      description="Convert JPG, PNG, WebP, BMP, or SVG photos with per-image decode validation, EXIF orientation, and page ordering."
       currentHref="/tools/pdf/image-to-pdf"
-      accept="image/jpeg,image/png,image/webp,image/bmp,image/svg+xml,image/tiff,.bmp,.svg,.tif,.tiff,.webp"
+      accept="image/jpeg,image/png,image/webp,image/bmp,image/svg+xml,image/gif,.bmp,.svg,.webp,.jpg,.jpeg,.png,.heic"
       multiple
-      selectedFiles={files}
-      onFilesSelected={(next) => setFiles((prev) => [...prev, ...next])}
-      submitLabel={`Convert ${files.length} Image(s) to PDF`}
-      canSubmit={files.length > 0}
+      selectedFiles={readyRecords.map((r) => r.normalizedFile || r.originalFile)}
+      onFilesSelected={(next) => void handleAddFiles(next)}
+      submitLabel={
+        ingesting
+          ? 'Validating images…'
+          : `Convert ${readyRecords.length} Ready Image${readyRecords.length === 1 ? '' : 's'} to PDF`
+      }
+      canSubmit={!ingesting && readyRecords.length > 0}
       onRun={(onProgress, signal) =>
         imagesToPdf(
-          files.map((f) => ({ file: f })),
+          readyRecords.map((r) => ({ file: r.normalizedFile || r.originalFile })),
           { pageSize, orientation, marginPt, fitMode },
           onProgress,
           signal
@@ -1365,17 +1674,83 @@ export function PdfImageToPdfTool() {
           </label>
         </div>
 
-        {files.length > 0 && (
-          <div className="space-y-1.5 pt-2 border-t border-line">
-            {files.map((f, idx) => (
+        {failedRecords.length > 0 && (
+          <div className="rounded-xl border border-amber-500/35 bg-amber-500/8 p-3 text-xs space-y-1">
+            <div className="font-semibold text-amber-700 dark:text-amber-300">
+              {failedRecords.length} file(s) failed validation — {readyRecords.length} valid image(s) remain ready in order
+            </div>
+            <div className="text-content-secondary">
+              You can retry, replace individual failed items, or remove them and convert your valid batch right away.
+            </div>
+          </div>
+        )}
+
+        {records.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-line">
+            {records.map((rec, idx) => (
               <div
-                key={`${f.name}-${idx}`}
-                className="px-3 py-2 rounded-xl border border-line bg-surface-elevated flex items-center justify-between gap-2 text-xs"
+                key={rec.id}
+                className={`px-3 py-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs ${
+                  rec.state === 'failed'
+                    ? 'border-rose-500/35 bg-rose-500/5'
+                    : 'border-line bg-surface-elevated'
+                }`}
               >
-                <span className="truncate font-medium text-content">
-                  {idx + 1}. {f.name} ({formatBytes(f.size)})
-                </span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  {rec.thumbnailUrl ? (
+                    <img
+                      src={rec.thumbnailUrl}
+                      alt={rec.displayName}
+                      className="w-10 h-10 rounded-lg object-cover border border-line shrink-0 bg-white"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg border border-line bg-surface flex items-center justify-center shrink-0 text-[10px] font-semibold text-content-tertiary">
+                      {rec.state === 'failed' ? 'ERR' : '...'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-content">
+                      {idx + 1}. {rec.displayName} ({formatBytes(rec.sizeBytes)})
+                    </div>
+                    {rec.state === 'failed' ? (
+                      <div className="text-[11px] text-rose-500 mt-0.5 leading-snug">
+                        {rec.errorMessage} {rec.suggestedAction ? `— ${rec.suggestedAction}` : ''}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-content-secondary tabular-nums mt-0.5">
+                        {rec.state === 'ready'
+                          ? `Ready · ${rec.detectedFormat.toUpperCase()}${rec.width && rec.height ? ` · ${rec.width}×${rec.height}px` : ''}`
+                          : `Status: ${rec.state}…`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  {rec.state === 'failed' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleRetryRecord(rec.id)}
+                        className="px-2 py-1 rounded border border-line bg-surface text-[11px] font-medium hover:text-brand"
+                      >
+                        Retry
+                      </button>
+                      <label className="px-2 py-1 rounded border border-line bg-surface text-[11px] font-medium hover:text-brand cursor-pointer">
+                        Replace
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/bmp,image/svg+xml,image/gif,.jpg,.jpeg,.png,.webp"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = '';
+                            if (f) void handleReplaceRecord(rec.id, f);
+                          }}
+                        />
+                      </label>
+                    </>
+                  )}
                   <button
                     type="button"
                     disabled={idx === 0}
@@ -1387,7 +1762,7 @@ export function PdfImageToPdfTool() {
                   </button>
                   <button
                     type="button"
-                    disabled={idx === files.length - 1}
+                    disabled={idx === records.length - 1}
                     onClick={() => moveFile(idx, 1)}
                     aria-label="Move image down"
                     className="p-1 rounded border border-line bg-surface disabled:opacity-30"
@@ -1396,7 +1771,7 @@ export function PdfImageToPdfTool() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFiles((prev) => prev.filter((_, i) => i !== idx))}
+                    onClick={() => setRecords((prev) => prev.filter((r) => r.id !== rec.id))}
                     aria-label="Remove image"
                     className="p-1 text-error"
                   >

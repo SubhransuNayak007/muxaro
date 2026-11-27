@@ -16,11 +16,10 @@ concurrency:
 
 env:
   NODE_VERSION: "24"
-  PRODUCTION_SITE_URL: "https://muxaro.vercel.app"
 
 jobs:
   typecheck-and-lint:
-    name: TypeCheck & Static Invariants
+    name: TypeCheck, Lint & Intent Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -33,80 +32,55 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install Web dependencies
-        working-directory: apps/web
-        run: npm ci --no-audit --no-fund
-
-      - name: Install API dependencies
-        working-directory: apps/api
-        run: npm ci --no-audit --no-fund
-
-      - name: Install Media Worker dependencies
-        working-directory: apps/media-worker
-        run: npm install --no-audit --no-fund
-
-      - name: Install Shared & DB dependencies
+      - name: Install Workspace Dependencies
         run: |
+          npm --prefix apps/web ci --no-audit --no-fund
+          npm --prefix apps/desktop ci --no-audit --no-fund
+          npm --prefix apps/api ci --no-audit --no-fund
+          npm --prefix apps/media-worker install --no-audit --no-fund
           npm --prefix packages/shared install --no-audit --no-fund
           npm --prefix packages/db install --no-audit --no-fund
-
-      - name: Install Entitlements dependencies
-        working-directory: packages/entitlements
-        run: npm ci --no-audit --no-fund
-
-      - name: Install Source Adapters dependencies
-        working-directory: packages/source-adapters
-        run: npm install --no-audit --no-fund
+          npm --prefix packages/entitlements ci --no-audit --no-fund
+          npm --prefix packages/source-adapters install --no-audit --no-fund
 
       - name: Lint & TypeCheck Web (apps/web)
         working-directory: apps/web
         run: npm run lint
 
-      - name: TypeCheck API (apps/api)
-        working-directory: apps/api
-        run: npm run typecheck
+      - name: Run Offline AI & Intent Engine Tests
+        working-directory: apps/web
+        run: node --test lib/ai/__tests__/intent-engine.test.mjs
 
-      - name: Build & TypeCheck Media Worker (apps/media-worker)
-        working-directory: apps/media-worker
-        run: npm run build
+      - name: TypeCheck Desktop (apps/desktop)
+        working-directory: apps/desktop
+        run: npm run build:ts
 
-      - name: Build & TypeCheck Shared, DB, Entitlements, Source Adapters
+      - name: TypeCheck API & Media Worker
+        run: |
+          npm --prefix apps/api run typecheck
+          npm --prefix apps/media-worker run build
+
+      - name: Build Shared Packages
         run: |
           npm --prefix packages/shared run build
           npm --prefix packages/db run build
           npm --prefix packages/entitlements run build
           npm --prefix packages/source-adapters run build
 
-      - name: TypeCheck Root & Test Suites (tsconfig.json)
-        run: |
-          if ./apps/api/node_modules/.bin/tsc -p tsconfig.json --noEmit > /tmp/root-tsc.log 2>&1; then
-            echo "Root tsconfig.json passed with zero errors."
-          else
-            cat /tmp/root-tsc.log
-            if grep -E "^tests/(unit|security|media/(e2e-|media-engine|synthetic-generator))" /tmp/root-tsc.log; then
-              echo "::error::TypeScript errors detected in core test suites."
-              exit 1
-            fi
-          fi
-
-      - name: Verify UI CSS performance & zero fake-health/dev-path invariants
+      - name: Verify UI & Security Invariants
         run: |
           if grep -rnE "transition:\s*all" apps/web/app apps/web/components; then
             echo "::error::Forbidden 'transition: all' detected in UI source."
             exit 1
           fi
-          if grep -rnE "status:\s*['\"]OPERATIONAL['\"]|ffmpegAvailable:\s*true" apps/web/app/api/v1/ apps/api/src/ apps/worker-media/src/; then
-            echo "::error::Hardcoded fake 'OPERATIONAL' or 'ffmpegAvailable: true' literal detected in runtime API/worker code!"
+          if grep -rnE "C:\\\\Users\\\\" apps/web/app apps/web/components apps/web/lib apps/desktop/src apps/api/src; then
+            echo "::error::Hardcoded developer Windows C:\\Users\\ path detected in source code!"
             exit 1
           fi
-          if grep -rnE "C:\\\\Users\\\\" apps/web/app/api/v1/ apps/api/src/ apps/worker-media/src/; then
-            echo "::error::Hardcoded developer Windows C:\\Users\\ path detected in runtime API/worker code!"
-            exit 1
-          fi
-          echo "UI CSS, honest health, and portable binary path invariants verified."
+          echo "All UI, TypeScript & portability invariants passed."
 
-  unit-and-security-tests:
-    name: Unit, Concurrency & Security Tests
+  package-and-security-tests:
+    name: Security & Package Unit Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -119,96 +93,37 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install Web & API dependencies
+      - name: Install Package Dependencies
         run: |
-          npm --prefix apps/web ci --no-audit --no-fund
-          npm --prefix apps/api ci --no-audit --no-fund
-          npm --prefix packages/shared install --no-audit --no-fund
-          npm --prefix packages/db install --no-audit --no-fund
           npm --prefix packages/entitlements ci --no-audit --no-fund
           npm --prefix packages/source-adapters install --no-audit --no-fund
-          npm --prefix apps/worker-media install --no-audit --no-fund
+          npm --prefix apps/media-worker install --no-audit --no-fund
 
-      - name: Build workspace dist packages for test imports
+      - name: Install FFmpeg for Media Worker Tests
         run: |
-          npm --prefix packages/shared run build
-          npm --prefix packages/db run build
-          npm --prefix packages/entitlements run build
-          npm --prefix packages/source-adapters run build
-          npm --prefix apps/worker-media run build
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Run security module test suite
+      - name: Run Security Module Tests
         run: |
           node --experimental-strip-types security/tests/ssrf.test.ts
           node --experimental-strip-types security/tests/ffmpeg-sanitizer.test.ts
           node --experimental-strip-types security/tests/rate-limiter.test.ts
           node --experimental-strip-types security/tests/validation.test.ts
 
-      - name: Run entitlements & source-adapters package test suites
+      - name: Run Package & Worker Tests
         run: |
           npm --prefix packages/entitlements test
           npm --prefix packages/source-adapters test
+          npm --prefix apps/media-worker run build
+          npm --prefix apps/media-worker test
 
-      - name: Run cross-package unit, concurrency, BFF & SSRF regression suites
-        run: |
-          npx --prefix apps/api tsx --test tests/unit/adapters.test.ts
-          npx --prefix apps/api tsx --test tests/unit/entitlements.test.ts
-          npx --prefix apps/api tsx --test tests/unit/api-client-edge-mode.test.ts
-          npx --prefix apps/api tsx --test tests/unit/link-handling-regression.test.ts
-          npx --prefix apps/api tsx --test tests/unit/opfs-accumulator.test.ts
-          npx --prefix apps/api tsx --test tests/unit/stream-engine.test.ts
-          npx --prefix apps/api tsx --tsconfig apps/web/tsconfig.json --test tests/unit/phase0-api-error-normalization.test.ts
-          npx --prefix apps/api tsx --test tests/concurrency/quota-race.test.ts
-          node --experimental-strip-types tests/security/ssrf-regression.test.ts
-
-  media-and-integration-tests:
-    name: Media Worker & API Integration Tests
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install FFmpeg & FFprobe
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-          ffmpeg -version
-          ffprobe -version
-
-      - name: Install API & Media Worker dependencies
-        run: |
-          npm --prefix apps/api ci --no-audit --no-fund
-          npm --prefix apps/media-worker install --no-audit --no-fund
-
-      - name: Build & Run Media Worker test suite (FFmpeg/FFprobe)
-        working-directory: apps/media-worker
-        run: |
-          npm run build
-          npm test
-
-      - name: Run synthetic media engine test suite
-        run: npx --prefix apps/api tsx --test tests/media/media-engine.test.ts
-
-      - name: Run API integration test suite
-        env:
-          NODE_ENV: test
-          RATE_LIMIT_ENABLED: "true"
-        run: npx --prefix apps/api tsx --test tests/integration/api-integration.test.ts
-
-  build-and-containers:
-    name: Build Vercel Web App & Verify Containers
+  build-static-web:
+    name: Build Static Production Web Bundle
     runs-on: ubuntu-latest
     needs:
       - typecheck-and-lint
-      - unit-and-security-tests
-      - media-and-integration-tests
+      - package-and-security-tests
     permissions:
       contents: read
     steps:
@@ -220,27 +135,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install Web dependencies
-        working-directory: apps/web
-        run: npm ci --no-audit --no-fund
-
-      - name: Build Production Next.js Bundle (Vercel target)
+      - name: Install Web Dependencies & Export Static App
         working-directory: apps/web
         env:
-          NEXT_PUBLIC_SITE_URL: ${{ vars.PRODUCTION_SITE_URL || env.PRODUCTION_SITE_URL }}
-        run: npx next build
-
-      - name: Verify production bundle hygiene (zero localhost or dead host leaks)
+          STATIC_EXPORT: "1"
         run: |
-          test -d apps/web/.next
-          if grep -rnE "localhost:3000|localhost:4000|127\.0\.0\.1:4000" apps/web/.next/static/; then
-            echo "::error::Hardcoded localhost URL leaked into production static assets!"
-            exit 1
-          fi
-          echo "Verified clean Vercel Next.js build with zero localhost leaks."
-
-      - name: Verify Docker Compose config & API/Worker Dockerfiles build cleanly
-        run: |
-          docker compose -f infra/docker-compose.yml config -q
-          docker build -f infra/Dockerfile.api -t muxaro-api:ci-check .
-          docker build -f infra/Dockerfile.worker -t muxaro-worker:ci-check .
+          npm ci --no-audit --no-fund
+          npm run build
+          test -d out

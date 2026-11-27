@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { ShieldCheck, SlidersHorizontal, X } from 'lucide-react';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
 import {
   CONSENT_CHANGE_EVENT,
   OPEN_CONSENT_EVENT,
@@ -13,6 +15,7 @@ import {
 } from '@/lib/analytics';
 
 export function ConsentBanner() {
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
@@ -21,6 +24,10 @@ export function ConsentBanner() {
 
   useEffect(() => {
     setMounted(true);
+    if (isNativeAppRuntime() || pathname?.startsWith('/m') || pathname?.startsWith('/app')) {
+      setVisible(false);
+      return;
+    }
     const stored = getStoredConsent();
     if (stored?.decided) {
       setAnalyticsEnabled(stored.analytics);
@@ -53,7 +60,7 @@ export function ConsentBanner() {
       window.removeEventListener(OPEN_CONSENT_EVENT, handleOpen);
       window.removeEventListener(CONSENT_CHANGE_EVENT, handleSync);
     };
-  }, []);
+  }, [pathname]);
 
   if (!mounted || !visible) {
     return null;

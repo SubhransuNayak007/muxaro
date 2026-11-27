@@ -2330,68 +2330,65 @@ export async function imagesToPdf(
   for (let i = 0; i < items.length; i += 1) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const item = items[i];
-    let bmp: ImageBitmap;
-    if (item.file.type === 'image/svg+xml' || item.file.name.toLowerCase().endsWith('.svg')) {
-      const svgText = await item.file.text();
-      const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
-      const svgUrl = URL.createObjectURL(svgBlob);
-      try {
-        const imgEl = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const el = new Image();
-          el.onload = () => resolve(el);
-          el.onerror = () => reject(new Error(`Failed to decode SVG ${item.file.name}`));
-          el.src = svgUrl;
-        });
-        const w = Math.max(120, imgEl.naturalWidth || 1200);
-        const h = Math.max(120, imgEl.naturalHeight || 900);
-        bmp = await createImageBitmap(imgEl, { resizeWidth: w, resizeHeight: h });
-      } finally {
-        URL.revokeObjectURL(svgUrl);
-      }
-    } else {
-      bmp = await createImageBitmap(item.file, { imageOrientation: 'from-image' });
+    const { detectImageSignatureFromBytes, decodeImageFileResilient } = await import('./image-pipeline');
+    if (item.file.size === 0) {
+      throw new PdfToolError(`Image #${i + 1} (${item.file.name}) is 0 bytes.`, 'validation');
     }
-    const rot = (((item.rotation || 0) % 360) + 360) % 360;
-    const swap = rot === 90 || rot === 270;
-    const cw = swap ? bmp.height : bmp.width;
-    const ch = swap ? bmp.width : bmp.height;
-
-    const isPngLike =
-      item.file.type === 'image/png' ||
-      item.file.type === 'image/webp' ||
-      item.file.name.toLowerCase().endsWith('.svg');
-
-    const canvas = document.createElement('canvas');
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas unavailable');
-    if (!isPngLike) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, cw, ch);
+    const headBytes = new Uint8Array(await item.file.slice(0, Math.min(item.file.size, 512)).arrayBuffer());
+    const sig = detectImageSignatureFromBytes(headBytes, item.file.name);
+    if (sig === 'heic' || sig === 'tiff' || sig === 'unknown') {
+      throw new PdfToolError(
+        `"${item.file.name}" (${sig.toUpperCase()}) cannot be decoded natively here. Replace or convert to JPEG/PNG and keep your remaining pages.`,
+        'validation'
+      );
     }
-    ctx.save();
-    ctx.translate(cw / 2, ch / 2);
-    ctx.rotate((rot * Math.PI) / 180);
-    if (item.filter === 'grayscale') {
-      ctx.filter = 'grayscale(100%) contrast(1.15)';
-    } else if (item.filter === 'bw') {
-      ctx.filter = 'grayscale(100%) contrast(1.7) brightness(1.05)';
-    }
-    ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
-    ctx.restore();
-    bmp.close();
 
+    const decoded = await decodeImageFileResilient(item.file, sig);
+    let outBlob: Blob | null = null;
+    const isPngLike = sig === 'png' || sig === 'webp' || sig === 'svg';
     const outMime = isPngLike && item.filter !== 'bw' ? 'image/png' : 'image/jpeg';
-    const outBlob = await new Promise<Blob | null>((r) => canvas.toBlob(r, outMime, 0.92));
-    canvas.width = 0;
-    canvas.height = 0;
+    try {
+      const rot = (((item.rotation || 0) % 360) + 360) % 360;
+      const swap = rot === 90 || rot === 270;
+      const cw = swap ? decoded.height : decoded.width;
+      const ch = swap ? decoded.width : decoded.height;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas unavailable');
+      if (!isPngLike) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cw, ch);
+      }
+      ctx.save();
+      ctx.translate(cw / 2, ch / 2);
+      ctx.rotate((rot * Math.PI) / 180);
+      if (item.filter === 'grayscale') {
+        ctx.filter = 'grayscale(100%) contrast(1.15)';
+      } else if (item.filter === 'bw') {
+        ctx.filter = 'grayscale(100%) contrast(1.7) brightness(1.05)';
+      }
+      ctx.drawImage(decoded.canvas, -decoded.width / 2, -decoded.height / 2);
+      ctx.restore();
+
+      outBlob = await new Promise<Blob | null>((r) => canvas.toBlob(r, outMime, 0.92));
+      canvas.width = 0;
+      canvas.height = 0;
+    } finally {
+      decoded.cleanup();
+    }
     if (!outBlob) throw new Error(`Failed to encode ${item.file.name}`);
 
     const img =
       outMime === 'image/png'
         ? await doc.embedPng(await outBlob.arrayBuffer())
         : await doc.embedJpg(await outBlob.arrayBuffer());
+    const rot = (((item.rotation || 0) % 360) + 360) % 360;
+    const swap = rot === 90 || rot === 270;
+    const cw = swap ? decoded.height : decoded.width;
+    const ch = swap ? decoded.width : decoded.height;
     const isLandscape =
       options.orientation === 'landscape'
         ? true

@@ -333,24 +333,24 @@ export async function getPdfThumbnails(
   const results: Array<{ pageNumber: number; dataUrl: string; width: number; height: number }> = [];
   const limit = maxPages ? Math.min(pdf.numPages, maxPages) : pdf.numPages;
 
+  const canvas = document.createElement('canvas');
   try {
     for (let i = 1; i <= limit; i += 1) {
       if (signal?.aborted) {
         throw new DOMException('Aborted', 'AbortError');
       }
-      const canvas = document.createElement('canvas');
-      try {
-        const { width, height } = await renderPdfPageToCanvas(pdf, i, canvas, scale);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        results.push({ pageNumber: i, dataUrl, width, height });
-        onPage?.(i, dataUrl);
-      } finally {
-        canvas.width = 0;
-        canvas.height = 0;
+      const { width, height } = await renderPdfPageToCanvas(pdf, i, canvas, scale);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+      results.push({ pageNumber: i, dataUrl, width, height });
+      onPage?.(i, dataUrl);
+      if (i % 4 === 0) {
+        await new Promise<void>((r) => setTimeout(r, 0));
       }
     }
     return results;
   } finally {
+    canvas.width = 0;
+    canvas.height = 0;
     await pdf.destroy().catch(() => {});
   }
 }

@@ -10,6 +10,7 @@ import {
   Share2,
 } from 'lucide-react';
 import { formatBytes } from '@/lib/formatters';
+import { isNativeAppRuntime } from '@/lib/native-bridge';
 
 export interface ChainTarget {
   href: string;
@@ -157,7 +158,9 @@ export default function WorkspaceResultCard({
             <span>Download</span>
           </button>
 
-          {onShare && typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+          {onShare &&
+            (isNativeAppRuntime() ||
+              (typeof navigator !== 'undefined' && typeof navigator.share === 'function')) && (
             <button
               type="button"
               onClick={() => onShare(resolvedName)}

@@ -57,6 +57,8 @@ export function detectMediaPlatform(rawUrl: string): SupportedPlatform {
 }
 
 export function resolveResolutionLabel(height: number, width?: number): string {
+  if (height >= 6480 || (width && width >= 11520)) return '12K Ultra HD';
+  if (height >= 5760 || (width && width >= 10240)) return '10K Ultra HD';
   if (height >= 4320 || (width && width >= 7680)) return '8K Ultra HD';
   if (height >= 2160 || (width && width >= 3840)) return '4K Ultra HD';
   if (height >= 1440 || (width && width >= 2560)) return '1440p Quad HD';
@@ -69,6 +71,8 @@ export function resolveResolutionLabel(height: number, width?: number): string {
 }
 
 export function resolveResolutionTier(height: number): string {
+  if (height >= 6480) return '12K';
+  if (height >= 5760) return '10K';
   if (height >= 4320) return '8K';
   if (height >= 2160) return '4K';
   if (height >= 1440) return '1440p';
@@ -81,7 +85,8 @@ export function resolveResolutionTier(height: number): string {
 }
 
 function resolveQualityBadge(height: number, fps: number, isHdr: boolean): string | undefined {
-  if (height >= 4320) return '8K Ultra HD (Local Worker)';
+  if (height >= 6480) return isHdr ? '12K HDR' : '12K UHD';
+  if (height >= 4320) return isHdr ? '8K HDR' : '8K Ultra HD (Local Worker)';
   if (height >= 2160) return isHdr ? '4K HDR' : '4K UHD';
   if (height >= 1440) return isHdr ? '2K HDR (Cloud Ready)' : '2K Quad HD (Cloud Ready)';
   if (height === 1080 && fps >= 50) return '1080p60 (Cloud Ready)';

@@ -15,39 +15,18 @@
     "allowSyntheticDefaultImports": true,
     "paths": {
       "@/*": ["./apps/web/*"],
-      "@vyro/security": ["./security/src/index.ts"],
-      "@vyro/security/*": ["./security/src/*"],
-      "@vyro/entitlements": ["./packages/entitlements/src/index.ts"],
-      "@vyro/entitlements/*": ["./packages/entitlements/src/*"],
-      "@vyro/source-adapters": ["./packages/source-adapters/src/index.ts"],
-      "@vyro/source-adapters/*": ["./packages/source-adapters/src/*"],
-      "@vyro/media-worker": ["./apps/media-worker/src/index.ts"],
-      "@vyro/media-worker/*": ["./apps/media-worker/src/*"],
-      "@vyro/api": ["./apps/api/src/index.ts"],
-      "@vyro/api/*": ["./apps/api/src/*"],
-      "@muxaro/shared": ["./packages/shared/src/index.ts"],
-      "@muxaro/shared/*": ["./packages/shared/src/*"],
-      "@muxaro/db": ["./packages/db/src/index.ts"],
-      "@muxaro/db/*": ["./packages/db/src/*"],
-      "@muxaro/security": ["./security/src/index.ts"],
-      "@muxaro/security/*": ["./security/src/*"],
-      "@muxaro/entitlements": ["./packages/entitlements/src/index.ts"],
-      "@muxaro/entitlements/*": ["./packages/entitlements/src/*"],
-      "@muxaro/source-adapters": ["./packages/source-adapters/src/index.ts"],
-      "@muxaro/source-adapters/*": ["./packages/source-adapters/src/*"],
-      "@muxaro/media-worker": ["./apps/media-worker/src/index.ts"],
-      "@muxaro/media-worker/*": ["./apps/media-worker/src/*"],
-      "@muxaro/worker-media": ["./apps/worker-media/src/index.ts"],
-      "@muxaro/worker-media/*": ["./apps/worker-media/src/*"],
-      "@muxaro/api": ["./apps/api/src/index.ts"],
-      "@muxaro/api/*": ["./apps/api/src/*"]
+      "@muxaro/media-splicer": ["./apps/web/lib/media-splicer/index.ts"],
+      "@muxaro/media-splicer/*": ["./apps/web/lib/media-splicer/*"]
     }
   },
   "include": [
-    "packages/**/*",
-    "apps/**/*",
-    "security/**/*",
-    "tests/**/*",
-    "qa/**/*"
+    "apps/web/app/**/*",
+    "apps/web/components/**/*",
+    "apps/web/lib/**/*",
+    "apps/web/tests/**/*"
+  ],
+  "exclude": [
+    "apps/web/node_modules",
+    "apps/web/.next"
   ]
 }

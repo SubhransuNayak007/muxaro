@@ -32,6 +32,7 @@ import {
   Search,
 } from 'lucide-react';
 import { api, extractDisplayError, getApiBaseUrl } from '@/lib/api-client';
+import { planMediaConversion } from '@/lib/media/source-resolver';
 import TurnstileChallenge from '@/components/TurnstileChallenge';
 import { isNativeAppRuntime } from '@/lib/native-bridge';
 import CommandPreviewDrawer from '@/components/tools/CommandPreviewDrawer';
@@ -205,31 +206,26 @@ export function ConvertTool() {
     }
   }, [jobStream.status, videoCodec, recordSavedJob]);
 
-  // Stream Copy / Lossless Remux Feasibility Detection
+  // Stream Copy (Remux) vs Transcode Capability Planner
   const remuxFeasibility = useMemo(() => {
-    if (selectedFormatSpec.streamCopy && selectedFormatSpec.type === 'video' && targetContainer !== 'webm') {
-      return {
-        feasible: true,
-        reason: 'Input container streams are natively packable without re-encoding.',
-        speedMultiplier: '12x faster',
-        lossless: true,
-      };
-    }
-    if (targetContainer === 'webm') {
-      return {
-        feasible: false,
-        reason: 'Targeting WebM typically requires transcoding VP9/Opus streams.',
-        speedMultiplier: '1x transcode',
-        lossless: false,
-      };
-    }
+    const plan = planMediaConversion({
+      sourceFileName: selectedFile?.name,
+      sourceMime: selectedFile?.type,
+      targetContainer,
+      targetType: selectedFormatSpec.type === 'audio' ? 'audio' : 'video',
+      requestedVideoCodec: videoCodec,
+      requestedAudioCodec: videoCodec === 'copy' ? 'copy' : undefined,
+    });
     return {
-      feasible: false,
-      reason: `Converting to .${targetContainer.toUpperCase()} (${selectedFormatSpec.name}) via FFmpeg.`,
-      speedMultiplier: 'FFmpeg Transcode',
-      lossless: false,
+      feasible: plan.feasibleRemux,
+      method: plan.method,
+      reason: plan.explanation,
+      speedMultiplier: plan.badgeLabel,
+      headline: plan.headline,
+      warning: plan.warning,
+      lossless: plan.losslessGuarantee,
     };
-  }, [targetContainer, selectedFormatSpec]);
+  }, [selectedFile, targetContainer, selectedFormatSpec, videoCodec]);
 
   // Keep codec in sync with Eco mode if remux is feasible
   useEffect(() => {
@@ -800,11 +796,9 @@ export function ConvertTool() {
                   <Zap className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
                 )}
                 <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold">
-                      {remuxFeasibility.feasible
-                        ? 'Lossless Stream Copy (Remux) Feasible'
-                        : 'Full Transcode Mode'}
+                      {remuxFeasibility.headline}
                     </span>
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -817,9 +811,7 @@ export function ConvertTool() {
                     </span>
                   </div>
                   <p className="text-xs opacity-90 leading-relaxed">
-                    {remuxFeasibility.feasible
-                      ? 'No re-encoding required! Video and audio bitstreams will be multiplexed into the new container with 100% mathematical fidelity and zero CPU bottleneck.'
-                      : 'Audio/video codecs will be transcoded to match container constraints. Processing will consume full hardware acceleration.'}
+                    {remuxFeasibility.reason}
                   </p>
                 </div>
               </div>

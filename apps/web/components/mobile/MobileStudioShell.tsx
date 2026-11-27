@@ -29,7 +29,9 @@ import {
   Cloud,
   Link2,
   ArrowRight,
+  ArrowUpRight,
   Loader2,
+  Share2,
 } from 'lucide-react';
 import {
   CREATOR_TOOLS_CATALOG,
@@ -53,7 +55,14 @@ import {
   captureNativeCameraPhoto,
 } from '@/lib/native-bridge';
 import GoogleDriveModal from '@/components/native/GoogleDriveModal';
+import { getToolIcon, TOOL_ICON_TONE } from '@/lib/tool-icons';
+import dynamic from 'next/dynamic';
+
+const MuxaroCopilotPanel = dynamic(() => import('@/components/ai/MuxaroCopilotPanel'), {
+  ssr: false,
+});
 import { matchCopilotActions } from '@/lib/native-copilot';
+import { listWorkspaceOutputs, type LocalWorkspaceOutputItem } from '@/lib/pdf/workspace';
 import { formatBytes } from '@/lib/formatters';
 
 type MobileTab = 'studio' | 'pdf' | 'media' | 'saved';
@@ -68,18 +77,18 @@ const PDF_FILTERS: Array<'All' | PdfToolCategory> = [
 ];
 
 const QUICK_MOBILE_TOOLS = [
-  { href: '/tools/pdf/make-pdf', title: 'Scan to PDF', sub: 'Auto crop + 6 filters', icon: Camera, accent: 'text-emerald-500' },
+  { href: '/tools/pdf/view', title: 'Read PDF', sub: 'Day, Sepia & Night', icon: FileText, accent: 'text-brand' },
   { href: '/tools/pdf/merge', title: 'Merge PDF', sub: 'Files & page order', icon: Layers, accent: 'text-brand' },
-  { href: '/tools/pdf/compress', title: 'Compress PDF', sub: 'QPDF lossless shrink', icon: Minimize2, accent: 'text-amber-500' },
+  { href: '/tools/pdf/compress', title: 'Compress PDF', sub: 'Shrink file size cleanly', icon: Minimize2, accent: 'text-amber-500' },
   { href: '/tools/pdf/sign', title: 'Sign PDF', sub: 'Draw, type or stamp', icon: PenTool, accent: 'text-brand' },
-  { href: '/tools/video-trimmer', title: 'Trim Video', sub: '1s stream-copy cut', icon: Scissors, accent: 'text-amber-500' },
+  { href: '/tools/video-trimmer', title: 'Trim Video', sub: 'Cut and split fast', icon: Scissors, accent: 'text-amber-500' },
   { href: '/tools/audio-extractor', title: 'Extract Audio', sub: 'MP3, FLAC & WAV', icon: Music, accent: 'text-emerald-500' },
 ] as const;
 
 export default function MobileStudioShell() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { artifact, setArtifactFromFile, clearArtifact } = useOpenedArtifact();
+  const { artifact, setArtifactFromBlob, setArtifactFromFile, clearArtifact } = useOpenedArtifact();
 
   const [tab, setTab] = useState<MobileTab>('studio');
   const [pdfFilter, setPdfFilter] = useState<'All' | PdfToolCategory>('All');
@@ -89,9 +98,11 @@ export default function MobileStudioShell() {
   const [lightweightGpu, setLightweightGpu] = useState(false);
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>([]);
+  const [recentDocs, setRecentDocs] = useState<LocalWorkspaceOutputItem[]>([]);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [isNativeMobile, setIsNativeMobile] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
   const [quickLink, setQuickLink] = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -100,6 +111,16 @@ export default function MobileStudioShell() {
     setRecentHrefs(getRecentToolHrefs());
     setPinnedHrefs(getPinnedToolHrefs());
     setIsNativeMobile(isCapacitorApp());
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const t = sp.get('tab');
+      if (t === 'studio' || t === 'pdf' || t === 'media' || t === 'saved') {
+        setTab(t);
+      }
+    } catch {}
+    void listWorkspaceOutputs()
+      .then((items) => setRecentDocs(items.slice(0, 6)))
+      .catch(() => {});
     try {
       setIsDark(document.documentElement.classList.contains('dark'));
       setLightweightGpu(document.documentElement.getAttribute('data-lightweight') === 'true');
@@ -155,14 +176,20 @@ export default function MobileStudioShell() {
   const routeLocalFile = (file: File) => {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
     const isPdf = ext === 'pdf' || file.type === 'application/pdf';
+    const isDocx = ext === 'docx';
+    const isSlides = ext === 'pptx' || ext === 'odp';
     const isImage = ['jpg', 'jpeg', 'png', 'webp', 'bmp'].includes(ext) || file.type.startsWith('image/');
     const isAudio = ['mp3', 'wav', 'flac', 'aac', 'm4a', 'ogg', 'opus'].includes(ext) || file.type.startsWith('audio/');
 
-    const domain = isPdf ? 'pdf' : isImage ? 'image' : isAudio ? 'audio' : 'video';
+    const domain = isPdf || isDocx || isSlides ? 'pdf' : isImage ? 'image' : isAudio ? 'audio' : 'video';
     setArtifactFromFile(file, domain, '/m');
 
     if (isPdf) {
       openTool('/tools/pdf/view?handoff=1');
+    } else if (isDocx) {
+      openTool('/tools/pdf/word-to-pdf?handoff=1');
+    } else if (isSlides) {
+      openTool('/tools/pdf/powerpoint-to-pdf?handoff=1');
     } else if (isImage) {
       openTool('/tools/pdf/make-pdf?handoff=1');
     } else if (isAudio) {
@@ -298,7 +325,7 @@ export default function MobileStudioShell() {
         onImported={(file) => routeLocalFile(file)}
       />
 
-      {/* Sticky Top Glass Instrument Bar */}
+      {/* Sticky Minimal Instrument Header */}
       <header className="sticky top-0 z-30 px-4 pt-2 pb-2">
         <div className="muxaro-liquid-glass rounded-2xl px-3.5 py-2.5 flex items-center justify-between gap-2 max-w-xl mx-auto">
           <div className="flex items-center gap-2.5">
@@ -309,9 +336,9 @@ export default function MobileStudioShell() {
               <div className="text-sm font-semibold tracking-tight text-content leading-none">
                 MUXARO
               </div>
-              <div className="text-[11px] text-content-secondary flex items-center gap-1 mt-0.5">
-                <CheckCircle2 className="w-3 h-3 text-emerald-500" aria-hidden="true" />
-                <span>On-device offline ready</span>
+              <div className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-0.5 font-medium">
+                <CheckCircle2 className="w-3 h-3" aria-hidden="true" />
+                <span>Ready offline</span>
               </div>
             </div>
           </div>
@@ -341,14 +368,14 @@ export default function MobileStudioShell() {
 
         {/* Expanding Search Drawer */}
         {searchOpen && (
-          <div className="muxaro-dropdown-enter mt-2 max-w-xl mx-auto muxaro-liquid-glass rounded-2xl p-3 space-y-2">
+          <div className="muxaro-dropdown-enter mt-2 max-w-xl mx-auto rounded-2xl border border-line bg-surface p-3 space-y-2 shadow-lg">
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface-elevated border border-line">
               <Search className="w-4 h-4 text-content-tertiary shrink-0" />
               <input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search 52 PDF, Video & Audio tools..."
+                placeholder="Search 52 PDF & Media tools…"
                 autoFocus
                 className="w-full bg-transparent text-sm text-content placeholder:text-content-tertiary focus:outline-none"
               />
@@ -395,7 +422,7 @@ export default function MobileStudioShell() {
                       key={tool.href}
                       type="button"
                       onClick={() => openTool(tool.href)}
-                      className="muxaro-spring-tap w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-surface/80 hover:bg-surface-elevated border border-line text-left"
+                      className="muxaro-spring-tap w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-surface-elevated/60 hover:bg-surface-elevated border border-line text-left"
                     >
                       <div>
                         <div className="text-xs font-semibold text-content">{tool.title}</div>
@@ -411,7 +438,7 @@ export default function MobileStudioShell() {
         )}
       </header>
 
-      {/* Main Content Area */}
+      {/* Main Thumb-Ergonomic Content Area */}
       <main className="flex-1 px-4 pt-2 max-w-xl w-full mx-auto space-y-5">
         {statusNotice && (
           <div className="muxaro-dropdown-enter rounded-xl px-3.5 py-2 bg-emerald-500/12 border border-emerald-500/30 text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -419,209 +446,116 @@ export default function MobileStudioShell() {
           </div>
         )}
 
-        {/* TAB 1: STUDIO HOME */}
+        {/* TAB 1: STUDIO HOME (Unified Gemini-Style Workspace) */}
         {tab === 'studio' && (
-          <div key="studio" className="muxaro-sheet-enter space-y-4">
-            {/* Smart Google Drive / Direct File Bar */}
-            <form onSubmit={handleQuickLinkImport} className="muxaro-liquid-glass rounded-2xl p-2 flex items-center gap-2">
-              <div className="flex-1 flex items-center gap-2 px-2.5">
-                <Link2 className="w-4 h-4 text-content-tertiary shrink-0" />
-                <input
-                  type="url"
-                  value={quickLink}
-                  onChange={(e) => setQuickLink(e.target.value)}
-                  placeholder="Paste Google Drive link or file URL…"
-                  className="w-full bg-transparent text-xs text-content placeholder:text-content-tertiary focus:outline-none py-1.5"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={linkLoading || !quickLink.trim()}
-                aria-label="Import link"
-                className="muxaro-spring-tap w-9 h-9 rounded-xl bg-brand text-white flex items-center justify-center shrink-0 disabled:opacity-40"
-              >
-                {linkLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-              </button>
-            </form>
+          <div key="studio" className="muxaro-sheet-enter flex flex-col min-h-[72dvh] space-y-4">
+            <MuxaroCopilotPanel
+              variant="embedded"
+              compactMobile
+              onOpenCamera={() => void handleQuickCameraCapture()}
+              onOpenDrive={() => {
+                void triggerHapticTap();
+                setDriveOpen(true);
+              }}
+              externalBottomSlot={
+                <div className="pt-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {[
+                    { href: '/tools/pdf/merge', label: 'Merge PDF' },
+                    { href: '/tools/pdf/sign', label: 'Sign PDF' },
+                    { href: '/tools/pdf/compress', label: 'Compress PDF' },
+                    { href: '/tools/video-trimmer', label: 'Trim Video' },
+                  ].map((qt) => (
+                    <button
+                      key={qt.href}
+                      type="button"
+                      onClick={() => openTool(qt.href)}
+                      className="px-3 py-1 rounded-full border border-line bg-surface text-[11px] font-medium text-content-secondary shrink-0"
+                    >
+                      {qt.label}
+                    </button>
+                  ))}
+                </div>
+              }
+            />
 
-            {linkError && (
-              <div className="rounded-xl px-3.5 py-2 bg-error-bg border border-error/30 text-xs text-error">
-                {linkError}
-              </div>
-            )}
-
-            {/* Primary Thumb Actions (3 Cards: Camera Scan, Google Drive, Open File) */}
-            <div className="grid grid-cols-3 gap-2.5">
-              <button
-                type="button"
-                onClick={() => void handleQuickCameraCapture()}
-                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
-              >
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-500">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-content">Camera</div>
-                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
-                    Scan &amp; filters
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void triggerHapticTap();
-                  setDriveOpen(true);
-                }}
-                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
-              >
-                <div className="w-10 h-10 rounded-xl bg-brand/15 border border-brand/30 flex items-center justify-center text-brand">
-                  <Cloud className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-content">Drive</div>
-                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
-                    Import file
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void triggerHapticTap();
-                  fileInputRef.current?.click();
-                }}
-                className="muxaro-liquid-glass muxaro-spring-tap rounded-2xl p-3.5 text-left flex flex-col justify-between min-h-[118px]"
-              >
-                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-500">
-                  <FolderOpen className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="text-xs font-semibold text-content">Device</div>
-                  <div className="text-[10px] text-content-secondary mt-0.5 leading-tight">
-                    Open local
-                  </div>
-                </div>
-              </button>
-            </div>
-
-            {/* Active Workspace Artifact Banner */}
-            {artifact && (
-              <div className="muxaro-liquid-glass rounded-2xl p-3.5 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-medium text-brand">Active Workspace File</div>
-                  <div className="text-xs font-semibold text-content truncate">{artifact.file.name}</div>
-                  <div className="text-[11px] text-content-secondary">
-                    {formatBytes(artifact.file.size)}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
+            {/* Recent On-Device Files */}
+            {recentDocs.length > 0 && (
+              <section aria-label="Recent local documents" className="space-y-2 pt-2">
+                <div className="flex items-center justify-between px-0.5">
+                  <h2 className="text-xs font-semibold text-content-secondary">Recent Files</h2>
                   <button
                     type="button"
-                    onClick={handleSaveCurrentArtifact}
-                    className="muxaro-spring-tap px-3 py-2 rounded-xl bg-brand text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                    onClick={() => openTool('/tools/pdf/recent')}
+                    className="text-xs font-medium text-brand inline-flex items-center gap-1"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Save</span>
+                    <span>History</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
                   </button>
                 </div>
-              </div>
-            )}
-
-            {/* Quick Workflows Grid */}
-            <section aria-label="Quick mobile tools" className="space-y-2.5">
-              <div className="flex items-center justify-between px-0.5">
-                <h2 className="text-xs font-semibold text-content-secondary">
-                  Quick Local Actions
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void triggerHapticTap();
-                    setTab('pdf');
-                  }}
-                  className="text-xs font-medium text-brand"
-                >
-                  All 52 tools →
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                {QUICK_MOBILE_TOOLS.map((tool) => {
-                  const Icon = tool.icon;
-                  return (
-                    <button
-                      key={tool.href}
-                      type="button"
-                      onClick={() => openTool(tool.href)}
-                      className="muxaro-spring-tap rounded-2xl bg-surface border border-line p-3.5 text-left flex items-start gap-3"
+                <div className="space-y-1.5">
+                  {recentDocs.slice(0, 3).map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="rounded-2xl bg-surface border border-line px-3.5 py-2.5 flex items-center justify-between gap-2.5"
                     >
-                      <div className="w-9 h-9 rounded-xl bg-surface-elevated border border-line flex items-center justify-center shrink-0">
-                        <Icon className={`w-4 h-4 ${tool.accent}`} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold text-content truncate">
-                          {tool.title}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!doc.blob) return;
+                          void triggerHapticTap();
+                          setArtifactFromBlob(doc.blob, doc.fileName, doc.domain === 'video' ? 'video' : 'pdf', '/m');
+                          openTool('/tools/pdf/view?handoff=1');
+                        }}
+                        className="min-w-0 text-left flex-1"
+                      >
+                        <div className="text-xs font-semibold text-content truncate">{doc.fileName}</div>
+                        <div className="text-[11px] text-content-secondary truncate tabular-nums">
+                          {doc.toolName} ({formatBytes(doc.sizeBytes)})
                         </div>
-                        <div className="text-[11px] text-content-secondary truncate mt-0.5">
-                          {tool.sub}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* Quick Suite Shortcuts */}
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  void triggerHapticTap();
-                  setTab('pdf');
-                }}
-                className="muxaro-spring-tap rounded-2xl bg-surface border border-line p-3.5 flex items-center justify-between"
-              >
-                <div className="flex items-center gap-2.5">
-                  <FileText className="w-4 h-4 text-emerald-500" />
-                  <div className="text-left">
-                    <div className="text-xs font-semibold text-content">PDF Suite</div>
-                    <div className="text-[11px] text-content-secondary">
-                      {PDF_TOOLS_CATALOG.length} tools
+                      </button>
+                      {doc.blob && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void triggerHapticTap();
+                            void saveOrShareArtifact(doc.blob!, doc.fileName, doc.fileName);
+                          }}
+                          aria-label={`Save or share ${doc.fileName}`}
+                          className="p-2 rounded-xl bg-surface-elevated border border-line text-content-secondary shrink-0"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
-                  </div>
+                  ))}
                 </div>
-                <ChevronRight className="w-4 h-4 text-content-tertiary" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  void triggerHapticTap();
-                  setTab('media');
-                }}
-                className="muxaro-spring-tap rounded-2xl bg-surface border border-line p-3.5 flex items-center justify-between"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Film className="w-4 h-4 text-brand" />
-                  <div className="text-left">
-                    <div className="text-xs font-semibold text-content">Video & Audio</div>
-                    <div className="text-[11px] text-content-secondary">
-                      {CREATOR_TOOLS_CATALOG.length} tools
-                    </div>
-                  </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-content-tertiary" />
-              </button>
-            </div>
+              </section>
+            )}
           </div>
         )}
 
-        {/* TAB 2: PDF SUITE (38 LOCAL TOOLS) */}
+        {/* TAB 2: PDF SUITE */}
         {tab === 'pdf' && (
           <div key="pdf" className="muxaro-sheet-enter space-y-3.5">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface border border-line">
+              <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter 38 PDF tools…"
+                className="w-full bg-transparent text-xs text-content placeholder:text-content-tertiary focus:outline-none"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="text-[11px] text-content-secondary"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
               {PDF_FILTERS.map((cat) => {
                 const active = pdfFilter === cat;
@@ -645,41 +579,41 @@ export default function MobileStudioShell() {
               })}
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 gap-2">
               {filteredPdfTools.map((tool) => {
                 const isPinned = pinnedHrefs.includes(tool.href);
+                const Icon = getToolIcon(tool.href);
+                const tone = TOOL_ICON_TONE[tool.accentKind];
                 return (
                   <div
                     key={tool.href}
-                    className="muxaro-spring-tap rounded-2xl bg-surface border border-line p-3.5 flex flex-col justify-between gap-2 relative"
+                    className="muxaro-spring-tap rounded-2xl bg-surface border border-line px-3.5 py-3 flex items-center justify-between gap-3"
                   >
                     <button
                       type="button"
                       onClick={() => openTool(tool.href)}
-                      className="text-left flex-1 space-y-1 focus:outline-none"
+                      className="text-left flex items-center gap-3 min-w-0 flex-1 focus:outline-none"
                     >
-                      <div className="text-xs font-semibold text-content pr-5 leading-snug">
-                        {tool.title}
+                      <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${tone}`}>
+                        <Icon className="w-4 h-4" />
                       </div>
-                      <div className="text-[11px] text-content-secondary line-clamp-1">
-                        {tool.tag}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-content">{tool.title}</div>
+                        <div className="text-[11px] text-content-secondary mt-0.5 leading-snug">
+                          {tool.description}
+                        </div>
                       </div>
                     </button>
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                        {tool.category}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => handleTogglePin(tool.href, e)}
-                        aria-label={isPinned ? 'Unpin tool' : 'Pin tool'}
-                        className={`p-1 rounded-lg ${
-                          isPinned ? 'text-brand bg-brand/10' : 'text-content-tertiary'
-                        }`}
-                      >
-                        <Pin className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => handleTogglePin(tool.href, e)}
+                      aria-label={isPinned ? 'Unpin tool' : 'Pin tool'}
+                      className={`p-1.5 rounded-lg shrink-0 ${
+                        isPinned ? 'text-brand bg-brand/10' : 'text-content-tertiary'
+                      }`}
+                    >
+                      <Pin className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 );
               })}
@@ -687,50 +621,78 @@ export default function MobileStudioShell() {
           </div>
         )}
 
-        {/* TAB 3: MEDIA TOOLS (VIDEO & AUDIO) */}
+        {/* TAB 3: MEDIA TOOLS */}
         {tab === 'media' && (
           <div key="media" className="muxaro-sheet-enter space-y-3.5">
-            <div className="muxaro-liquid-glass rounded-2xl p-3.5 flex items-center justify-between">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-surface border border-line">
+              <Search className="w-4 h-4 text-content-tertiary shrink-0" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter Video & Audio tools…"
+                className="w-full bg-transparent text-xs text-content placeholder:text-content-tertiary focus:outline-none"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="text-[11px] text-content-secondary"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="rounded-2xl border border-line bg-surface p-3.5 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <ImageIcon className="w-4 h-4 text-brand shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-content">Local Media Engine</div>
+                  <div className="text-xs font-semibold text-content">Private Media Tools</div>
                   <div className="text-[11px] text-content-secondary">
-                    FFmpeg WASM + HTML5 Stream Copy
+                    Fast video &amp; audio editing on your phone
                   </div>
                 </div>
               </div>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/12 text-emerald-500">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/12 text-emerald-500">
                 Ready
               </span>
             </div>
 
             <div className="space-y-2">
-              {filteredMediaTools.map((tool) => (
-                <button
-                  key={tool.href}
-                  type="button"
-                  onClick={() => openTool(tool.href)}
-                  className="muxaro-spring-tap w-full rounded-2xl bg-surface border border-line p-3.5 flex items-center justify-between gap-3 text-left"
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-content truncate">{tool.title}</div>
-                    <div className="text-[11px] text-content-secondary truncate mt-0.5">
-                      {tool.tag} · {tool.tierBadge}
+              {filteredMediaTools.map((tool) => {
+                const Icon = getToolIcon(tool.href);
+                const tone = TOOL_ICON_TONE[tool.accentKind];
+                return (
+                  <button
+                    key={tool.href}
+                    type="button"
+                    onClick={() => openTool(tool.href)}
+                    className="muxaro-spring-tap w-full rounded-2xl bg-surface border border-line px-3.5 py-3 flex items-center justify-between gap-3 text-left"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${tone}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-content">{tool.title}</div>
+                        <div className="text-[11px] text-content-secondary mt-0.5 leading-snug">
+                          {tool.description}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
-                </button>
-              ))}
+                    <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* TAB 4: SAVED / QUEUE & SETTINGS */}
+        {/* TAB 4: FILES & PREFERENCES */}
         {tab === 'saved' && (
           <div key="saved" className="muxaro-sheet-enter space-y-4">
             {artifact ? (
-              <div className="muxaro-liquid-glass rounded-2xl p-4 space-y-3">
+              <div className="rounded-2xl border border-line bg-surface p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-brand">Active Session File</span>
                   <button
@@ -743,8 +705,8 @@ export default function MobileStudioShell() {
                 </div>
                 <div>
                   <div className="text-sm font-semibold text-content truncate">{artifact.file.name}</div>
-                  <div className="text-xs text-content-secondary">
-                    {formatBytes(artifact.file.size)} · {artifact.domain.toUpperCase()}
+                  <div className="text-xs text-content-secondary tabular-nums">
+                    {formatBytes(artifact.file.size)} ({artifact.domain.toUpperCase()})
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -753,7 +715,7 @@ export default function MobileStudioShell() {
                     onClick={handleSaveCurrentArtifact}
                     className="muxaro-spring-tap px-3.5 py-2 rounded-xl bg-brand text-white text-xs font-semibold"
                   >
-                    Save / Share File
+                    Save or Share File
                   </button>
                   {artifact.domain === 'pdf' && (
                     <>
@@ -776,12 +738,53 @@ export default function MobileStudioShell() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl bg-surface border border-line p-4 text-center space-y-2">
+              <div className="rounded-2xl bg-surface border border-line p-4 text-center space-y-1.5">
                 <div className="text-xs font-medium text-content">No active file in queue</div>
                 <div className="text-[11px] text-content-secondary">
                   Open or scan any document to pass it directly between tools.
                 </div>
               </div>
+            )}
+
+            {recentDocs.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="text-xs font-semibold text-content-secondary px-0.5">
+                  Saved Outputs
+                </h2>
+                <div className="space-y-1.5">
+                  {recentDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="rounded-xl bg-surface border border-line px-3.5 py-2.5 flex items-center justify-between gap-2"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!doc.blob) return;
+                          setArtifactFromBlob(doc.blob, doc.fileName, doc.domain === 'video' ? 'video' : 'pdf', '/m');
+                          openTool('/tools/pdf/view?handoff=1');
+                        }}
+                        className="min-w-0 text-left flex-1"
+                      >
+                        <div className="text-xs font-semibold text-content truncate">{doc.fileName}</div>
+                        <div className="text-[11px] text-content-secondary truncate tabular-nums">
+                          {doc.toolName} ({formatBytes(doc.sizeBytes)})
+                        </div>
+                      </button>
+                      {doc.blob && (
+                        <button
+                          type="button"
+                          onClick={() => void saveOrShareArtifact(doc.blob!, doc.fileName, doc.fileName)}
+                          aria-label={`Save ${doc.fileName}`}
+                          className="p-2 rounded-lg bg-surface-elevated border border-line text-content-secondary"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
             )}
 
             {pinnedTools.length > 0 && (
@@ -838,7 +841,7 @@ export default function MobileStudioShell() {
                 <div>
                   <div className="text-xs font-medium text-content">Eco GPU Mode</div>
                   <div className="text-[11px] text-content-secondary">
-                    Disable blur & animations for battery savings
+                    Disable blur and animations for battery savings
                   </div>
                 </div>
                 <button
@@ -855,9 +858,9 @@ export default function MobileStudioShell() {
               </div>
               {!isNativeMobile && (
                 <div className="pt-2 border-t border-line flex items-center justify-between">
-                  <span className="text-xs text-content-secondary">Full Desktop View</span>
-                  <Link href="/" className="text-xs font-semibold text-brand">
-                    Open Web Studio →
+                  <span className="text-xs text-content-secondary">Desktop View</span>
+                  <Link href="/app" className="text-xs font-semibold text-brand">
+                    Open Workstation
                   </Link>
                 </div>
               )}
@@ -866,14 +869,13 @@ export default function MobileStudioShell() {
         )}
       </main>
 
-      {/* Floating Liquid-Glass Thumb Dock */}
+      {/* Floating Thumb Dock */}
       <nav
         aria-label="Mobile navigation dock"
         className="fixed bottom-3 left-4 right-4 z-40 max-w-md mx-auto"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div className="muxaro-dock-glass rounded-full p-1.5 grid grid-cols-4 relative">
-          {/* GPU-Accelerated Sliding Liquid Pill Indicator */}
           <div
             aria-hidden="true"
             className="absolute top-1.5 bottom-1.5 left-1.5 rounded-full bg-brand/14 border border-brand/25 pointer-events-none"
@@ -889,7 +891,7 @@ export default function MobileStudioShell() {
               { id: 'studio', label: 'Studio', icon: Shield },
               { id: 'pdf', label: 'PDF', icon: FileText },
               { id: 'media', label: 'Media', icon: Film },
-              { id: 'saved', label: 'Queue', icon: Clock },
+              { id: 'saved', label: 'Files', icon: Clock },
             ] as const
           ).map((item) => {
             const Icon = item.icon;

@@ -1,6 +1,7 @@
 {
   "name": "@muxaro/desktop",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "MUXARO Local Desktop Studio — Standalone Offline Video, PDF & Media Workstation",
   "main": "dist/main.js",
@@ -27,13 +28,19 @@
     },
     "files": [
       "dist/**/*",
-      "web-dist/**/*",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "bin",
         "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "web-dist",
+        "to": "web-dist",
         "filter": [
           "**/*"
         ]
@@ -51,8 +58,6 @@
       ],
       "artifactName": "MUXARO-Studio-Windows-x64.exe"
     },
-    "portable": {
-      "unpackDirName": "muxaro-runtime"
-    }
+    "portable": {}
   }
 }

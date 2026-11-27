@@ -40,6 +40,8 @@ function parseHeight(stream: MediaStream): number {
     return Math.round(stream.height);
   }
   const label = String(stream?.resolutionLabel || '').toLowerCase();
+  if (label.includes('12k') || label.includes('6480')) return 6480;
+  if (label.includes('10k') || label.includes('5760')) return 5760;
   if (label.includes('8k') || label.includes('4320')) return 4320;
   if (label.includes('4k') || label.includes('2160')) return 2160;
   if (label.includes('1440')) return 1440;
@@ -57,6 +59,8 @@ function parseHeight(stream: MediaStream): number {
 }
 
 function getQualityName(height: number): string {
+  if (height >= 6480) return '12K Ultra HD';
+  if (height >= 5760) return '10K Ultra HD';
   if (height >= 4320) return '8K Ultra HD';
   if (height >= 2160) return '4K Ultra HD';
   if (height >= 1440) return 'Quad HD';
@@ -163,7 +167,7 @@ export function getSavedQualityPreference(): number | null {
     const raw = window.localStorage.getItem(PREF_STORAGE_KEY);
     if (!raw) return null;
     const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed >= 144 && parsed <= 4320 ? parsed : null;
+    return Number.isFinite(parsed) && parsed >= 144 && parsed <= 8640 ? parsed : null;
   } catch {
     return null;
   }
@@ -262,7 +266,11 @@ export function normalizeVideoOptions(
   const options: NormalizedVideoOption[] = deduped.map((item, idx) => {
     const { stream, height, fps, fpsBucket, hdr } = item;
     const resolutionLabel =
-      height >= 4320
+      height >= 6480
+        ? '12K UHD'
+        : height >= 5760
+        ? '10K UHD'
+        : height >= 4320
         ? '8K UHD'
         : height >= 2160
         ? '4K UHD'
@@ -437,6 +445,8 @@ export function parseResolutionHeight(res?: string | number): number {
   if (!res) return 1080;
   if (typeof res === 'number') return res;
   const str = String(res).trim().toUpperCase();
+  if (str.includes('12K') || str.includes('6480')) return 6480;
+  if (str.includes('10K') || str.includes('5760')) return 5760;
   if (str.includes('8K') || str.includes('4320')) return 4320;
   if (str.includes('4K') || str.includes('2160') || str.includes('UHD')) return 2160;
   if (str.includes('1440') || str.includes('2K') || str.includes('QHD')) return 1440;
@@ -449,6 +459,8 @@ export function parseResolutionHeight(res?: string | number): number {
   const match = str.match(/\d+/);
   if (match) {
     const val = parseInt(match[0], 10);
+    if (val === 12) return 6480;
+    if (val === 10) return 5760;
     if (val === 8) return 4320;
     if (val === 4) return 2160;
     if (val === 2) return 1440;

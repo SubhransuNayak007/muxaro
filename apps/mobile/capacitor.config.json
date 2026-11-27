@@ -5,13 +5,18 @@
   "server": {
     "androidScheme": "https"
   },
+  "android": {
+    "backgroundColor": "#0B0C0F",
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
   "plugins": {
     "CapacitorHttp": {
       "enabled": true
     },
     "SplashScreen": {
       "launchAutoHide": true,
-      "launchShowDuration": 500,
+      "launchShowDuration": 250,
+      "launchFadeOutDuration": 150,
       "backgroundColor": "#0B0C0F",
       "showSpinner": false
     },

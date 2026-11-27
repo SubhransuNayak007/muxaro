@@ -28,6 +28,7 @@ import {
 } from '@/lib/tools-catalog';
 import { getToolIcon, TOOL_ICON_TONE } from '@/lib/tool-icons';
 import { formatBytes } from '@/lib/formatters';
+import { isCapacitorApp, isDesktopApp, isNativeAppRuntime } from '@/lib/native-bridge';
 import { useOpenedArtifact, type OpenedArtifact } from '@/lib/opened-artifact';
 import {
   getPinnedToolHrefs,
@@ -83,6 +84,13 @@ export default function UnifiedToolWorkspace({
   const [railQuery, setRailQuery] = useState('');
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>([]);
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
+  const [nativePlatform, setNativePlatform] = useState<'exe' | 'apk' | null>(null);
+
+  useEffect(() => {
+    if (isDesktopApp()) setNativePlatform('exe');
+    else if (isCapacitorApp()) setNativePlatform('apk');
+    else setNativePlatform(null);
+  }, []);
 
   useEffect(() => {
     setRailSuite(suite);
@@ -175,7 +183,10 @@ export default function UnifiedToolWorkspace({
     ? 'w-full max-w-none mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8'
     : 'w-full max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8';
 
-  const hasSidebar = prefs.toolRailOpen;
+  const hasSidebar = nativePlatform === 'apk' ? false : prefs.toolRailOpen;
+  const resolvedBackHref = nativePlatform === 'exe' ? '/app' : nativePlatform === 'apk' ? '/m' : backHref;
+  const resolvedBackLabel =
+    nativePlatform === 'exe' ? 'Workstation' : nativePlatform === 'apk' ? 'Mobile Studio' : backLabel;
 
   return (
     <div className="w-full min-h-[calc(100vh-140px)] scroll-mt-20">
@@ -183,28 +194,30 @@ export default function UnifiedToolWorkspace({
         {/* Top Unified Breadcrumb & Workbench Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-4 mb-6 border-b border-line">
           <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => updatePrefs((prev) => ({ ...prev, toolRailOpen: !prev.toolRailOpen }))}
-              aria-expanded={prefs.toolRailOpen}
-              aria-label={prefs.toolRailOpen ? 'Hide tools sidebar' : 'Show tools sidebar'}
-              title="Toggle tool switcher (Alt+B)"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-surface hover:border-line-hover text-xs font-medium text-content whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              {prefs.toolRailOpen ? (
-                <PanelLeftClose className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
-              ) : (
-                <PanelLeftOpen className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
-              )}
-              <span>{prefs.toolRailOpen ? 'Hide tools' : 'Switch tool'}</span>
-            </button>
+            {nativePlatform !== 'apk' && (
+              <button
+                type="button"
+                onClick={() => updatePrefs((prev) => ({ ...prev, toolRailOpen: !prev.toolRailOpen }))}
+                aria-expanded={prefs.toolRailOpen}
+                aria-label={prefs.toolRailOpen ? 'Hide tools sidebar' : 'Show tools sidebar'}
+                title="Toggle tool switcher (Alt+B)"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-line bg-surface hover:border-line-hover text-xs font-medium text-content whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                {prefs.toolRailOpen ? (
+                  <PanelLeftClose className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
+                ) : (
+                  <PanelLeftOpen className="w-3.5 h-3.5 text-content-secondary" aria-hidden="true" />
+                )}
+                <span>{prefs.toolRailOpen ? 'Hide tools' : 'Switch tool'}</span>
+              </button>
+            )}
 
             <Link
-              href={backHref}
+              href={resolvedBackHref}
               className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-content-secondary hover:text-content whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rounded px-1 py-0.5"
             >
               <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-              <span>{backLabel}</span>
+              <span>{resolvedBackLabel}</span>
             </Link>
 
             {historyHref && (

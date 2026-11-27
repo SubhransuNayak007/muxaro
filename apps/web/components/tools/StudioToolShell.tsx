@@ -25,7 +25,7 @@ import {
   runLocalStudioJobFallback,
   type LocalProcessResult,
 } from '@/lib/tier1-local';
-import { isCapacitorApp, isNativeAppRuntime } from '@/lib/native-bridge';
+import { getNativeDesktopFilePath, isCapacitorApp, isDesktopApp, isNativeAppRuntime, saveOrShareArtifact } from '@/lib/native-bridge';
 import GoogleDriveModal from '@/components/native/GoogleDriveModal';
 import { useOpenedArtifact, type OpenedArtifact } from '@/lib/opened-artifact';
 import TurnstileChallenge from '@/components/TurnstileChallenge';
@@ -125,6 +125,7 @@ export default function StudioToolShell({
   const [chainedTitle, setChainedTitle] = useState('');
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [localInputPath, setLocalInputPath] = useState<string | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [videoPosterUrl, setVideoPosterUrl] = useState<string | null>(null);
   const [probedInfo, setProbedInfo] = useState<ProbedLocalMedia | null>(null);
@@ -139,11 +140,13 @@ export default function StudioToolShell({
   const localAbortRef = useRef<AbortController | null>(null);
 
   const [isNativeApp, setIsNativeApp] = useState(false);
+  const [isDesktopExe, setIsDesktopExe] = useState(false);
   const [captchaToken, setCaptchaToken] = useState('');
 
   useEffect(() => {
     if (isNativeAppRuntime()) {
       setIsNativeApp(true);
+      setIsDesktopExe(isDesktopApp());
       setCaptchaToken('native-local-verified');
     }
   }, []);
@@ -208,10 +211,13 @@ export default function StudioToolShell({
         }
       : undefined);
 
+  // On Desktop EXE, prefer native multi-core ffmpeg.exe over slow single-threaded WASM
+  // except for 0ms pure-JS tools (localOnlyWithoutFile like subtitle shifter).
   const qualifiesForTier1 =
     Boolean(effectiveLocalRunner) &&
     ((localOnlyWithoutFile && inputMode !== 'url') ||
-      (inputMode === 'file' &&
+      (!isDesktopExe &&
+        inputMode === 'file' &&
         Boolean(selectedFile) &&
         (selectedFile?.size ?? 0) <= TIER1_MAX_BYTES));
 
@@ -252,6 +258,7 @@ export default function StudioToolShell({
     setErrorMessage(null);
     setLocalNotice(null);
     setSelectedFile(null);
+    setLocalInputPath(null);
     setUploadedAssetId(null);
     setVideoPosterUrl(null);
 
@@ -320,6 +327,43 @@ export default function StudioToolShell({
     probeEl.src = objUrl;
 
     setSelectedFile(file);
+
+    // Zero-Copy OS File Path on Desktop EXE: skips slow RAM/temp chunking for 4K/8K/12K files
+    const nativePath = isDesktopApp() ? getNativeDesktopFilePath(file) : '';
+    if (nativePath) {
+      setLocalInputPath(nativePath);
+      try {
+        const probeResp = await fetch('/api/v1/native/probe-local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ localInputPath: nativePath }),
+        });
+        if (probeResp.ok) {
+          const parsed = await probeResp.json();
+          const pData = parsed?.data;
+          if (pData) {
+            const info: ProbedLocalMedia = {
+              name: file.name,
+              sizeBytes: pData.sizeBytes || file.size,
+              durationSec: Number(pData.durationSec || 0),
+              width: Number(pData.width || 0),
+              height: Number(pData.height || 0),
+              hasVideo: !isLikelyAudio && Number(pData.width || 0) > 0,
+              mimeType: file.type || 'application/octet-stream',
+            };
+            setProbedInfo(info);
+            onMediaLoaded?.(info);
+            if (pData.needsProxy) {
+              setLocalNotice(`Generating smooth 720p preview proxy for ${pData.width}x${pData.height} clip (exports use full original quality).`);
+              setFilePreviewUrl(`/api/v1/native/media-proxy?path=${encodeURIComponent(nativePath)}`);
+            }
+          }
+        }
+      } catch {
+        // Non-fatal; regular job path still runs cleanly
+      }
+      return;
+    }
 
     const isTier1 = Boolean(effectiveLocalRunner) && file.size <= TIER1_MAX_BYTES;
     if (!isTier1) {
@@ -393,6 +437,8 @@ export default function StudioToolShell({
       }
       sourcePayload.sourceUrl = normalized;
       sourcePayload.mediaUrl = normalized;
+    } else if (localInputPath) {
+      sourcePayload.title = selectedFile?.name;
     } else {
       let assetId = uploadedAssetId;
       if (!assetId && selectedFile) {
@@ -411,6 +457,7 @@ export default function StudioToolShell({
       const extraParams = onBuildJobParams(sourcePayload);
       const job = await api.createJob({
         targetFormat: 'mp4',
+        ...(localInputPath ? { localInputPath } : {}),
         ...sourcePayload,
         ...extraParams,
         captchaToken: captchaToken || undefined,
@@ -485,6 +532,10 @@ export default function StudioToolShell({
           statusLabel="Browser Local, 0 bytes uploaded"
           editableName={false}
           onDownload={() => {
+            if (isNativeAppRuntime()) {
+              void saveOrShareArtifact(localResult.blob, localResult.filename, localResult.filename);
+              return;
+            }
             const a = document.createElement('a');
             a.href = localResult.url;
             a.download = localResult.filename;
@@ -644,9 +695,11 @@ export default function StudioToolShell({
                               {isUploading
                                 ? `Uploading (${uploadStats?.percent ?? 0}%)…`
                                 : qualifiesForTier1
-                                ? 'Local instant mode ready'
+                                ? 'On-device instant mode ready'
                                 : uploadedAssetId
-                                ? 'Ready for Cloud FFmpeg 8'
+                                ? isDesktopExe
+                                  ? 'Ready for Native Multi-Core FFmpeg'
+                                  : 'Ready for Cloud FFmpeg 8'
                                 : 'Preparing…'}
                             </span>
                           </div>
@@ -816,7 +869,15 @@ export default function StudioToolShell({
             {submitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                <span>{qualifiesForTier1 ? 'Running locally in browser…' : 'Starting Cloud FFmpeg 8…'}</span>
+                <span>
+                  {qualifiesForTier1
+                    ? isNativeApp
+                      ? 'Running locally on device…'
+                      : 'Running locally in browser…'
+                    : isDesktopExe
+                    ? 'Running Native Multi-Core FFmpeg…'
+                    : 'Starting Cloud FFmpeg 8…'}
+                </span>
               </>
             ) : (
               <>

@@ -59,7 +59,30 @@ export interface MuxaroDesktopBridge {
     bytes: Uint8Array;
   }) => Promise<{ ok: boolean; savedPath?: string; canceled?: boolean; error?: string }>;
   openDownloadsFolder: () => Promise<void>;
+  getDiagnostics?: () => Promise<{
+    platform: string;
+    arch: string;
+    cpus: number;
+    hasFfmpeg: boolean;
+    hasYtdlp: boolean;
+    ffmpegPath: string;
+    ytdlpPath: string;
+    downloadsDir: string;
+    localPort: number;
+  }>;
+  openFilePath?: (filePath: string) => Promise<boolean>;
+  showInFolder?: (filePath: string) => Promise<boolean>;
   captureScreenPng?: () => Promise<{ ok: boolean; bytes?: Uint8Array; error?: string }>;
+  getFilePath?: (file: File) => string;
+}
+
+export function getNativeDesktopFilePath(file: File | null | undefined): string {
+  if (!file || typeof window === 'undefined') return '';
+  try {
+    return window.muxaroDesktop?.getFilePath?.(file) || '';
+  } catch {
+    return '';
+  }
 }
 
 declare global {
