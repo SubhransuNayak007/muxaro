@@ -1,4 +1,4 @@
-const SKILL_STORAGE_KEY = 'muxaro_voyager_skills_v1';
+const SKILL_STORAGE_SLOT = 'muxaro_voyager_skills_v1';
 
 export interface LearnedSkillRecipe {
   id: string;
@@ -18,7 +18,7 @@ export interface LearnedSkillRecipe {
 function readAllSkills(): LearnedSkillRecipe[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(SKILL_STORAGE_KEY);
+    const raw = localStorage.getItem(SKILL_STORAGE_SLOT);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -30,7 +30,7 @@ function readAllSkills(): LearnedSkillRecipe[] {
 function writeAllSkills(list: LearnedSkillRecipe[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(SKILL_STORAGE_KEY, JSON.stringify(list.slice(0, 50)));
+    localStorage.setItem(SKILL_STORAGE_SLOT, JSON.stringify(list.slice(0, 50)));
   } catch {}
 }
 
@@ -150,6 +150,6 @@ export function deleteLearnedSkill(skillId: string): void {
 export function clearAllLearnedSkills(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(SKILL_STORAGE_KEY);
+    localStorage.removeItem(SKILL_STORAGE_SLOT);
   } catch {}
 }

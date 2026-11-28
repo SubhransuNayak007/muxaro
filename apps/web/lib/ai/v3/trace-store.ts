@@ -21,7 +21,7 @@ export interface AgentTraceRecord {
   note?: string;
 }
 
-const TRACE_STORAGE_KEY = 'muxaro_ai_traces_v1';
+const TRACE_STORAGE_SLOT = 'muxaro_ai_traces_v1';
 const MAX_TRACES = 60;
 
 function redactSecretsForTrace(raw: string): string {
@@ -35,7 +35,7 @@ function redactSecretsForTrace(raw: string): string {
 export function listTraces(): AgentTraceRecord[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(TRACE_STORAGE_KEY);
+    const raw = localStorage.getItem(TRACE_STORAGE_SLOT);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -55,7 +55,7 @@ export function saveTraceRecord(rec: Omit<AgentTraceRecord, 'id' | 'createdAt' |
   if (typeof window !== 'undefined') {
     try {
       const next = [item, ...listTraces()].slice(0, MAX_TRACES);
-      localStorage.setItem(TRACE_STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(TRACE_STORAGE_SLOT, JSON.stringify(next));
     } catch {}
   }
   return item;
@@ -69,14 +69,14 @@ export function rateTrace(traceId: string, rating: 'up' | 'down', note?: string)
         ? { ...t, rating, ...(note !== undefined ? { note: redactSecretsForTrace(note) } : {}) }
         : t
     );
-    localStorage.setItem(TRACE_STORAGE_KEY, JSON.stringify(next));
+    localStorage.setItem(TRACE_STORAGE_SLOT, JSON.stringify(next));
   } catch {}
 }
 
 export function clearAllTraces(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(TRACE_STORAGE_KEY);
+    localStorage.removeItem(TRACE_STORAGE_SLOT);
   } catch {}
 }
 

@@ -167,36 +167,69 @@ const McpReqSchema = z.object({
 });
 
 async function runDuckDuckGoSearch(query: string, limit: number) {
-  const res = await safeFetchPublic(
-    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-    10000,
-    800_000
-  );
-  const { document } = parseHTML(res.text);
   const hits: Array<{ id: string; title: string; url: string; snippet: string; domain: string }> = [];
-  for (const node of Array.from(document.querySelectorAll('.result'))) {
-    if (hits.length >= limit) break;
-    const link = node.querySelector('a.result__a');
-    const snip = node.querySelector('.result__snippet');
-    if (!link) continue;
-    let href = link.getAttribute('href') || '';
-    if (href.includes('uddg=')) {
+  const ddgRes = await safeFetchPublic(
+    `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    8000,
+    800_000
+  ).catch(() => null);
+  if (ddgRes && ddgRes.status >= 200 && ddgRes.status < 300) {
+    const { document } = parseHTML(ddgRes.text);
+    for (const node of Array.from(document.querySelectorAll('.result'))) {
+      if (hits.length >= limit) break;
+      const link = node.querySelector('a.result__a');
+      const snip = node.querySelector('.result__snippet');
+      if (!link) continue;
+      let href = link.getAttribute('href') || '';
+      if (href.includes('uddg=')) {
+        try {
+          href = new URL(href, 'https://duckduckgo.com').searchParams.get('uddg') || href;
+        } catch {}
+      }
+      if (!/^https?:\/\//i.test(href)) continue;
+      let domain = 'web';
       try {
-        href = new URL(href, 'https://duckduckgo.com').searchParams.get('uddg') || href;
+        domain = new URL(href).hostname.replace(/^www\./, '');
       } catch {}
+      hits.push({
+        id: `S${hits.length + 1}`,
+        title: (link.textContent || '').trim() || href,
+        url: href,
+        snippet: (snip?.textContent || '').trim().slice(0, 420),
+        domain,
+      });
     }
-    if (!/^https?:\/\//i.test(href)) continue;
-    let domain = 'web';
+  }
+  if (hits.length) return hits;
+
+  const wikiRes = await safeFetchPublic(
+    `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      query
+    )}&format=json&srlimit=${limit}`,
+    7000,
+    400_000
+  ).catch(() => null);
+  if (wikiRes && wikiRes.status === 200) {
     try {
-      domain = new URL(href).hostname.replace(/^www\./, '');
+      const data = JSON.parse(wikiRes.text) as {
+        query?: { search?: Array<{ title?: string; pageid?: number; snippet?: string }> };
+      };
+      for (const item of data.query?.search || []) {
+        if (hits.length >= limit) break;
+        const title = String(item.title || '').trim();
+        if (!title) continue;
+        const url = item.pageid
+          ? `https://en.wikipedia.org/?curid=${item.pageid}`
+          : `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, '_'))}`;
+        hits.push({
+          id: `S${hits.length + 1}`,
+          title,
+          url,
+          snippet: String(item.snippet || '').replace(/<[^>]+>/g, '').trim().slice(0, 420),
+          domain: 'en.wikipedia.org',
+        });
+      }
     } catch {}
-    hits.push({
-      id: `S${hits.length + 1}`,
-      title: (link.textContent || '').trim() || href,
-      url: href,
-      snippet: (snip?.textContent || '').trim().slice(0, 420),
-      domain,
-    });
   }
   return hits;
 }

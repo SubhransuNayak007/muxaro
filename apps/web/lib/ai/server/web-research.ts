@@ -129,7 +129,7 @@ export async function searchWebSources(
 
   // Zero-key DuckDuckGo HTML fallback
   const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`;
-  const ddgRes = await safePublicFetch(ddgUrl, { timeoutMs: 10000, maxBytes: 800_000 }).catch(() => null);
+  const ddgRes = await safePublicFetch(ddgUrl, { timeoutMs: 8000, maxBytes: 800_000 }).catch(() => null);
   if (ddgRes && ddgRes.status >= 200 && ddgRes.status < 300) {
     const { document } = parseHTML(ddgRes.text);
     const results = Array.from(document.querySelectorAll('.result'));
@@ -157,6 +157,103 @@ export async function searchWebSources(
       });
     }
     if (hits.length) return { hits, engine: 'duckduckgo' };
+  }
+
+  // Cloud-resilient fallback: DuckDuckGo Lite -> Wikipedia Action Search API + DuckDuckGo Instant Answer
+  const liteUrl = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(cleanQuery)}`;
+  const liteRes = await safePublicFetch(liteUrl, { timeoutMs: 7000, maxBytes: 600_000 }).catch(() => null);
+  if (liteRes && liteRes.status >= 200 && liteRes.status < 300) {
+    const { document } = parseHTML(liteRes.text);
+    const links = Array.from(document.querySelectorAll('a.result-link'));
+    const snippets = Array.from(document.querySelectorAll('td.result-snippet'));
+    const hits: WebSearchHit[] = [];
+    for (let i = 0; i < links.length && hits.length < limit; i += 1) {
+      const link = links[i];
+      let href = link.getAttribute('href') || '';
+      if (href.includes('uddg=')) {
+        try {
+          href = new URL(href, 'https://lite.duckduckgo.com').searchParams.get('uddg') || href;
+        } catch {}
+      }
+      if (!/^https?:\/\//i.test(href)) continue;
+      hits.push({
+        id: `S${hits.length + 1}`,
+        title: (link.textContent || '').trim() || href,
+        url: href,
+        snippet: stripPromptInjectionVectors((snippets[i]?.textContent || '').trim()).slice(0, 420),
+        domain: getDomain(href),
+      });
+    }
+    if (hits.length) return { hits, engine: 'duckduckgo-lite' };
+  }
+
+  const combinedHits: WebSearchHit[] = [];
+  const iaUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json&no_html=1&skip_disambig=1`;
+  const iaRes = await safePublicFetch(iaUrl, { timeoutMs: 6000, maxBytes: 400_000 }).catch(() => null);
+  if (iaRes && iaRes.status === 200) {
+    try {
+      const ia = JSON.parse(iaRes.text) as {
+        AbstractText?: string;
+        AbstractURL?: string;
+        Heading?: string;
+        RelatedTopics?: Array<{ Text?: string; FirstURL?: string }>;
+      };
+      if (ia.AbstractText && ia.AbstractURL) {
+        combinedHits.push({
+          id: `S${combinedHits.length + 1}`,
+          title: ia.Heading || cleanQuery,
+          url: ia.AbstractURL,
+          snippet: stripPromptInjectionVectors(ia.AbstractText).slice(0, 420),
+          domain: getDomain(ia.AbstractURL),
+        });
+      }
+      for (const topic of ia.RelatedTopics || []) {
+        if (combinedHits.length >= Math.min(limit, 3)) break;
+        if (topic.FirstURL && topic.Text) {
+          combinedHits.push({
+            id: `S${combinedHits.length + 1}`,
+            title: topic.Text.split(' - ')[0].slice(0, 120),
+            url: topic.FirstURL,
+            snippet: stripPromptInjectionVectors(topic.Text).slice(0, 420),
+            domain: getDomain(topic.FirstURL),
+          });
+        }
+      }
+    } catch {}
+  }
+
+  if (combinedHits.length < limit) {
+    const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      cleanQuery
+    )}&format=json&srlimit=${limit}`;
+    const wikiRes = await safePublicFetch(wikiUrl, { timeoutMs: 7000, maxBytes: 400_000 }).catch(() => null);
+    if (wikiRes && wikiRes.status === 200) {
+      try {
+        const wData = JSON.parse(wikiRes.text) as {
+          query?: { search?: Array<{ title?: string; pageid?: number; snippet?: string }> };
+        };
+        for (const item of wData.query?.search || []) {
+          if (combinedHits.length >= limit) break;
+          const title = String(item.title || '').trim();
+          const url = item.pageid
+            ? `https://en.wikipedia.org/?curid=${item.pageid}`
+            : `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, '_'))}`;
+          const rawSnip = String(item.snippet || '').replace(/<[^>]+>/g, '');
+          if (!title || combinedHits.some((h) => h.url === url)) continue;
+          combinedHits.push({
+            id: `S${combinedHits.length + 1}`,
+            title,
+            url,
+            snippet: stripPromptInjectionVectors(rawSnip).slice(0, 420),
+            domain: 'en.wikipedia.org',
+          });
+        }
+      } catch {}
+    }
+  }
+
+  if (combinedHits.length) {
+    return { hits: combinedHits, engine: 'wikipedia-ia' };
   }
 
   return { hits: [], engine: 'unavailable' };

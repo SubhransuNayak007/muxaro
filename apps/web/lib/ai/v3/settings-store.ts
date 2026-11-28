@@ -34,10 +34,10 @@ export interface MuxaroAiV3Settings {
   }>;
 }
 
-const SETTINGS_KEY = 'muxaro_ai_v3_settings_v1';
-const SESSION_BYOK_KEY = 'muxaro_ai_v3_session_byok';
-const ENCRYPTED_BYOK_KEY = 'muxaro_ai_v3_enc_byok';
-const DEVICE_SALT_KEY = 'muxaro_ai_v3_device_salt';
+const SETTINGS_SLOT = 'muxaro_ai_v3_settings_v1';
+const SESSION_BYOK_SLOT = 'muxaro_ai_v3_session_byok';
+const ENCRYPTED_BYOK_SLOT = 'muxaro_ai_v3_enc_byok';
+const DEVICE_SALT_SLOT = 'muxaro_ai_v3_device_salt';
 
 export const DEFAULT_AI_V3_SETTINGS: MuxaroAiV3Settings = {
   runtimePreference: 'auto',
@@ -85,7 +85,7 @@ export const WEBGPU_RECOMMENDED_MODELS = [
 export function loadAiV3Settings(): MuxaroAiV3Settings {
   if (typeof window === 'undefined') return { ...DEFAULT_AI_V3_SETTINGS };
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const raw = localStorage.getItem(SETTINGS_SLOT);
     if (!raw) return { ...DEFAULT_AI_V3_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<MuxaroAiV3Settings>;
     return {
@@ -101,18 +101,18 @@ export function loadAiV3Settings(): MuxaroAiV3Settings {
 export function saveAiV3Settings(next: MuxaroAiV3Settings): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    localStorage.setItem(SETTINGS_SLOT, JSON.stringify(next));
     window.dispatchEvent(new CustomEvent('muxaro:ai-settings-changed', { detail: next }));
   } catch {}
 }
 
 function getOrCreateDeviceMaterial(): string {
-  let salt = localStorage.getItem(DEVICE_SALT_KEY);
+  let salt = localStorage.getItem(DEVICE_SALT_SLOT);
   if (!salt) {
     const bytes = new Uint8Array(24);
     crypto.getRandomValues(bytes);
     salt = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    localStorage.setItem(DEVICE_SALT_KEY, salt);
+    localStorage.setItem(DEVICE_SALT_SLOT, salt);
   }
   return `${salt}|${navigator.userAgent.slice(0, 40)}|muxaro-v3`;
 }
@@ -153,15 +153,15 @@ export async function saveClientByokKey(
 
   if (!clean) {
     try {
-      sessionStorage.removeItem(SESSION_BYOK_KEY);
-      localStorage.removeItem(ENCRYPTED_BYOK_KEY);
+      sessionStorage.removeItem(SESSION_BYOK_SLOT);
+      localStorage.removeItem(ENCRYPTED_BYOK_SLOT);
     } catch {}
     return;
   }
 
   // Always keep inside sessionStorage for immediate tab use
   try {
-    sessionStorage.setItem(SESSION_BYOK_KEY, JSON.stringify({ provider, apiKey: clean }));
+    sessionStorage.setItem(SESSION_BYOK_SLOT, JSON.stringify({ provider, apiKey: clean }));
   } catch {}
 
   if (persistence === 'device-encrypted' && window.crypto?.subtle) {
@@ -179,11 +179,11 @@ export async function saveClientByokKey(
         iv: Array.from(iv),
         ct: Array.from(new Uint8Array(ct)),
       };
-      localStorage.setItem(ENCRYPTED_BYOK_KEY, JSON.stringify(pack));
+      localStorage.setItem(ENCRYPTED_BYOK_SLOT, JSON.stringify(pack));
     } catch {}
   } else {
     try {
-      localStorage.removeItem(ENCRYPTED_BYOK_KEY);
+      localStorage.removeItem(ENCRYPTED_BYOK_SLOT);
     } catch {}
   }
 }
@@ -191,7 +191,7 @@ export async function saveClientByokKey(
 export async function loadClientByokKey(): Promise<{ provider: AiProviderId; apiKey: string } | null> {
   if (typeof window === 'undefined') return null;
   try {
-    const sess = sessionStorage.getItem(SESSION_BYOK_KEY);
+    const sess = sessionStorage.getItem(SESSION_BYOK_SLOT);
     if (sess) {
       const p = JSON.parse(sess) as { provider?: AiProviderId; apiKey?: string };
       if (p.apiKey && p.provider) return { provider: p.provider, apiKey: p.apiKey };
@@ -199,7 +199,7 @@ export async function loadClientByokKey(): Promise<{ provider: AiProviderId; api
   } catch {}
 
   try {
-    const raw = localStorage.getItem(ENCRYPTED_BYOK_KEY);
+    const raw = localStorage.getItem(ENCRYPTED_BYOK_SLOT);
     if (raw && window.crypto?.subtle) {
       const pack = JSON.parse(raw) as { iv?: number[]; ct?: number[] };
       if (Array.isArray(pack.iv) && Array.isArray(pack.ct)) {
@@ -226,7 +226,7 @@ export function hasClientByokKeySync(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     return Boolean(
-      sessionStorage.getItem(SESSION_BYOK_KEY) || localStorage.getItem(ENCRYPTED_BYOK_KEY)
+      sessionStorage.getItem(SESSION_BYOK_SLOT) || localStorage.getItem(ENCRYPTED_BYOK_SLOT)
     );
   } catch {
     return false;

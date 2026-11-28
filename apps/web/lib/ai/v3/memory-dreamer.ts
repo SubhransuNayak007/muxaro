@@ -1,4 +1,4 @@
-const MEMORY_STORAGE_KEY = 'muxaro_dreaming_memory_v1';
+const MEMORY_STORAGE_SLOT = 'muxaro_dreaming_memory_v1';
 const MAX_MEMORY_RULES = 30;
 const DEFAULT_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
 
@@ -17,7 +17,7 @@ export interface EpisodicMemoryRule {
 function readAllRules(): EpisodicMemoryRule[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(MEMORY_STORAGE_KEY);
+    const raw = localStorage.getItem(MEMORY_STORAGE_SLOT);
     if (!raw) return [];
     const now = Date.now();
     const list: EpisodicMemoryRule[] = JSON.parse(raw);
@@ -30,7 +30,7 @@ function readAllRules(): EpisodicMemoryRule[] {
 function writeAllRules(list: EpisodicMemoryRule[]): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(MEMORY_STORAGE_KEY, JSON.stringify(list.slice(0, MAX_MEMORY_RULES)));
+    localStorage.setItem(MEMORY_STORAGE_SLOT, JSON.stringify(list.slice(0, MAX_MEMORY_RULES)));
   } catch {}
 }
 
@@ -88,7 +88,7 @@ export function deleteMemoryRule(id: string): void {
 export function clearAllMemoryRules(): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.removeItem(MEMORY_STORAGE_KEY);
+    localStorage.removeItem(MEMORY_STORAGE_SLOT);
   } catch {}
 }
 
