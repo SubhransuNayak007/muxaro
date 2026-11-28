@@ -412,6 +412,18 @@ CREATE TABLE IF NOT EXISTS analytics_events (
 );
 CREATE INDEX IF NOT EXISTS idx_analytics_name_created ON analytics_events(event_name, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_analytics_user_created ON analytics_events(user_id, created_at DESC);
+
+-- 23. AI Research Jobs (async background Deep Research persistence)
+CREATE TABLE IF NOT EXISTS ai_research_jobs (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  sources_json TEXT NOT NULL DEFAULT '[]',
+  report_md TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_research_status ON ai_research_jobs(status, created_at DESC);
 `;
 
 let dbInstance: DatabaseSync | null = null;

@@ -6,53 +6,45 @@ import { CREATOR_TOOLS_CATALOG, PDF_TOOLS_CATALOG } from '@/lib/tools-catalog';
 const SUITES = [
   {
     index: '01',
-    name: 'Stream Downloader',
-    summary: 'Grab 8K video, native audio tracks, playlists, and clean AI transcripts from any supported link.',
-    meta: '8K & 4K Direct',
-    href: '#main-content',
-    cta: 'Paste link above',
+    name: 'AI Studio',
+    summary: 'Autonomous ReAct agent, Python code sandbox, local WebGPU, and web research.',
+    meta: 'Web & Desktop',
+    href: '/ai',
+    cta: 'Open AI',
   },
   {
     index: '02',
-    name: 'Video Studio',
-    summary: 'Target-size 10 MB compression, lossless stream-copy cuts, 9:16 framing, subtitle burning, and 105+ format conversion.',
+    name: 'Video & Audio',
+    summary: 'Save streams up to 8K, target 10 MB compression, and lossless cuts.',
     meta: `${CREATOR_TOOLS_CATALOG.length} tools`,
     href: '/tools?section=video',
-    cta: 'Browse Video',
+    cta: 'Browse',
   },
   {
     index: '03',
     name: 'PDF Studio',
-    summary: 'Zero-upload browser tools powered by QPDF WASM, pdf-lib, Tesseract OCR, and WebCrypto PKCS#7 verification.',
-    meta: `${PDF_TOOLS_CATALOG.length} local tools`,
+    summary: 'Merge, compress, redact PII, OCR, and encrypt locally in WASM.',
+    meta: `${PDF_TOOLS_CATALOG.length} tools`,
     href: '/tools/pdf',
-    cta: 'Browse PDF',
-  },
-  {
-    index: '04',
-    name: 'Audio Studio',
-    summary: 'Dedicated stem separation, voice de-noise, waveform silence trimming, and podcast loudness mastering.',
-    meta: 'Upcoming suite',
-    href: '/docs/audio-studio',
-    cta: 'Preview roadmap',
+    cta: 'Browse',
   },
 ] as const;
 
 export default function SuiteIndexLedger() {
   return (
     <section
-      className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-16 border-t border-line"
+      className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-line"
       aria-labelledby="suites-ledger-heading"
     >
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 mb-6">
         <h2
           id="suites-ledger-heading"
-          className="text-3xl sm:text-4xl font-display font-medium text-content tracking-[-0.02em]"
+          className="text-2xl sm:text-3xl font-display font-medium text-content tracking-[-0.02em]"
         >
-          Four suites inside one workstation
+          One quiet workspace
         </h2>
-        <span className="text-xs font-mono text-content-secondary tabular-nums">
-          {CREATOR_TOOLS_CATALOG.length + PDF_TOOLS_CATALOG.length} active tools
+        <span className="text-xs text-content-secondary tabular-nums">
+          {CREATOR_TOOLS_CATALOG.length + PDF_TOOLS_CATALOG.length} utilities
         </span>
       </div>
 
@@ -61,13 +53,13 @@ export default function SuiteIndexLedger() {
           <Link
             key={suite.index}
             href={suite.href}
-            className="py-6 sm:py-7 grid grid-cols-1 md:grid-cols-12 gap-3 md:gap-6 items-baseline group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rounded-lg"
+            className="py-5 grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-6 items-baseline group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rounded-lg"
           >
             <div className="md:col-span-4 flex items-baseline gap-3">
-              <span className="font-mono text-xs text-content-tertiary tabular-nums">
+              <span className="text-xs text-content-tertiary tabular-nums">
                 {suite.index}
               </span>
-              <span className="text-lg sm:text-xl font-semibold text-content group-hover:text-brand transition-colors">
+              <span className="text-base sm:text-lg font-semibold text-content group-hover:text-brand transition-colors">
                 {suite.name}
               </span>
             </div>
@@ -77,7 +69,7 @@ export default function SuiteIndexLedger() {
             </p>
 
             <div className="md:col-span-3 flex items-center justify-between md:justify-end gap-4">
-              <span className="font-mono text-xs text-content-secondary tabular-nums">
+              <span className="text-xs text-content-secondary tabular-nums">
                 {suite.meta}
               </span>
               <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand">

@@ -113,6 +113,7 @@ public class MuxaroAiPlugin extends Plugin {
         Context ctx = getContext();
         ret.put("ttsReady", ttsReady);
         ret.put("slmReady", false);
+        ret.put("recommendedMaxParams", "1.5B");
 
         boolean speechAvail = false;
         boolean onDeviceAvail = false;
@@ -337,6 +338,13 @@ public class MuxaroAiPlugin extends Plugin {
             ed.putString("byok_key", apiKey.trim());
         }
         ed.apply();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearByokKey(PluginCall call) {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        prefs.edit().remove("byok_key").apply();
         call.resolve();
     }
 }

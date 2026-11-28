@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   UploadCloud,
   Loader2,
@@ -15,6 +16,7 @@ import {
   Image as ImageIcon,
   ArrowUpRight,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 import HeroOmnibox, { type DownloadIntentMode, type SmartPreset } from '@/components/HeroOmnibox';
 import AdaptiveMediaCard from '@/components/AdaptiveMediaCard';
@@ -156,9 +158,11 @@ const PRESET_BY_MODE: Record<DownloadIntentMode, SmartPreset> = {
   video: '4k',
   audio: 'audio',
   compact: '720p',
+  ai: 'best',
 };
 
 export default function HomeWorkspace() {
+  const router = useRouter();
   const { isMobile } = useDeviceDetection();
   const { setArtifactFromFile } = useOpenedArtifact();
 
@@ -448,13 +452,22 @@ export default function HomeWorkspace() {
           </div>
 
           <div className="pt-2 border-t border-line flex flex-wrap items-center justify-between gap-2 text-xs">
-            <Link
-              href={droppedStudio.browseHref}
-              className="font-semibold text-brand hover:underline inline-flex items-center gap-1"
-            >
-              <span>{droppedStudio.browseLabel}</span>
-              <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
-            </Link>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href={`/ai?prompt=${encodeURIComponent(`Help me work on ${droppedStudio.file.name}`)}`}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand text-brand-fg font-semibold hover:bg-brand-hover transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Ask AI about this file</span>
+              </Link>
+              <Link
+                href={droppedStudio.browseHref}
+                className="font-semibold text-brand hover:underline inline-flex items-center gap-1"
+              >
+                <span>{droppedStudio.browseLabel}</span>
+                <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
+              </Link>
+            </div>
             {(droppedStudio.domain === 'video' || droppedStudio.domain === 'audio') && (
               <button
                 type="button"
@@ -546,6 +559,14 @@ export default function HomeWorkspace() {
                 setErrorMessage(null);
               }}
               onSubmit={(targetUrl) => {
+                const cleaned = targetUrl.trim();
+                const looksLikeUrl =
+                  /^https?:\/\//i.test(cleaned) ||
+                  (/^[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#].*)?$/i.test(cleaned) && !/\s/.test(cleaned));
+                if (downloadMode === 'ai' || (!looksLikeUrl && cleaned.length > 0)) {
+                  router.push(cleaned ? `/ai?prompt=${encodeURIComponent(cleaned)}` : '/ai');
+                  return;
+                }
                 void inspectTargetUrl(targetUrl);
               }}
               onFileDropClick={() => fileInputRef.current?.click()}

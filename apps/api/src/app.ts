@@ -38,6 +38,7 @@ import { adminRoutes } from './routes/admin.js';
 import { downloadRoutes } from './routes/download.js';
 import { downloadsRoutes } from './routes/downloads.js';
 import { probeRoutes } from './routes/probe.js';
+import { aiRoutes } from './routes/ai.js';
 
 function resolveCorsOriginConfig(): boolean | string | string[] {
   const raw = config.corsOrigin;
@@ -124,6 +125,10 @@ export async function buildApp(): Promise<FastifyInstance> {
       'x-request-id',
       'x-file-name',
       'x-muxaro-csrf',
+      'x-muxaro-byok',
+      'x-muxaro-tavily-key',
+      'x-muxaro-brave-key',
+      'x-muxaro-mcp-auth',
     ],
     exposedHeaders: [
       'x-request-id',
@@ -365,6 +370,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(downloadRoutes);
       await v1.register(downloadsRoutes);
       await v1.register(probeRoutes);
+      await v1.register(aiRoutes);
     },
     { prefix: '/api/v1' }
   );

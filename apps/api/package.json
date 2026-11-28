@@ -7,7 +7,7 @@
     "start": "tsx src/server.ts",
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test --test-force-exit tests/v1-api.test.ts tests/po-token-cookie.test.ts tests/turboflow.test.ts tests/egress-tunnel.test.ts"
+    "test": "tsx --test --test-force-exit tests/v1-api.test.ts tests/v1-ai.test.ts tests/po-token-cookie.test.ts tests/turboflow.test.ts tests/egress-tunnel.test.ts"
   },
   "keywords": [],
   "author": "Subhransu Nayak",
@@ -21,6 +21,7 @@
     "@fastify/sensible": "^6.0.8",
     "@fastify/swagger": "^9.9.5",
     "@fastify/swagger-ui": "^6.1.4",
+    "@mozilla/readability": "^0.6.0",
     "@muxaro/db": "link:../../packages/db",
     "@muxaro/shared": "link:../../packages/shared",
     "bullmq": "^6.7.8",
@@ -28,7 +29,9 @@
     "fastify": "^5.12.8",
     "fastify-plugin": "^6.0.1",
     "ioredis": "^6.0.0",
+    "linkedom": "^0.18.15",
     "postgres": "^4.1.1",
+    "turndown": "^7.2.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {

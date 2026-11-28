@@ -34,12 +34,15 @@ jobs:
 
       - name: Install Workspace Dependencies
         run: |
+          corepack enable && corepack prepare pnpm@10 --activate
           npm --prefix apps/web ci --no-audit --no-fund
           npm --prefix apps/desktop ci --no-audit --no-fund
-          npm --prefix apps/api ci --no-audit --no-fund
-          npm --prefix apps/media-worker install --no-audit --no-fund
           npm --prefix packages/shared install --no-audit --no-fund
-          npm --prefix packages/db install --no-audit --no-fund
+          npm --prefix packages/shared run build
+          pnpm --dir packages/db install --no-frozen-lockfile --shamefully-hoist
+          pnpm --dir packages/db run build
+          pnpm --dir apps/api install --no-frozen-lockfile --shamefully-hoist
+          npm --prefix apps/media-worker install --no-audit --no-fund
           npm --prefix packages/entitlements ci --no-audit --no-fund
           npm --prefix packages/source-adapters install --no-audit --no-fund
 
@@ -47,23 +50,24 @@ jobs:
         working-directory: apps/web
         run: npm run lint
 
-      - name: Run Offline AI & Intent Engine Tests
+      - name: Run Offline AI, Eval & Intent Engine Tests
         working-directory: apps/web
-        run: node --test lib/ai/__tests__/intent-engine.test.mjs
+        run: npm run test:ai && npm run test:ai-evals
 
       - name: TypeCheck Desktop (apps/desktop)
         working-directory: apps/desktop
         run: npm run build:ts
 
-      - name: TypeCheck API & Media Worker
+      - name: TypeCheck & Test API & Media Worker
         run: |
-          npm --prefix apps/api run typecheck
+          pnpm --dir apps/api run typecheck
+          pnpm --dir apps/api test
           npm --prefix apps/media-worker run build
 
       - name: Build Shared Packages
         run: |
           npm --prefix packages/shared run build
-          npm --prefix packages/db run build
+          pnpm --dir packages/db run build
           npm --prefix packages/entitlements run build
           npm --prefix packages/source-adapters run build
 

@@ -133,7 +133,7 @@ export function LayoutFooter() {
     }
   }, []);
 
-  if (pathname?.startsWith('/m') || pathname?.startsWith('/app')) {
+  if (pathname?.startsWith('/m') || pathname?.startsWith('/app') || pathname?.startsWith('/ai')) {
     return null;
   }
 

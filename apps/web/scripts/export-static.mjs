@@ -3,13 +3,22 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 
 const webDir = path.resolve(import.meta.dirname, '..');
-const routeFile = path.join(webDir, 'app', 'api', 'v1', '[...path]', 'route.ts');
+const apiDir = path.join(webDir, 'app', 'api');
+const backupDir = path.join(webDir, '.static-export-api-backup');
 const nextDir = path.join(webDir, '.next');
 
-let savedRouteContent = null;
-if (fs.existsSync(routeFile)) {
-  savedRouteContent = fs.readFileSync(routeFile, 'utf8');
-  fs.rmSync(routeFile, { force: true });
+// Recover from an interrupted prior run if needed
+if (!fs.existsSync(apiDir) && fs.existsSync(backupDir)) {
+  fs.renameSync(backupDir, apiDir);
+}
+
+let movedApiDir = false;
+if (fs.existsSync(apiDir)) {
+  if (fs.existsSync(backupDir)) {
+    fs.rmSync(backupDir, { recursive: true, force: true });
+  }
+  fs.renameSync(apiDir, backupDir);
+  movedApiDir = true;
 }
 
 try {
@@ -28,8 +37,10 @@ try {
   });
   console.log('[export-static] Export complete at apps/web/out');
 } finally {
-  if (savedRouteContent !== null) {
-    fs.mkdirSync(path.dirname(routeFile), { recursive: true });
-    fs.writeFileSync(routeFile, savedRouteContent, 'utf8');
+  if (movedApiDir && fs.existsSync(backupDir)) {
+    if (fs.existsSync(apiDir)) {
+      fs.rmSync(apiDir, { recursive: true, force: true });
+    }
+    fs.renameSync(backupDir, apiDir);
   }
 }

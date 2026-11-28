@@ -291,6 +291,27 @@ export default function GlobalSmartCommand({
             </div>
 
             <div className="max-h-[65vh] overflow-y-auto p-3 space-y-4">
+              {query.trim().length > 0 && !isUrlQuery && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const q = query.trim();
+                    setOpen(false);
+                    router.push(`/ai?prompt=${encodeURIComponent(q)}`);
+                  }}
+                  className="w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 bg-brand/10 border border-brand/25 text-content hover:bg-brand/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Sparkles className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold truncate">Ask MUXARO AI: {query.trim()}</div>
+                      <div className="text-[11px] text-content-secondary">Open AI Studio with autonomous tools &amp; Python sandbox</div>
+                    </div>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-brand shrink-0" aria-hidden="true" />
+                </button>
+              )}
+
               {smartActions.length > 0 && (
                 <div className="space-y-1.5">
                   <div className="px-2 flex items-center justify-between text-[11px] font-semibold text-content-secondary">

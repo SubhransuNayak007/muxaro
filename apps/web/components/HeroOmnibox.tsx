@@ -13,6 +13,7 @@ import {
   Film,
   Music,
   Minimize2,
+  Sparkles,
 } from 'lucide-react';
 
 export type SupportedPlatform =
@@ -40,7 +41,7 @@ export type SmartPreset =
   | 'mp3'
   | 'lossless';
 
-export type DownloadIntentMode = 'video' | 'audio' | 'compact';
+export type DownloadIntentMode = 'video' | 'audio' | 'compact' | 'ai';
 
 export interface PlatformConfig {
   id: NonNullable<SupportedPlatform>;
@@ -145,12 +146,14 @@ const MODE_PRESET_MAP: Record<DownloadIntentMode, SmartPreset> = {
   video: '4k',
   audio: 'audio',
   compact: '720p',
+  ai: 'best',
 };
 
 const INTENT_MODES = [
-  { id: 'video', label: 'Best Video', icon: Film },
+  { id: 'video', label: 'Video', icon: Film },
   { id: 'audio', label: 'Audio', icon: Music },
   { id: 'compact', label: 'Compact', icon: Minimize2 },
+  { id: 'ai', label: 'Ask AI', icon: Sparkles },
 ] as const;
 
 export default function HeroOmnibox({
@@ -263,12 +266,20 @@ export default function HeroOmnibox({
     e.preventDefault();
     const trimmed = url.trim();
     if (!trimmed) {
+      if (mode === 'ai') {
+        onSubmit('', activePreset);
+        return;
+      }
       inputRef.current?.focus();
       return;
     }
     const looksLikeUrl =
       /^https?:\/\//i.test(trimmed) ||
       (/^[a-z0-9-]+(\.[a-z0-9-]+)+([/:?#].*)?$/i.test(trimmed) && !/\s/.test(trimmed));
+    if (mode === 'ai' || (!looksLikeUrl && /\s/.test(trimmed))) {
+      onSubmit(trimmed, activePreset);
+      return;
+    }
     if (!looksLikeUrl && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('muxaro:open-command', { detail: { query: trimmed } }));
       return;
@@ -309,7 +320,11 @@ export default function HeroOmnibox({
             onFocus={() => onFocusChange?.(true)}
             onBlur={() => onFocusChange?.(false)}
             placeholder={
-              isMobileWidth ? 'Paste link or drop any file…' : 'Paste video link or drop MP4, PDF, MP3, DOCX…'
+              mode === 'ai'
+                ? 'Ask anything, summarize files, or write Python…'
+                : isMobileWidth
+                  ? 'Paste link, ask AI, or drop file…'
+                  : 'Paste video URL, ask MUXARO AI, or drop PDF / MP4…'
             }
             aria-label="Media link or file input"
             className="flex-1 min-w-0 bg-transparent border-0 text-content placeholder:text-content-secondary placeholder:truncate truncate text-sm font-sans focus:outline-none focus:ring-0 px-1.5 py-1.5 select-text"

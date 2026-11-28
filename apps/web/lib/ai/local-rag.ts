@@ -1,5 +1,6 @@
 import type { CitationRef, DocumentLayoutIR, RagChunk, RagSpaceIndex } from './types';
 import { embedTextsOffline } from './semantic-router';
+import { computeReciprocalRankFusion } from './v3/rrf';
 
 const STOP_WORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
@@ -32,7 +33,10 @@ function buildChunksFromLayout(ir: DocumentLayoutIR): RagChunk[] {
       bufferRects = [];
       return;
     }
-    const terms = tokenizeForRag(`${bufferSection} ${clean}`);
+    // Anthropic Contextual Retrieval deterministic structural header
+    const contextualHeader = `[Doc: ${ir.fileName} | Section: ${bufferSection} | Page: ${bufferPage} of ${ir.pageCount}]`;
+    const contextualText = `${contextualHeader}\n${clean}`;
+    const terms = tokenizeForRag(`${ir.fileName} ${bufferSection} ${clean}`);
     const termFreq: Record<string, number> = {};
     for (const t of terms) {
       termFreq[t] = (termFreq[t] || 0) + 1;
@@ -43,7 +47,7 @@ function buildChunksFromLayout(ir: DocumentLayoutIR): RagChunk[] {
       fileName: ir.fileName,
       pageNumber: bufferPage,
       sectionTitle: bufferSection,
-      text: clean,
+      text: contextualText,
       rects: bufferRects.slice(0, 12),
       terms,
       termFreq,
@@ -230,33 +234,59 @@ export function queryRagSpace(
 }
 
 /**
- * Semantic + BM25 Hybrid Fusion: boosts BM25 candidates using cosine vector similarity
- * when `all-MiniLM-L6-v2` (q8 ONNX) is cached on-device, falling back seamlessly to BM25.
+ * Semantic + BM25 Hybrid Fusion via Reciprocal Rank Fusion (RRF, k=60)
+ * paired with contextual section/phrase proximity reranking.
  */
 export async function queryRagSpaceHybrid(
   index: RagSpaceIndex,
   query: string,
   topK = 6
 ): Promise<CitationRef[]> {
-  const bm25Pool = queryRagSpace(index, query, Math.max(topK * 2, 12));
+  const poolSize = Math.max(topK * 4, 24);
+  const bm25Pool = queryRagSpace(index, query, poolSize);
   if (bm25Pool.length <= 1 || !query.trim()) return bm25Pool.slice(0, topK);
 
-  const vecs = await embedTextsOffline([query, ...bm25Pool.map((c) => `${c.sectionTitle}: ${c.snippet}`)]);
+  const vecs = await embedTextsOffline([
+    query,
+    ...bm25Pool.map((c) => `[${c.fileName} · ${c.sectionTitle}] ${c.snippet}`),
+  ]);
   if (!vecs || vecs.length < 2) return bm25Pool.slice(0, topK);
 
   const qVec = vecs[0];
-  const rescored = bm25Pool.map((cit, i) => {
-    const cVec = vecs[i + 1];
-    let cos = 0;
-    for (let d = 0; d < Math.min(qVec.length, cVec.length); d += 1) {
-      cos += qVec[d] * cVec[d];
-    }
-    const fused = cit.score + Math.max(0, cos) * 4.5;
-    return { ...cit, score: Math.round(fused * 100) / 100 };
-  });
+  const vecRanked = bm25Pool
+    .map((cit, i) => {
+      const cVec = vecs[i + 1];
+      let cos = 0;
+      for (let d = 0; d < Math.min(qVec.length, cVec.length); d += 1) {
+        cos += qVec[d] * cVec[d];
+      }
+      return { cit, cos };
+    })
+    .sort((a, b) => b.cos - a.cos)
+    .map((x) => x.cit);
 
-  rescored.sort((a, b) => b.score - a.score);
-  return rescored.slice(0, topK);
+  const qTerms = tokenizeForRag(query);
+  const fused = computeReciprocalRankFusion(
+    [
+      { weight: 1.0, items: bm25Pool },
+      { weight: 1.15, items: vecRanked },
+    ],
+    60
+  );
+
+  // Lightweight lexical overlap + RRF proximity reranker on top candidates
+  return fused
+    .map(({ item, rrfScore }) => {
+      const low = item.snippet.toLowerCase();
+      const termCoverage =
+        qTerms.length > 0
+          ? qTerms.reduce((acc, qt) => acc + (low.includes(qt) ? 1 : 0), 0) / qTerms.length
+          : 0;
+      const finalScore = Math.round((rrfScore * 100 + termCoverage * 1.4) * 100) / 100;
+      return { ...item, score: finalScore };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
 }
 
 /**

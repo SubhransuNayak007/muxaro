@@ -10,6 +10,7 @@ import { ALL_STUDIO_TOOLS } from '@/lib/tools-catalog';
 
 const NAV_LINKS = [
   { href: '/', label: 'Studio' },
+  { href: '/ai', label: 'AI Studio' },
   { href: '/tools', label: 'All tools' },
   { href: '/tools/pdf', label: 'PDF' },
   { href: '/downloads', label: 'Downloads' },

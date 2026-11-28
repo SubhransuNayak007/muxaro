@@ -1,11 +1,9 @@
 import React from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { ArrowUpRight } from 'lucide-react';
 import HomeWorkspace from '@/components/HomeWorkspace';
-import StudioShowcase from '@/components/StudioShowcase';
 import SuiteIndexLedger from '@/components/SuiteIndexLedger';
-import HomeToolsDirectory from '@/components/HomeToolsDirectory';
-import AudioRoadmapBand from '@/components/AudioRoadmapBand';
 import {
   constructMetadata,
   buildToolSoftwareAppJsonLd,
@@ -15,34 +13,42 @@ import {
 import { ALL_STUDIO_TOOLS, CREATOR_TOOLS_CATALOG, PDF_TOOLS_CATALOG } from '@/lib/tools-catalog';
 
 export const metadata: Metadata = constructMetadata({
-  title: 'MUXARO — All-in-One Video, PDF & Media Studio',
+  title: 'MUXARO — Media, PDF & Local AI Studio',
   description:
-    'Process video up to 8K, compress to exact Discord 10 MB or WhatsApp 16 MB targets, edit and OCR 38 PDF workflows locally in your browser, and extract lossless audio.',
+    'Process video up to 8K, edit 38 PDF workflows locally in your browser, and run an autonomous AI assistant with Python code execution and WebGPU privacy.',
   path: '/',
   keywords: [
     'all in one video tools',
     'private browser pdf tools',
+    'local ai assistant webgpu',
     'video downloader 8k',
     'discord 10mb video compressor',
     'lossless video trimmer browser',
-    'audio loudness normalizer -14 lufs',
     'ocr searchable pdf',
-    'media converter 105 formats',
   ],
 });
 
+const QUICK_LAUNCHERS = [
+  { href: '/ai', title: 'AI Assistant', note: 'Chat, Python, Web Research' },
+  { href: '/tools/video-compressor', title: 'Compress Video', note: '10 MB & 16 MB presets' },
+  { href: '/tools/video-trimmer', title: 'Trim Video', note: 'Instant stream-copy cuts' },
+  { href: '/tools/pdf/merge', title: 'Merge PDF', note: 'Zero-upload combine' },
+  { href: '/tools/pdf/compress', title: 'Compress PDF', note: 'Lossless QPDF shrink' },
+  { href: '/tools/pdf/ocr', title: 'OCR PDF', note: 'Searchable local text' },
+] as const;
+
 const HOME_STEPS = [
   {
-    name: 'Paste a URL or drop any file',
-    text: 'Enter any supported video link up to 8K or drop MP4, MKV, MP3, PDF, DOCX, or PPTX files.',
+    name: 'Paste a URL, question, or file',
+    text: 'Enter a media link up to 8K, ask MUXARO AI, or drop MP4, MP3, PDF, or DOCX files.',
   },
   {
     name: 'Run locally in your browser',
-    text: 'All 38 PDF tools and Tier-1 video/audio utilities execute directly in WebAssembly with zero server upload.',
+    text: 'All 38 PDF tools, Pyodide Python analysis, and local WebGPU inference stay private in your browser.',
   },
   {
-    name: 'Chain outputs cleanly',
-    text: 'Pass finished artifacts directly into compression, trimming, OCR, signing, or encryption without re-uploading.',
+    name: 'Save or continue cleanly',
+    text: 'Download results directly or pass outputs into the AI Studio or another tool.',
   },
 ];
 
@@ -50,49 +56,38 @@ const HOME_FAQS = [
   {
     question: 'Which tools run 100% locally in my browser?',
     answer:
-      'All 38 PDF Studio tools (merge, split, compress, edit, sign, OCR, PKCS#7 verify, AES-256 protect) and Tier-1 video/audio tools (lossless trimmer, frame grabber, subtitle shifter, metadata scrubber, and remuxer) run inside your browser with zero server uploads.',
+      'All 38 PDF Studio tools, Pyodide Python analysis, local WebGPU inference, and Tier-1 video/audio utilities execute in-browser with zero file uploads.',
   },
   {
-    question: 'Are there any daily credits, paywalls, or ads?',
+    question: 'How does MUXARO AI work on the website?',
     answer:
-      'No. Credits have been removed completely. Browser-local tools run without limits, and Cloud FFmpeg worker tasks run with zero display ads or sign-in walls.',
-  },
-  {
-    question: 'How long are temporary Cloud worker files kept?',
-    answer:
-      'Media processed by Cloud FFmpeg workers stays isolated only long enough for downloads and zero-reupload chaining, then is automatically deleted within 60 minutes.',
-  },
-  {
-    question: 'What is coming in the Audio Studio suite?',
-    answer:
-      'The upcoming Audio Studio expands MUXARO beyond Audio Extractor and Loudness Normalizer with local stem separation, voice de-noise, waveform silence trimming, and podcast mastering.',
+      'MUXARO AI supports local browser WebGPU models, Pyodide code execution, your own API keys (Gemini, OpenAI, Anthropic, OpenRouter, Groq), or Desktop Ollama.',
   },
 ];
 
 export default function HomePage() {
   const webAppJsonLd = buildToolSoftwareAppJsonLd({
-    name: 'MUXARO All-in-One Media & PDF Studio',
+    name: 'MUXARO Media, PDF & Local AI Studio',
     description:
-      '52 integrated browser-local and Cloud FFmpeg tools across Video Studio, PDF Studio, Stream Downloader, and Audio workflows.',
+      '52 browser-local PDF and media tools paired with an autonomous ReAct AI assistant and 8K stream downloader.',
     path: '/',
     features: [
-      '8K and 4K stream downloading with video, audio, and compact modes',
-      '14 Video & Audio Studio tools including 10 MB compression, lossless trim, and 9:16 smart pad',
-      '38 browser-local PDF tools including QPDF compression, OCR, signing, and PKCS#7 verification',
-      'Zero credits, zero sign-up, and zero third-party ads',
+      'Autonomous AI Studio with ReAct tool loops, Pyodide sandbox, and WebGPU privacy',
+      '8K and 4K stream downloading with video, audio, and compact presets',
+      '14 Video & Audio Studio tools and 38 browser-local PDF utilities',
     ],
   });
 
   const howToJsonLd = buildHowToJsonLd({
-    name: 'How to Process Video, Audio, and PDFs with MUXARO',
-    description: 'Paste a link or drop any supported file, pick a workflow, and save your output.',
+    name: 'How to use MUXARO',
+    description: 'Paste a link, drop a file, or ask AI in one calm workspace.',
     path: '/',
     steps: HOME_STEPS,
   });
 
   const faqJsonLd = buildFaqJsonLd(HOME_FAQS, {
     path: '/',
-    name: 'MUXARO Frequently Asked Questions',
+    name: 'MUXARO Questions',
   });
 
   return (
@@ -110,43 +105,42 @@ export default function HomePage() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
 
-      {/* Fold-Locked Clean Liquid-Glass Hero */}
-      <section className="w-full pt-10 pb-12 sm:pt-14 sm:pb-16">
+      {/* Minimal Above-the-Fold Hero */}
+      <section className="w-full pt-12 pb-14 sm:pt-20 sm:pb-20">
         <div className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-7">
-            <h1 className="text-4xl sm:text-5xl lg:text-[3.5rem] font-display font-medium text-content tracking-[-0.025em] leading-[1.06] mb-3 break-words">
-              Every media and PDF tool.
+          <div className="text-center max-w-xl mx-auto mb-8">
+            <h1 className="text-4xl sm:text-5xl font-display font-medium text-content tracking-[-0.025em] leading-[1.08] mb-3 break-words">
+              Media, PDFs, and local AI.
             </h1>
             <p className="text-sm sm:text-base text-content-secondary leading-relaxed">
-              Grab 8K streams, trim or compress video, and run {PDF_TOOLS_CATALOG.length} local PDF tools in your browser.
+              Save 8K video, edit PDFs privately, or ask AI directly.
             </p>
           </div>
 
           <HomeWorkspace />
 
-          {/* Clean Suite Strip */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs">
             <Link
+              href="/ai"
+              className="px-3.5 py-1.5 rounded-full border border-brand/30 bg-brand/10 text-brand font-semibold hover:bg-brand/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              AI Studio
+            </Link>
+            <Link
               href="/tools?section=video"
-              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content font-medium"
+              className="px-3.5 py-1.5 rounded-full border border-line bg-surface text-content font-medium hover:border-line-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               Video ({CREATOR_TOOLS_CATALOG.length})
             </Link>
             <Link
               href="/tools/pdf"
-              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content font-medium"
+              className="px-3.5 py-1.5 rounded-full border border-line bg-surface text-content font-medium hover:border-line-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               PDF ({PDF_TOOLS_CATALOG.length})
             </Link>
             <Link
-              href="/tools?section=audio"
-              className="liquid-glass spring-bounce px-3.5 py-1.5 rounded-full text-content-secondary hover:text-content font-medium"
-            >
-              Audio (Next)
-            </Link>
-            <Link
               href="/tools"
-              className="spring-bounce px-3.5 py-1.5 rounded-full border border-brand/30 bg-brand/10 text-brand font-semibold hover:bg-brand/15"
+              className="px-3.5 py-1.5 rounded-full border border-line bg-surface text-content-secondary hover:text-content transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               All {ALL_STUDIO_TOOLS.length} tools
             </Link>
@@ -154,33 +148,49 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Interactive Workbench Console */}
-      <StudioShowcase />
-
-      {/* Four-Suite Architectural Ledger */}
+      {/* Clean 3-Row Suite Overview */}
       <SuiteIndexLedger />
 
-      {/* Searchable Launcher Directory + Local vs Cloud Spec Table */}
-      <HomeToolsDirectory />
+      {/* Minimal 6-Tile Quick Launcher */}
+      <section
+        className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-12 border-t border-line"
+        aria-labelledby="quick-tools-heading"
+      >
+        <div className="flex items-baseline justify-between gap-4 mb-6">
+          <h2
+            id="quick-tools-heading"
+            className="text-2xl sm:text-3xl font-display font-medium text-content tracking-[-0.02em]"
+          >
+            Quick tools
+          </h2>
+          <Link
+            href="/tools"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus rounded"
+          >
+            <span>All {ALL_STUDIO_TOOLS.length} tools</span>
+            <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
+          </Link>
+        </div>
 
-      {/* Upcoming Audio Suite Preview Band */}
-      <AudioRoadmapBand />
-
-      {/* Concise Factual FAQ */}
-      <section className="max-w-sheet mx-auto px-4 sm:px-6 lg:px-8 py-16 border-t border-line">
-        <h2 className="text-3xl sm:text-4xl font-display font-medium text-content tracking-[-0.02em] mb-8">
-          Questions
-        </h2>
-        <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">
-          {HOME_FAQS.map((item) => (
-            <div key={item.question} className="pb-5 border-b border-line-subtle">
-              <dt className="text-sm font-semibold text-content">{item.question}</dt>
-              <dd className="text-xs sm:text-sm text-content-secondary leading-relaxed mt-1.5">
-                {item.answer}
-              </dd>
-            </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {QUICK_LAUNCHERS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="p-4 rounded-xl border border-line bg-surface hover:border-line-hover transition-colors flex items-center justify-between gap-3 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-content group-hover:text-brand truncate">
+                  {item.title}
+                </div>
+                <div className="text-xs text-content-secondary truncate mt-0.5">
+                  {item.note}
+                </div>
+              </div>
+              <ArrowUpRight className="w-4 h-4 text-content-tertiary group-hover:text-brand shrink-0" aria-hidden="true" />
+            </Link>
           ))}
-        </dl>
+        </div>
       </section>
     </div>
   );

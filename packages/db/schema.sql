@@ -142,6 +142,22 @@ CREATE INDEX IF NOT EXISTS idx_service_incidents_active ON service_incidents(ser
 CREATE INDEX IF NOT EXISTS idx_service_incidents_severity ON service_incidents(severity, created_at DESC);
 
 -- =============================================================================
+-- 6. AI RESEARCH JOBS (Background Deep Research & Grounded Source Gathering)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS ai_research_jobs (
+    id VARCHAR(64) PRIMARY KEY,
+    query TEXT NOT NULL,
+    status VARCHAR(24) NOT NULL DEFAULT 'running',
+    sources_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    report_md TEXT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_research_jobs_status ON ai_research_jobs(status, created_at DESC);
+
+-- =============================================================================
 -- AUTOMATIC TIMESTAMP TRIGGER
 -- =============================================================================
 

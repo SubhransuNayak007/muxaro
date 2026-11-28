@@ -41,6 +41,8 @@
     "src/routes/downloads.ts",
     "src/routes/status.ts",
     "src/routes/usage.ts",
+    "src/routes/ai.ts",
+    "src/types/**/*.d.ts",
     "src/lib/**/*",
     "tests/v1-api.test.ts"
   ]

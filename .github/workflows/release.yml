@@ -74,8 +74,13 @@ jobs:
 
       - name: Install dependencies across build targets
         run: |
+          corepack enable && corepack prepare pnpm@10 --activate
           npm --prefix apps/web ci --no-audit --no-fund
-          npm --prefix apps/api ci --no-audit --no-fund
+          npm --prefix packages/shared install --no-audit --no-fund
+          npm --prefix packages/shared run build
+          pnpm --dir packages/db install --no-frozen-lockfile --shamefully-hoist
+          pnpm --dir packages/db run build
+          pnpm --dir apps/api install --no-frozen-lockfile --shamefully-hoist
           npm --prefix apps/media-worker install --no-audit --no-fund
           npm --prefix packages/entitlements ci --no-audit --no-fund
           npm --prefix packages/source-adapters install --no-audit --no-fund
@@ -87,7 +92,7 @@ jobs:
         run: |
           npm --prefix packages/entitlements run typecheck
           npm --prefix packages/source-adapters run typecheck
-          npm --prefix apps/api run typecheck
+          pnpm --dir apps/api run typecheck
           npm --prefix apps/media-worker run build
           (cd apps/web && npm run lint && npx next build)
 

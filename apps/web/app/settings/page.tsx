@@ -13,6 +13,11 @@ import {
   RotateCcw,
   Trash2,
   ArrowLeft,
+  Sparkles,
+  Cpu,
+  KeyRound,
+  Brain,
+  Plug,
 } from 'lucide-react';
 import {
   useMuxaroSettings,
@@ -25,8 +30,35 @@ import {
   getAutoDownloadPreference,
   setAutoDownloadPreference,
 } from '@/lib/background-download';
+import {
+  clearAllLearnedSkills,
+  clearAllMemoryRules,
+  DEFAULT_AI_V3_SETTINGS,
+  deleteLearnedSkill,
+  deleteMemoryRule,
+  discoverMcpToolsWithPinning,
+  ensureWebGpuEngine,
+  hasClientByokKeySync,
+  listLearnedSkills,
+  listMemoryRules,
+  loadAiV3Settings,
+  probeWebGpuAvailability,
+  PROVIDER_DEFAULT_MODELS,
+  purgeWebGpuCache,
+  saveAiV3Settings,
+  saveClientByokKey,
+  toggleMemoryRule,
+  WEBGPU_RECOMMENDED_MODELS,
+  type AiProviderId,
+  type AiRuntimePreference,
+  type EpisodicMemoryRule,
+  type KeyPersistenceMode,
+  type LearnedSkillRecipe,
+  type MuxaroAiV3Settings,
+  type WebGpuAvailability,
+} from '@/lib/ai';
 
-type SettingsTab = 'appearance' | 'downloads' | 'worker';
+type SettingsTab = 'appearance' | 'downloads' | 'ai' | 'worker';
 
 export default function SettingsPage() {
   const { settings, mounted, updateSettings, resetSettings } = useMuxaroSettings();
@@ -41,14 +73,37 @@ export default function SettingsPage() {
   const [saveWorkerFeedback, setSaveWorkerFeedback] = useState<boolean>(false);
   const [clearedDataFeedback, setClearedDataFeedback] = useState<boolean>(false);
 
+  // AI & Memory v3 state
+  const [aiSettings, setAiSettings] = useState<MuxaroAiV3Settings>(DEFAULT_AI_V3_SETTINGS);
+  const [byokInput, setByokInput] = useState<string>('');
+  const [hasStoredKey, setHasStoredKey] = useState<boolean>(false);
+  const [aiSavedNote, setAiSavedNote] = useState<string | null>(null);
+  const [webgpuInfo, setWebgpuInfo] = useState<WebGpuAvailability | null>(null);
+  const [webgpuLoadStatus, setWebgpuLoadStatus] = useState<string | null>(null);
+  const [memoryRules, setMemoryRules] = useState<EpisodicMemoryRule[]>([]);
+  const [learnedSkills, setLearnedSkills] = useState<LearnedSkillRecipe[]>([]);
+  const [mcpNameInput, setMcpNameInput] = useState<string>('');
+  const [mcpUrlInput, setMcpUrlInput] = useState<string>('');
+  const [mcpStatus, setMcpStatus] = useState<string | null>(null);
+
+  const reloadAiPanels = () => {
+    setAiSettings(loadAiV3Settings());
+    setHasStoredKey(hasClientByokKeySync());
+    setMemoryRules(listMemoryRules());
+    setLearnedSkills(listLearnedSkills());
+    void probeWebGpuAvailability().then(setWebgpuInfo).catch(() => {});
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = window.localStorage.getItem('muxaro-auto-download');
       setAutoDownload(stored === null ? true : getAutoDownloadPreference());
+      reloadAiPanels();
 
       const params = new URLSearchParams(window.location.search);
       const tab = params.get('tab');
       if (tab === 'downloads' || tab === 'video' || tab === 'audio') setActiveTab('downloads');
+      else if (tab === 'ai' || tab === 'memory' || tab === 'models') setActiveTab('ai');
       else if (tab === 'worker' || tab === 'instances') setActiveTab('worker');
     }
   }, []);
@@ -115,6 +170,7 @@ export default function SettingsPage() {
   const tabs: { id: SettingsTab; label: string; Icon: React.ElementType }[] = [
     { id: 'appearance', label: 'Appearance', Icon: Sun },
     { id: 'downloads', label: 'Download Defaults', Icon: Download },
+    { id: 'ai', label: 'AI & Memory', Icon: Sparkles },
     { id: 'worker', label: 'Worker & Data', Icon: Server },
   ];
 
@@ -329,7 +385,447 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Tab 3: Worker & Data */}
+        {/* Tab 3: AI & Memory (WebGPU, BYOK, Voyager Skills, Dreaming Memory & MCP) */}
+        {activeTab === 'ai' && (
+          <div className="space-y-6">
+            {/* Engine Mode & BYOK Keys */}
+            <div className="muxaro-card p-6 space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-content flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-brand" aria-hidden="true" />
+                    <span>Inference Engine &amp; API Key (BYOK)</span>
+                  </h2>
+                  <p className="text-xs text-content-secondary mt-1">
+                    Choose free local Browser WebGPU, Desktop Ollama, or your own API key streamed over SSE. Keys are never logged on our servers.
+                  </p>
+                </div>
+                {hasStoredKey && (
+                  <span className="px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                    Key active ({aiSettings.provider})
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-content-secondary mb-1.5">
+                    Runtime Priority
+                  </label>
+                  <select
+                    value={aiSettings.runtimePreference}
+                    onChange={(e) => {
+                      const next = {
+                        ...aiSettings,
+                        runtimePreference: e.target.value as AiRuntimePreference,
+                      };
+                      setAiSettings(next);
+                      saveAiV3Settings(next);
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-line bg-base text-xs font-medium text-content"
+                  >
+                    <option value="auto">Auto Smart Routing</option>
+                    <option value="webgpu-local">WebGPU Local (Free On-Device)</option>
+                    <option value="byok-cloud">Cloud BYOK (Frontier Models)</option>
+                    <option value="desktop-ollama">Desktop Ollama / LM Studio</option>
+                    <option value="tier0-offline">Deterministic Tier-0 Only</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-content-secondary mb-1.5">
+                    Cloud Provider
+                  </label>
+                  <select
+                    value={aiSettings.provider}
+                    onChange={(e) => {
+                      const prov = e.target.value as AiProviderId;
+                      const next = {
+                        ...aiSettings,
+                        provider: prov,
+                        model: PROVIDER_DEFAULT_MODELS[prov][0],
+                      };
+                      setAiSettings(next);
+                      saveAiV3Settings(next);
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-line bg-base text-xs font-medium text-content"
+                  >
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openai">OpenAI (GPT / o3-mini)</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="groq">Groq</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-content-secondary mb-1.5">
+                    Model ID
+                  </label>
+                  <input
+                    type="text"
+                    value={aiSettings.model}
+                    onChange={(e) => {
+                      const next = { ...aiSettings, model: e.target.value };
+                      setAiSettings(next);
+                      saveAiV3Settings(next);
+                    }}
+                    placeholder={PROVIDER_DEFAULT_MODELS[aiSettings.provider][0]}
+                    className="w-full px-3 py-2.5 rounded-xl border border-line bg-base text-xs font-mono text-content"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-content-secondary mb-1.5">
+                    API Key (Optional · Overrides server fallback)
+                  </label>
+                  <input
+                    type="password"
+                    value={byokInput}
+                    onChange={(e) => setByokInput(e.target.value)}
+                    placeholder={hasStoredKey ? 'Saved key active — enter new key to replace' : 'Paste Gemini / OpenAI / Anthropic / Groq key'}
+                    className="w-full px-3 py-2.5 rounded-xl border border-line bg-base text-xs font-mono text-content"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-content-secondary mb-1.5">
+                    Key Storage
+                  </label>
+                  <select
+                    value={aiSettings.keyPersistence}
+                    onChange={(e) => {
+                      const next = {
+                        ...aiSettings,
+                        keyPersistence: e.target.value as KeyPersistenceMode,
+                      };
+                      setAiSettings(next);
+                      saveAiV3Settings(next);
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border border-line bg-base text-xs font-medium text-content"
+                  >
+                    <option value="session">This tab session only</option>
+                    <option value="device-encrypted">Encrypted local device (AES-GCM)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await saveClientByokKey(aiSettings.provider, byokInput, aiSettings.keyPersistence);
+                    setByokInput('');
+                    setHasStoredKey(hasClientByokKeySync());
+                    setAiSavedNote('AI key preferences updated cleanly.');
+                    setTimeout(() => setAiSavedNote(null), 2200);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-brand text-brand-fg text-xs font-semibold hover:bg-brand-hover"
+                >
+                  Save API Key
+                </button>
+                {hasStoredKey && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await saveClientByokKey(aiSettings.provider, '', 'session');
+                      setHasStoredKey(false);
+                      setAiSavedNote('Cleared API key from device.');
+                      setTimeout(() => setAiSavedNote(null), 2200);
+                    }}
+                    className="px-3.5 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content-secondary hover:text-error"
+                  >
+                    Remove Key
+                  </button>
+                )}
+                {aiSavedNote && <span className="text-xs text-emerald-600 dark:text-emerald-400">{aiSavedNote}</span>}
+              </div>
+            </div>
+
+            {/* Browser WebGPU Local SLM */}
+            <div className="muxaro-card p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-content flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-brand" aria-hidden="true" />
+                    <span>Browser WebGPU Local Models</span>
+                  </h2>
+                  <p className="text-xs text-content-secondary mt-1">
+                    {webgpuInfo?.supported
+                      ? `WebGPU ready (${webgpuInfo.adapterDescription || 'GPU Adapter'}). Runs private quantized models inside your browser.`
+                      : webgpuInfo?.reason || 'Checking browser WebGPU support…'}
+                  </p>
+                </div>
+                {webgpuInfo && webgpuInfo.cachedModels.length > 0 && (
+                  <span className="px-2.5 py-1 rounded-full bg-surface-elevated border border-line text-[11px] font-mono text-content">
+                    Cached locally
+                  </span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {WEBGPU_RECOMMENDED_MODELS.map((m) => {
+                  const selected = aiSettings.webgpuModelId === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => {
+                        const next = { ...aiSettings, webgpuModelId: m.id };
+                        setAiSettings(next);
+                        saveAiV3Settings(next);
+                      }}
+                      className={`p-3 rounded-xl border text-left space-y-1 transition-colors ${
+                        selected
+                          ? 'border-brand bg-brand/8'
+                          : 'border-line bg-base hover:border-line-hover'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold text-content">{m.label}</div>
+                      <div className="text-[11px] text-content-secondary leading-snug">{m.notes}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!webgpuInfo?.supported}
+                  onClick={async () => {
+                    setWebgpuLoadStatus('Starting WebGPU weight download…');
+                    try {
+                      await ensureWebGpuEngine(aiSettings.webgpuModelId, (p) =>
+                        setWebgpuLoadStatus(`${p.progressPct}% — ${p.text}`)
+                      );
+                      setWebgpuLoadStatus('WebGPU model loaded and ready in browser.');
+                      reloadAiPanels();
+                    } catch (err) {
+                      setWebgpuLoadStatus(err instanceof Error ? err.message : 'WebGPU load failed.');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-content text-base text-xs font-semibold disabled:opacity-45"
+                >
+                  Download &amp; Warm Selected Model
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await purgeWebGpuCache();
+                    setWebgpuLoadStatus('Cleared WebGPU model cache from browser storage.');
+                    reloadAiPanels();
+                  }}
+                  className="px-3.5 py-2 rounded-xl border border-line bg-surface-elevated text-xs font-medium text-content-secondary hover:text-content"
+                >
+                  Purge WebGPU Cache
+                </button>
+                {webgpuLoadStatus && <span className="text-xs text-content-secondary">{webgpuLoadStatus}</span>}
+              </div>
+            </div>
+
+            {/* Dreaming Memory & Voyager Skills */}
+            <div className="muxaro-card p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-bold text-content flex items-center gap-2">
+                    <Brain className="w-4 h-4 text-brand" aria-hidden="true" />
+                    <span>Learned Skills &amp; Dreaming Memory</span>
+                  </h2>
+                  <p className="text-xs text-content-secondary mt-1">
+                    Verified reusable workflows and preferences stored privately on this device. Inspect or delete anything anytime.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearAllMemoryRules();
+                      clearAllLearnedSkills();
+                      reloadAiPanels();
+                    }}
+                    className="px-3 py-1.5 rounded-xl border border-line text-xs font-medium text-content-secondary hover:text-error"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-content">
+                    Memory Rules ({memoryRules.length})
+                  </div>
+                  {memoryRules.length === 0 ? (
+                    <p className="text-xs text-content-secondary p-3 rounded-xl border border-line bg-base">
+                      No episodic preferences learned yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {memoryRules.map((rule) => (
+                        <div
+                          key={rule.id}
+                          className="p-2.5 rounded-xl border border-line bg-base flex items-center justify-between gap-2 text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              toggleMemoryRule(rule.id);
+                              reloadAiPanels();
+                            }}
+                            className={`flex-1 text-left truncate ${rule.enabled ? 'text-content' : 'line-through text-content-tertiary'}`}
+                          >
+                            {rule.ruleText}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteMemoryRule(rule.id);
+                              reloadAiPanels();
+                            }}
+                            aria-label="Delete rule"
+                            className="p-1 text-content-tertiary hover:text-error"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-content">
+                    Verified Skill Library ({learnedSkills.length})
+                  </div>
+                  {learnedSkills.length === 0 ? (
+                    <p className="text-xs text-content-secondary p-3 rounded-xl border border-line bg-base">
+                      No verified multi-step skills saved yet.
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {learnedSkills.map((sk) => (
+                        <div
+                          key={sk.id}
+                          className="p-2.5 rounded-xl border border-line bg-base flex items-center justify-between gap-2 text-xs"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-medium text-content truncate">{sk.intentSummary}</div>
+                            <div className="text-[11px] text-content-secondary">
+                              {sk.domain} · {sk.verifiedPassCount} pass / {sk.failCount} fail
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteLearnedSkill(sk.id);
+                              reloadAiPanels();
+                            }}
+                            aria-label="Delete skill"
+                            className="p-1 text-content-tertiary hover:text-error"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* External MCP Servers (Spec 2026-07-28) */}
+            <div className="muxaro-card p-6 space-y-4">
+              <div>
+                <h2 className="text-base font-bold text-content flex items-center gap-2">
+                  <Plug className="w-4 h-4 text-brand" aria-hidden="true" />
+                  <span>External MCP Servers (Schema-Pinned)</span>
+                </h2>
+                <p className="text-xs text-content-secondary mt-1">
+                  Connect Streamable HTTP MCP endpoints via SSRF-guarded relay with SHA-256 rug-pull detection.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={mcpNameInput}
+                  onChange={(e) => setMcpNameInput(e.target.value)}
+                  placeholder="Server label (e.g. Docs)"
+                  className="px-3 py-2 rounded-xl border border-line bg-base text-xs text-content sm:w-44"
+                />
+                <input
+                  type="url"
+                  value={mcpUrlInput}
+                  onChange={(e) => setMcpUrlInput(e.target.value)}
+                  placeholder="https://your-mcp-server.example/mcp"
+                  className="flex-1 px-3 py-2 rounded-xl border border-line bg-base text-xs font-mono text-content"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const url = mcpUrlInput.trim();
+                    const name = mcpNameInput.trim() || 'MCP Server';
+                    if (!url) return;
+                    setMcpStatus('Inspecting & pinning tool schemas…');
+                    try {
+                      const res = await discoverMcpToolsWithPinning(url, {});
+                      const entry = {
+                        id: `mcp-${Date.now()}`,
+                        name,
+                        url,
+                        enabled: true,
+                        pinnedToolHashes: res.updatedPins,
+                      };
+                      const next = { ...aiSettings, mcpServers: [...aiSettings.mcpServers, entry] };
+                      setAiSettings(next);
+                      saveAiV3Settings(next);
+                      setMcpNameInput('');
+                      setMcpUrlInput('');
+                      setMcpStatus(`Pinned ${res.tools.length} tool(s). ${res.rugPullWarnings[0] || ''}`);
+                    } catch (err) {
+                      setMcpStatus(err instanceof Error ? err.message : 'Failed to connect MCP server.');
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-brand text-brand-fg text-xs font-semibold shrink-0"
+                >
+                  Connect &amp; Pin
+                </button>
+              </div>
+              {mcpStatus && <div className="text-xs text-content-secondary">{mcpStatus}</div>}
+              {aiSettings.mcpServers.length > 0 && (
+                <div className="space-y-1.5">
+                  {aiSettings.mcpServers.map((srv) => (
+                    <div
+                      key={srv.id}
+                      className="p-2.5 rounded-xl border border-line bg-base flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-semibold text-content truncate">{srv.name}</div>
+                        <div className="text-[11px] font-mono text-content-secondary truncate">{srv.url}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = {
+                            ...aiSettings,
+                            mcpServers: aiSettings.mcpServers.filter((x) => x.id !== srv.id),
+                          };
+                          setAiSettings(next);
+                          saveAiV3Settings(next);
+                        }}
+                        className="p-1 text-content-tertiary hover:text-error"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Worker & Data */}
         {activeTab === 'worker' && (
           <div className="muxaro-card p-6 space-y-6">
             <div className="space-y-3">
