@@ -59,6 +59,17 @@ function cleanupMultipartSession(uploadId: string): void {
   fsp.rm(session.sessionDir, { recursive: true, force: true }).catch(() => {});
 }
 
+function sanitizePublicErrorMessage(raw: unknown, fallback: string): string {
+  const text = String(raw || '').trim();
+  if (!text) return fallback;
+  if (
+    /\/app\/|[A-Za-z]:\\|\.muxaro-uploads|ffprobe\s+-v|ffmpeg\s+-/i.test(text)
+  ) {
+    return fallback;
+  }
+  return text.slice(0, 260);
+}
+
 function inferExtensionFromContentType(contentType?: string): string {
   const ct = (contentType || '').toLowerCase().split(';')[0].trim();
   const map: Record<string, string> = {
@@ -344,9 +355,9 @@ export const mediaRoutes: FastifyPluginAsync<MediaRoutesOptions> = async (fastif
         success: false,
         error: {
           code,
-          message: err.message || 'Failed to upload and inspect media file',
-          userMessage: mapHumanFriendlyError(code, err.message),
-          details: err.details || null,
+          message: sanitizePublicErrorMessage(err?.message, 'Failed to upload and inspect media file'),
+          userMessage: mapHumanFriendlyError(code, sanitizePublicErrorMessage(err?.message, 'Failed to upload and inspect media file')),
+          details: null,
         },
         requestId,
       });
@@ -545,8 +556,8 @@ export const mediaRoutes: FastifyPluginAsync<MediaRoutesOptions> = async (fastif
         success: false,
         error: {
           code,
-          message: err.message || 'Failed to save upload part',
-          userMessage: mapHumanFriendlyError(code, err.message),
+          message: sanitizePublicErrorMessage(err?.message, 'Failed to save upload part'),
+          userMessage: mapHumanFriendlyError(code, sanitizePublicErrorMessage(err?.message, 'Failed to save upload part')),
         },
         requestId,
       });
@@ -653,8 +664,8 @@ export const mediaRoutes: FastifyPluginAsync<MediaRoutesOptions> = async (fastif
         success: false,
         error: {
           code,
-          message: err.message || 'Failed to complete multipart upload',
-          userMessage: mapHumanFriendlyError(code, err.message),
+          message: sanitizePublicErrorMessage(err?.message, 'Uploaded file is not a valid supported media container or appears corrupted.'),
+          userMessage: mapHumanFriendlyError(code, sanitizePublicErrorMessage(err?.message, 'Uploaded file is not a valid supported media container.')),
         },
         requestId,
       });

@@ -37,6 +37,7 @@ import { toolsRoutes } from './routes/tools.js';
 import { playlistRoutes } from './routes/playlists.js';
 import { batchRoutes } from './routes/batches.js';
 import { tunnelRoutes } from './routes/tunnel.js';
+import { aiRoutes } from './routes/ai.js';
 import { closeQueues } from './lib/queues.js';
 
 export interface ServerOptions {
@@ -104,6 +105,10 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
       'Range',
       'x-muxaro-csrf',
       'X-CSRF-Token',
+      'x-muxaro-byok',
+      'x-muxaro-tavily-key',
+      'x-muxaro-brave-key',
+      'x-muxaro-mcp-auth',
     ],
     exposedHeaders: [
       'RateLimit-Limit',
@@ -259,6 +264,7 @@ export async function buildServer(options: ServerOptions = {}): Promise<FastifyI
     usageRoutes,
     authRoutes,
     accountRoutes,
+    aiRoutes,
   ];
 
   for (const mod of routeModules) {

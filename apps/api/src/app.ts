@@ -239,12 +239,13 @@ export async function buildApp(): Promise<FastifyInstance> {
       }
     }
 
-    // Duplicate mutation flood detection (skip binary part uploads, login, and GAM SSV callbacks)
+    // Duplicate mutation flood detection (skip binary/resumable uploads, login, and GAM SSV callbacks)
     if (
       (method === 'POST' || method === 'PATCH' || method === 'DELETE') &&
       pathWithoutQuery !== '/api/v1/auth/login' &&
       pathWithoutQuery !== '/api/v1/rewards/provider-callback' &&
       !pathWithoutQuery.startsWith('/api/v1/media/upload') &&
+      !pathWithoutQuery.startsWith('/api/v1/uploads') &&
       request.body &&
       typeof request.body === 'object' &&
       !Buffer.isBuffer(request.body)

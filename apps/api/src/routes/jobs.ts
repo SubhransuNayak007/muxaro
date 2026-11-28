@@ -493,8 +493,8 @@ export const jobsRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    if (!rawBody.sourceUrl && (rawBody.videoUrl || rawBody.mediaUrl)) {
-      rawBody.sourceUrl = rawBody.videoUrl || rawBody.mediaUrl;
+    if (!rawBody.sourceUrl && (rawBody.videoUrl || rawBody.mediaUrl || rawBody.url)) {
+      rawBody.sourceUrl = rawBody.videoUrl || rawBody.mediaUrl || rawBody.url;
     }
 
     if (!rawBody.secondaryAudioUrl && rawBody.audioUrl) {

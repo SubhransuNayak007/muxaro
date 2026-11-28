@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { JobProgressEvent, ProcessingJob } from '@/lib/types';
-import { getApiBaseUrl } from '@/lib/api-client';
+import { getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 
 export interface JobStreamError {
   code: string;
@@ -167,7 +167,10 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
     async (targetJobId: string): Promise<boolean> => {
       try {
         const apiBase = getApiBaseUrl().replace(/\/+$/, '');
-        const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(targetJobId)}`);
+        const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(targetJobId)}`, {
+          credentials: 'include',
+          headers: { Accept: 'application/json' },
+        });
         if (res.ok) {
           const body = await res.json();
           const job = body?.data || body;
@@ -332,10 +335,14 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
     if (!jobId) return false;
     try {
       const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+      const csrf = readCsrfTokenFromCookie();
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrf ? { 'x-muxaro-csrf': csrf, 'X-CSRF-Token': csrf } : {}),
+        },
       });
       if (res.ok) {
         setStatus('CANCELLED');
@@ -353,10 +360,14 @@ export function useJobStream(initialJobId?: string | null): UseJobStreamState & 
     if (!jobId) return false;
     try {
       const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+      const csrf = readCsrfTokenFromCookie();
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/retry`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrf ? { 'x-muxaro-csrf': csrf, 'X-CSRF-Token': csrf } : {}),
+        },
       });
       if (res.ok) {
         const body = await res.json();

@@ -142,7 +142,10 @@ export function BatchTool() {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       };
-      if (csrf) headers['X-CSRF-Token'] = csrf;
+      if (csrf) {
+        headers['x-muxaro-csrf'] = csrf;
+        headers['X-CSRF-Token'] = csrf;
+      }
 
       const res = await fetch(`${apiBase}/playlists/inspect`, {
         method: 'POST',
@@ -395,7 +398,10 @@ export function BatchTool() {
         Accept: 'application/json',
         'Idempotency-Key': idempotencyKey,
       };
-      if (csrf) headers['X-CSRF-Token'] = csrf;
+      if (csrf) {
+        headers['x-muxaro-csrf'] = csrf;
+        headers['X-CSRF-Token'] = csrf;
+      }
 
       const res = await fetch(`${apiBase}/batches`, {
         method: 'POST',

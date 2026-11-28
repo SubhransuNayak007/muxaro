@@ -516,6 +516,14 @@ export const aiRoutes: FastifyPluginAsync = async (app) => {
     return reply.code(202).send({ ok: true, id, status: 'running' });
   });
 
+  app.get('/ai/research-jobs', async (_request, reply) => {
+    const db = getDb();
+    const rows = db
+      .prepare('SELECT id, query, status, created_at, updated_at FROM ai_research_jobs ORDER BY created_at DESC LIMIT 20')
+      .all() as Array<Record<string, any>>;
+    return reply.send({ ok: true, jobs: rows });
+  });
+
   app.get<{ Params: { id: string } }>('/ai/research-jobs/:id', async (request, reply) => {
     const db = getDb();
     const row = db

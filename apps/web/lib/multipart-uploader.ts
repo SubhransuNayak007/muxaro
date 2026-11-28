@@ -9,7 +9,7 @@
  * - Handles up to 4GB files using non-buffering File.slice() Blobs
  */
 
-import { readCsrfTokenFromCookie } from './api-client';
+import { getApiBaseUrl, readCsrfTokenFromCookie } from './api-client';
 
 export type UploadSessionState =
   | 'idle'
@@ -74,6 +74,32 @@ const PRESIGNED_PART_BATCH_SIZE = 100;
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_MAX_RETRIES = 4;
 const SPEED_WINDOW_MS = 3500;
+const NON_RETRYABLE_STATUSES = new Set([400, 401, 404, 413, 415, 422]);
+
+// Cache remote backend capability so subsequent browser uploads skip extra `/uploads/init` roundtrips
+// when R2 direct presigned uploads are not enabled on the cluster.
+let preferChunkedMediaFallbackUntil = 0;
+
+function isBackendLocalPartUrl(candidateUrl: string): boolean {
+  try {
+    const parsed = new URL(
+      candidateUrl,
+      typeof window !== 'undefined' ? window.location.origin : 'https://muxaro.vercel.app'
+    );
+    return /\/(?:api\/)?v1\/uploads\/[^/]+\/parts?\/\d+/i.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+class NonRetryableUploadError extends Error {
+  public readonly status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'NonRetryableUploadError';
+    this.status = status;
+  }
+}
 
 function openIndexedDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -170,8 +196,11 @@ export class ResumableMultipartUploader {
   private abortControllers: Map<number, AbortController> = new Map();
   private speedSamples: SpeedSample[] = [];
   private speedTrackerTimer: ReturnType<typeof setInterval> | null = null;
+  private isElectronDesktop: boolean = false;
   private isPaused: boolean = false;
   private isCancelled: boolean = false;
+  private activeWorkerCap: number = DEFAULT_CONCURRENCY;
+  private rateLimitGate: Promise<void> | null = null;
   private resolvePromise?: (result: any) => void;
   private rejectPromise?: (reason: any) => void;
 
@@ -181,15 +210,11 @@ export class ResumableMultipartUploader {
     }
     this.file = file;
     this.fileKey = computeFileKey(file);
-    const isElectronDesktop =
+    this.isElectronDesktop =
       typeof window !== 'undefined' && Boolean((window as any).muxaroDesktop?.isDesktop);
-    this.apiBase =
-      options.apiBase ||
-      (isElectronDesktop
-        ? '/api/v1'
-        : typeof window !== 'undefined' && (process.env.NEXT_PUBLIC_API_URL || '/api/v1')) ||
-      '/api/v1';
+    this.apiBase = (options.apiBase || getApiBaseUrl()).replace(/\/+$/, '');
     this.concurrency = Math.min(8, Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY));
+    this.activeWorkerCap = this.concurrency;
     this.chunkSize = Math.min(MAX_SERVERLESS_CHUNK_SIZE, Math.max(256 * 1024, options.chunkSize ?? DEFAULT_CHUNK_SIZE));
     this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.tool = options.tool || 'convert_video';
@@ -334,7 +359,7 @@ export class ResumableMultipartUploader {
           method: 'DELETE',
           credentials: 'include',
           headers: {
-            ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+            ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
           },
         }).catch(() => {});
       } catch {
@@ -374,10 +399,18 @@ export class ResumableMultipartUploader {
 
   private async initializeSession(): Promise<void> {
     this.setState('initializing');
+    this.activeWorkerCap = this.concurrency;
 
-    // 1. Check IndexedDB for existing session
+    // 1. Check IndexedDB for existing resumable session
     const stored = await getStoredSession(this.fileKey);
-    if (stored && stored.uploadId && new Date(stored.expiresAt).getTime() > Date.now()) {
+    const shouldDiscardStalePresigned =
+      !this.isElectronDesktop &&
+      stored?.mode === 'presigned' &&
+      (preferChunkedMediaFallbackUntil > Date.now() || stored.chunkSize > MAX_SERVERLESS_CHUNK_SIZE);
+
+    if (shouldDiscardStalePresigned) {
+      await removeStoredSession(this.fileKey);
+    } else if (stored && stored.uploadId && new Date(stored.expiresAt).getTime() > Date.now()) {
       this.mode = stored.mode || 'chunked';
       this.uploadId = stored.uploadId;
       this.completedParts = new Set(stored.completedParts || []);
@@ -394,73 +427,96 @@ export class ResumableMultipartUploader {
     const authHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+      ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
     };
 
-    // 2. Prefer canonical Fastify R2 presigned multipart flow (/api/v1/uploads/init)
+    // 2. Prefer direct-to-R2 multipart flow (/api/v1/uploads/init) when cloud object storage is configured.
+    // When backend reports `uploadMode: 'local'` from a browser session, switch cleanly to same-origin
+    // chunked `/media/upload/*` (<= 3.5 MB) to stay inside Vercel body limits and avoid exposing backend origins or IP-hash mismatches.
     let presignedFallbackReason: string | null = null;
-    try {
-      const presignedRes = await fetch(`${this.apiBase}/uploads/init`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: authHeaders,
-        body: JSON.stringify({
-          filename: this.file.name,
-          sizeBytes: this.file.size,
-          mimeType: this.file.type || 'application/octet-stream',
-          tool: this.tool,
-          ...(this.targetFormat ? { targetFormat: this.targetFormat } : {}),
-        }),
-      });
+    if (this.isElectronDesktop || Date.now() >= preferChunkedMediaFallbackUntil) {
+      try {
+        const presignedRes = await fetch(`${this.apiBase}/uploads/init`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: authHeaders,
+          body: JSON.stringify({
+            filename: this.file.name,
+            sizeBytes: this.file.size,
+            mimeType: this.file.type || 'application/octet-stream',
+            tool: this.tool,
+            ...(this.targetFormat ? { targetFormat: this.targetFormat } : {}),
+          }),
+        });
 
-      if (presignedRes.ok) {
-        const initData = await presignedRes.json();
-        const data = initData.data || initData;
-        const sessionId = data.uploadSessionId || data.uploadId;
-        if (sessionId) {
-          this.mode = data.mode === 'chunked' ? 'chunked' : 'presigned';
-          this.uploadId = String(sessionId);
-          this.chunkSize =
-            this.mode === 'chunked'
-              ? Math.min(MAX_SERVERLESS_CHUNK_SIZE, Number(data.chunkSizeHint || data.chunkSize) || MAX_SERVERLESS_CHUNK_SIZE)
-              : Number(data.chunkSize) || 5 * 1024 * 1024;
-          this.totalParts =
-            Number(data.totalChunks) || Math.max(1, Math.ceil(this.file.size / this.chunkSize));
-          this.completedParts.clear();
-          this.partEtags.clear();
-          this.presignedUrls.clear();
-          await this.persistSession(data.expiresAt);
-          return;
+        if (presignedRes.ok) {
+          const initData = await presignedRes.json();
+          const data = initData.data || initData;
+          const sessionId = data.uploadSessionId || data.uploadId;
+          const isLocalSink = data.uploadMode === 'local' || data.mode === 'chunked';
+
+          if (sessionId && !isLocalSink) {
+            this.mode = 'presigned';
+            this.uploadId = String(sessionId);
+            this.chunkSize = Number(data.chunkSize) || 16 * 1024 * 1024;
+            this.totalParts =
+              Number(data.totalChunks) || Math.max(1, Math.ceil(this.file.size / this.chunkSize));
+            this.completedParts.clear();
+            this.partEtags.clear();
+            this.presignedUrls.clear();
+            await this.persistSession(data.expiresAt);
+            return;
+          }
+
+          if (sessionId && isLocalSink) {
+            if (!this.isElectronDesktop) {
+              preferChunkedMediaFallbackUntil = Date.now() + 5 * 60 * 1000;
+              fetch(`${this.apiBase}/uploads/${encodeURIComponent(String(sessionId))}/abort`, {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {},
+              }).catch(() => {});
+              presignedFallbackReason = 'local_bff_chunked';
+            } else {
+              this.mode = 'presigned';
+              this.uploadId = String(sessionId);
+              this.chunkSize = Number(data.chunkSize) || 16 * 1024 * 1024;
+              this.totalParts =
+                Number(data.totalChunks) || Math.max(1, Math.ceil(this.file.size / this.chunkSize));
+              this.completedParts.clear();
+              this.partEtags.clear();
+              this.presignedUrls.clear();
+              for (let p = 1; p <= this.totalParts; p++) {
+                this.presignedUrls.set(p, `${this.apiBase}/uploads/${encodeURIComponent(this.uploadId)}/part/${p}`);
+              }
+              await this.persistSession(data.expiresAt);
+              return;
+            }
+          }
+        } else {
+          const errJson = await presignedRes.json().catch(() => ({}));
+          if (
+            presignedRes.status === 413 ||
+            presignedRes.status === 400 ||
+            presignedRes.status === 422
+          ) {
+            const msg =
+              errJson.error?.message ||
+              errJson.error?.userMessage ||
+              `Failed to initialize upload session (${presignedRes.status})`;
+            throw new NonRetryableUploadError(msg, presignedRes.status);
+          }
+          presignedFallbackReason = errJson.error?.code || String(presignedRes.status);
         }
-      } else if (
-        presignedRes.status !== 404 &&
-        presignedRes.status !== 500 &&
-        presignedRes.status !== 501 &&
-        presignedRes.status !== 502 &&
-        presignedRes.status !== 503 &&
-        presignedRes.status !== 504
-      ) {
-        const errJson = await presignedRes.json().catch(() => ({}));
-        const msg =
-          errJson.error?.message ||
-          errJson.error?.userMessage ||
-          `Failed to initialize upload session (${presignedRes.status})`;
-        const err = new Error(msg) as Error & { code?: string; status?: number };
-        err.code = errJson.error?.code;
-        err.status = presignedRes.status;
-        throw err;
-      } else {
-        const errJson = await presignedRes.json().catch(() => ({}));
-        presignedFallbackReason = errJson.error?.code || String(presignedRes.status);
+      } catch (err: any) {
+        if (err instanceof NonRetryableUploadError) {
+          throw err;
+        }
+        presignedFallbackReason = err?.message || 'presigned_unavailable';
       }
-    } catch (err: any) {
-      if (err?.status && err.status < 500 && err.status !== 404) {
-        throw err;
-      }
-      presignedFallbackReason = err?.message || 'presigned_unavailable';
     }
 
-    // 3. Fallback: chunked server upload (/api/v1/media/upload/init) strictly <= 3.5 MB chunks
+    // 3. Same-origin chunked upload (/api/v1/media/upload/init) strictly <= 3.5 MB chunks
     this.mode = 'chunked';
     this.chunkSize = Math.min(MAX_SERVERLESS_CHUNK_SIZE, this.chunkSize);
     this.totalParts = Math.max(1, Math.ceil(this.file.size / this.chunkSize));
@@ -481,7 +537,7 @@ export class ResumableMultipartUploader {
       const msg =
         errJson.error?.message ||
         errJson.error?.userMessage ||
-        `Failed to initialize upload session (${initRes.status}${presignedFallbackReason ? `; presigned: ${presignedFallbackReason}` : ''})`;
+        `Failed to initialize upload session (${initRes.status}${presignedFallbackReason ? `; init: ${presignedFallbackReason}` : ''})`;
       const err = new Error(msg) as Error & { code?: string; status?: number };
       err.code = errJson.error?.code;
       err.status = initRes.status;
@@ -492,9 +548,10 @@ export class ResumableMultipartUploader {
     const data = initData.data || initData;
 
     this.uploadId = data.uploadId || data.uploadSessionId || data.assetId;
-    if (data.chunkSizeHint && Number(data.chunkSizeHint) > 0) {
-      this.chunkSize = Math.min(MAX_SERVERLESS_CHUNK_SIZE, Number(data.chunkSizeHint));
-    }
+    // Always enforce <= 3.5 MB ceiling on web BFF regardless of chunkSizeHint from Fastify (which defaults to 5 MB)
+    this.chunkSize = this.isElectronDesktop && data.chunkSizeHint && Number(data.chunkSizeHint) > 0
+      ? Number(data.chunkSizeHint)
+      : Math.min(MAX_SERVERLESS_CHUNK_SIZE, this.chunkSize);
     this.totalParts = Math.max(1, Math.ceil(this.file.size / this.chunkSize));
     this.completedParts.clear();
     this.partEtags.clear();
@@ -536,7 +593,7 @@ export class ResumableMultipartUploader {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+          ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
         },
         body: JSON.stringify({
           uploadSessionId: this.uploadId,
@@ -546,7 +603,11 @@ export class ResumableMultipartUploader {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error?.message || `Failed to obtain presigned upload URLs (${res.status})`);
+        const msg = errData.error?.message || `Failed to obtain presigned upload URLs (${res.status})`;
+        if (NON_RETRYABLE_STATUSES.has(res.status) || res.status === 403) {
+          throw new NonRetryableUploadError(msg, res.status);
+        }
+        throw new Error(msg);
       }
 
       const json = await res.json();
@@ -554,14 +615,33 @@ export class ResumableMultipartUploader {
       const parts: Array<{ partNumber: number; presignedUrl: string }> = data.parts || [];
       for (const part of parts) {
         if (part.partNumber && part.presignedUrl) {
-          this.presignedUrls.set(part.partNumber, part.presignedUrl);
+          // Never call raw backend/sslip hosts directly if local sink URL was returned
+          const resolvedUrl = isBackendLocalPartUrl(part.presignedUrl)
+            ? `${this.apiBase}/uploads/${encodeURIComponent(this.uploadId)}/part/${part.partNumber}`
+            : part.presignedUrl;
+          this.presignedUrls.set(part.partNumber, resolvedUrl);
         }
       }
     }
   }
 
+  private async waitForRateLimitCooldown(retryAfterSeconds: number): Promise<void> {
+    this.activeWorkerCap = 1;
+    if (this.rateLimitGate) {
+      await this.rateLimitGate;
+      return;
+    }
+    const waitMs = Math.min(65_000, Math.max(1500, Math.round(retryAfterSeconds * 1000) + 350));
+    this.rateLimitGate = new Promise((resolve) => {
+      setTimeout(() => {
+        this.rateLimitGate = null;
+        resolve();
+      }, waitMs);
+    });
+    await this.rateLimitGate;
+  }
+
   private async runWorkerPool(): Promise<void> {
-    // Generate queue of parts remaining
     const remainingParts: number[] = [];
     for (let partNum = 1; partNum <= this.totalParts; partNum++) {
       if (!this.completedParts.has(partNum)) {
@@ -582,8 +662,14 @@ export class ResumableMultipartUploader {
 
     const worker = async (workerId: number): Promise<void> => {
       while (nextIndex < remainingParts.length && !this.isPaused && !this.isCancelled && !poolError) {
+        if (workerId >= this.activeWorkerCap) {
+          return;
+        }
+        if (this.rateLimitGate) {
+          await this.rateLimitGate;
+        }
         const partNum = remainingParts[nextIndex++];
-        if (this.completedParts.has(partNum)) continue;
+        if (partNum === undefined || this.completedParts.has(partNum)) continue;
 
         try {
           this.activeWorkers++;
@@ -619,6 +705,7 @@ export class ResumableMultipartUploader {
 
   private async uploadPartWithRetry(partNumber: number): Promise<void> {
     let attempt = 0;
+    let refreshedPresignedUrlOnce = false;
     const startByte = (partNumber - 1) * this.chunkSize;
     const endByte = Math.min(this.file.size, startByte + this.chunkSize);
     const chunkBlob = this.file.slice(startByte, endByte);
@@ -627,32 +714,47 @@ export class ResumableMultipartUploader {
       if (this.isPaused || this.isCancelled) {
         throw new Error('Upload paused or cancelled.');
       }
+      if (this.rateLimitGate) {
+        await this.rateLimitGate;
+      }
 
       const ctrl = new AbortController();
       this.abortControllers.set(partNumber, ctrl);
 
       try {
         let res: Response;
+        const csrfToken = readCsrfTokenFromCookie();
         if (this.mode === 'presigned') {
           await this.ensurePresignedUrls([partNumber]);
           const presignedUrl = this.presignedUrls.get(partNumber);
           if (!presignedUrl) {
-            throw new Error(`Missing presigned URL for part ${partNumber}`);
+            throw new NonRetryableUploadError(`Missing presigned URL for part ${partNumber}`, 400);
           }
+          const isSameOriginBff =
+            presignedUrl.startsWith('/') ||
+            (typeof window !== 'undefined' && presignedUrl.startsWith(window.location.origin));
           res = await fetch(presignedUrl, {
             method: 'PUT',
+            ...(isSameOriginBff
+              ? {
+                  credentials: 'include' as RequestCredentials,
+                  headers: {
+                    'Content-Type': 'application/octet-stream',
+                    ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
+                  },
+                }
+              : {}),
             body: chunkBlob,
             signal: ctrl.signal,
           });
         } else {
-          const csrfToken = readCsrfTokenFromCookie();
           const url = `${this.apiBase}/media/upload/${encodeURIComponent(this.uploadId!)}/part/${partNumber}`;
           res = await fetch(url, {
             method: 'PUT',
             credentials: 'include',
             headers: {
               'Content-Type': 'application/octet-stream',
-              ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+              ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
             },
             body: chunkBlob,
             signal: ctrl.signal,
@@ -661,25 +763,58 @@ export class ResumableMultipartUploader {
 
         this.abortControllers.delete(partNumber);
 
+        // Proactive pacing when server warns remaining rate-limit budget is low
+        const rlRemaining = Number(res.headers.get('RateLimit-Remaining'));
+        const rlReset = Number(res.headers.get('RateLimit-Reset'));
+        if (res.ok && Number.isFinite(rlRemaining) && rlRemaining <= 1 && this.totalParts - this.completedParts.size > 2) {
+          this.activeWorkerCap = 1;
+          await new Promise((r) => setTimeout(r, Math.min(4000, Math.max(800, (rlReset || 2) * 200))));
+        }
+
         if (!res.ok) {
-          if (this.mode === 'presigned' && res.status === 403) {
-            this.presignedUrls.delete(partNumber);
-          }
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `Chunk ${partNumber} failed with status ${res.status}`);
+          const errMsg = errData.error?.message || `Chunk ${partNumber} failed with status ${res.status}`;
+
+          if (res.status === 429) {
+            const retryAfter = Number(res.headers.get('Retry-After')) || errData.error?.details?.retryAfterSeconds || 5;
+            attempt++;
+            if (attempt >= this.maxRetries) {
+              throw new NonRetryableUploadError(errMsg, 429);
+            }
+            await this.waitForRateLimitCooldown(retryAfter);
+            continue;
+          }
+
+          if (res.status === 403) {
+            if (this.mode === 'presigned' && !refreshedPresignedUrlOnce && !isBackendLocalPartUrl(this.presignedUrls.get(partNumber) || '')) {
+              refreshedPresignedUrlOnce = true;
+              this.presignedUrls.delete(partNumber);
+            } else {
+              await removeStoredSession(this.fileKey);
+              throw new NonRetryableUploadError(errMsg, 403);
+            }
+          }
+
+          if (NON_RETRYABLE_STATUSES.has(res.status)) {
+            if (res.status === 404) {
+              await removeStoredSession(this.fileKey);
+            }
+            throw new NonRetryableUploadError(errMsg, res.status);
+          }
+
+          throw new Error(errMsg);
         }
 
         if (this.mode === 'presigned') {
           const etag = (res.headers.get('etag') || res.headers.get('ETag') || '').trim();
           if (!etag) {
-            throw new Error(
+            throw new NonRetryableUploadError(
               `Storage response for part ${partNumber} did not expose an ETag header (verify R2 CORS ExposeHeaders includes ETag).`
             );
           }
           this.partEtags.set(partNumber, etag);
         }
 
-        // Record speed sample
         this.speedSamples.push({
           timestamp: Date.now(),
           bytes: chunkBlob.size,
@@ -688,7 +823,7 @@ export class ResumableMultipartUploader {
         return;
       } catch (err: any) {
         this.abortControllers.delete(partNumber);
-        if (this.isPaused || this.isCancelled || err.name === 'AbortError') {
+        if (this.isPaused || this.isCancelled || err.name === 'AbortError' || err instanceof NonRetryableUploadError) {
           throw err;
         }
 
@@ -697,8 +832,7 @@ export class ResumableMultipartUploader {
           throw new Error(`Part ${partNumber} failed after ${this.maxRetries} attempts: ${err.message}`);
         }
 
-        // Exponential backoff with jitter
-        const delay = Math.min(8000, 400 * Math.pow(2, attempt) + Math.random() * 200);
+        const delay = Math.min(8000, 500 * Math.pow(2, attempt) + Math.random() * 250);
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -732,7 +866,7 @@ export class ResumableMultipartUploader {
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-        ...(csrfToken ? { 'x-muxaro-csrf': csrfToken } : {}),
+        ...(csrfToken ? { 'x-muxaro-csrf': csrfToken, 'X-CSRF-Token': csrfToken } : {}),
       },
       body: JSON.stringify(completeBody),
     });

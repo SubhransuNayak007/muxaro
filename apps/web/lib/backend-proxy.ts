@@ -116,6 +116,9 @@ export async function proxyToBackend(
   if (!forwardHeaders.has('x-forwarded-host') && req.headers.get('host')) {
     forwardHeaders.set('x-forwarded-host', req.headers.get('host') || '');
   }
+  if (!forwardHeaders.has('x-muxaro-public-origin')) {
+    forwardHeaders.set('x-muxaro-public-origin', parsedIncoming.origin);
+  }
 
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs ?? (options.streaming ? 300_000 : 30_000);
@@ -163,7 +166,7 @@ export async function proxyToBackend(
           code: isAbort ? 'TIMEOUT' : 'ERR_BACKEND_UNREACHABLE',
           message: isAbort
             ? 'Backend service request timed out.'
-            : `Backend service unavailable: ${err?.message || 'Connection failed'}`,
+            : 'Backend media processing service is temporarily unreachable. Please retry in a moment.',
         },
         requestId: `proxy_err_${Date.now()}`,
       },

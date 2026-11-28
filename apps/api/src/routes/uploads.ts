@@ -30,8 +30,42 @@ import {
   abortMultipartUpload,
   verifyMagicBytes,
 } from '../lib/s3.js';
+import { config } from '../config.js';
 
 const LOCAL_UPLOADS_ROOT = path.resolve(process.cwd(), '.muxaro-uploads');
+
+function signLocalUploadPartToken(
+  sessionId: string,
+  partNumber: number,
+  expMs: number
+): string {
+  const payload = `${sessionId}:${partNumber}:${expMs}`;
+  const sig = crypto
+    .createHmac('sha256', config.signedTokenSecret)
+    .update(payload)
+    .digest('base64url');
+  return `${expMs}.${sig}`;
+}
+
+function verifyLocalUploadPartToken(
+  sessionId: string,
+  partNumber: number,
+  rawToken: unknown
+): boolean {
+  if (typeof rawToken !== 'string' || !rawToken.includes('.')) return false;
+  const dotIdx = rawToken.indexOf('.');
+  const expStr = rawToken.slice(0, dotIdx);
+  const sig = rawToken.slice(dotIdx + 1);
+  const expMs = Number(expStr);
+  if (!Number.isFinite(expMs) || expMs < Date.now() || !sig) return false;
+  const expectedSig = crypto
+    .createHmac('sha256', config.signedTokenSecret)
+    .update(`${sessionId}:${partNumber}:${expMs}`)
+    .digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expectedSig);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 function sanitizeFilename(filename: string): string {
   return filename.replace(/[\r\n\t"]/g, '_').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -53,14 +87,20 @@ function isR2OrS3Configured(): boolean {
 }
 
 function resolveRequestOriginAndPrefix(request: FastifyRequest): { origin: string; routePrefix: string } {
+  const url = request.url || '';
+  const routePrefix = url.startsWith('/api/v1') ? '/api/v1' : url.startsWith('/v1') ? '/v1' : '';
+  const publicOriginHeader = request.headers['x-muxaro-public-origin'];
+  const rawPublicOrigin = (Array.isArray(publicOriginHeader) ? publicOriginHeader[0] : publicOriginHeader || '').trim();
+  if (/^https?:\/\/[a-zA-Z0-9.-]+(?::\d+)?$/i.test(rawPublicOrigin)) {
+    return { origin: rawPublicOrigin.replace(/\/+$/, ''), routePrefix };
+  }
+
   const protoHeader = request.headers['x-forwarded-proto'];
   const proto = (Array.isArray(protoHeader) ? protoHeader[0] : protoHeader || request.protocol || 'http')
     .split(',')[0]
     .trim();
   const hostHeader = request.headers['x-forwarded-host'] || request.headers.host || '127.0.0.1:4000';
   const host = (Array.isArray(hostHeader) ? hostHeader[0] : hostHeader).split(',')[0].trim();
-  const url = request.url || '';
-  const routePrefix = url.startsWith('/api/v1') ? '/api/v1' : url.startsWith('/v1') ? '/v1' : '';
   return { origin: `${proto}://${host}`, routePrefix };
 }
 
@@ -277,12 +317,16 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
 
     const useLocalFallback = !isR2OrS3Configured() || r2UploadId.startsWith('upload_mock_');
     const { origin, routePrefix } = resolveRequestOriginAndPrefix(request);
+    const expiresMs = session.expiresAt ? new Date(session.expiresAt).getTime() : Date.now() + 3600_000;
 
-    // Generate presigned R2/S3 upload URLs, or local dev HTTP part endpoints when R2 is unconfigured
+    // Generate presigned R2/S3 upload URLs, or HMAC-signed local HTTP part endpoints when R2 is unconfigured
     const parts = await Promise.all(
       partNumbers.map(async (partNumber) => {
+        const partToken = useLocalFallback
+          ? signLocalUploadPartToken(id, partNumber, expiresMs)
+          : '';
         const presignedUrl = useLocalFallback
-          ? `${origin}${routePrefix}/uploads/${encodeURIComponent(id)}/part/${partNumber}`
+          ? `${origin}${routePrefix}/uploads/${encodeURIComponent(id)}/part/${partNumber}?token=${encodeURIComponent(partToken)}`
           : await generatePresignedPartUrl(
               storageConfig.uploadsBucket,
               session.storageKey,
@@ -343,7 +387,14 @@ export const uploadsRoutes: FastifyPluginAsync = async (fastify) => {
         throw MuxaroError.notFound(`Upload session ${id} not found`);
       }
 
-      assertSessionOwnership(session, request);
+      const hasSignedPartCap = verifyLocalUploadPartToken(
+        id,
+        partNum,
+        (request.query as Record<string, unknown> | undefined)?.token
+      );
+      if (!hasSignedPartCap) {
+        assertSessionOwnership(session, request);
+      }
 
       if (session.status === 'aborted' || session.status === 'expired' || session.status === 'completed') {
         throw MuxaroError.badRequest(`Cannot upload parts for ${session.status} upload session`);

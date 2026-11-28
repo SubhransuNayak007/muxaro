@@ -382,7 +382,10 @@ export function MergeTool() {
         'Idempotency-Key': idempotencyKey,
       };
       if (token) headers.Authorization = `Bearer ${token}`;
-      if (csrf) headers['X-CSRF-Token'] = csrf;
+      if (csrf) {
+        headers['x-muxaro-csrf'] = csrf;
+        headers['X-CSRF-Token'] = csrf;
+      }
 
       const res = await fetch(`${apiBase}/tools/merge`, {
         method: 'POST',

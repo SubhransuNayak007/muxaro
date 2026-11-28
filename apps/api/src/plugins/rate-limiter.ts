@@ -26,9 +26,19 @@ export const ROUTE_LIMITS: Record<string, Record<string, RateLimitRule>> = {
     pro: { limit: 60, windowSeconds: 60 },
   },
   uploads: {
-    guest: { limit: 10, windowSeconds: 60 },
-    free_account: { limit: 20, windowSeconds: 60 },
-    pro: { limit: 60, windowSeconds: 60 },
+    guest: { limit: 60, windowSeconds: 60 },
+    free_account: { limit: 120, windowSeconds: 60 },
+    pro: { limit: 300, windowSeconds: 60 },
+  },
+  uploads_init: {
+    guest: { limit: 20, windowSeconds: 60 },
+    free_account: { limit: 40, windowSeconds: 60 },
+    pro: { limit: 120, windowSeconds: 60 },
+  },
+  uploads_part: {
+    guest: { limit: 600, windowSeconds: 60 },
+    free_account: { limit: 1200, windowSeconds: 60 },
+    pro: { limit: 2400, windowSeconds: 60 },
   },
   jobs: {
     guest: { limit: 30, windowSeconds: 60 },
@@ -83,6 +93,18 @@ export function resolveRouteGroup(url: string, method?: string): string {
   const cleanPath = url.split('?')[0].toLowerCase();
   if (cleanPath.startsWith('/v1/analyse') || cleanPath.startsWith('/api/v1/analyse')) {
     return 'analyse';
+  }
+  if (
+    /^\/(?:api\/)?v1\/uploads\/init$/.test(cleanPath) ||
+    /^\/(?:api\/)?v1\/media\/upload\/init$/.test(cleanPath)
+  ) {
+    return 'uploads_init';
+  }
+  if (
+    /^\/(?:api\/)?v1\/uploads\/[^/]+\/(?:parts?|complete|abort)/.test(cleanPath) ||
+    /^\/(?:api\/)?v1\/media\/upload\/[^/]+\/(?:parts?|complete)/.test(cleanPath)
+  ) {
+    return 'uploads_part';
   }
   if (cleanPath.startsWith('/v1/uploads') || cleanPath.startsWith('/api/v1/uploads')) {
     return 'uploads';

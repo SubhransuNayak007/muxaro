@@ -44,6 +44,24 @@ declare module 'fastify' {
   }
 }
 
+function extractCookieValue(cookieHeader: string | undefined, cookieName: string): string | null {
+  if (!cookieHeader) return null;
+  const prefix = `${cookieName}=`;
+  for (const rawCookie of cookieHeader.split(';')) {
+    const cookie = rawCookie.trim();
+    if (cookie.startsWith(prefix)) {
+      const rawVal = cookie.substring(prefix.length).trim();
+      if (!rawVal) return null;
+      try {
+        return decodeURIComponent(rawVal);
+      } catch {
+        return rawVal;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Extracts session token from Authorization header or cookie
  */
@@ -54,26 +72,20 @@ function extractToken(req: FastifyRequest): string | null {
     if (token) return token;
   }
 
-  const cookieHeader = req.headers.cookie;
-  if (cookieHeader) {
-    const cookies = cookieHeader.split(';').map((c) => c.trim());
-    for (const cookie of cookies) {
-      if (cookie.startsWith('muxaro_session=')) {
-        const val = cookie.substring('muxaro_session='.length).trim();
-        if (val) return decodeURIComponent(val);
-      }
-    }
-  }
-
-  return null;
+  return extractCookieValue(req.headers.cookie, 'muxaro_session');
 }
+
+const GUEST_COOKIE_RE = /^guest_[a-f0-9]{16,64}$/i;
 
 const authPluginCallback: FastifyPluginAsync = async (fastify) => {
   const db = getDb();
 
   fastify.addHook('onRequest', async (request: FastifyRequest) => {
     const clientIp = extractClientIp(request);
-    const guestIpHash = hashIp(clientIp);
+    const guestCookie = extractCookieValue(request.headers.cookie, 'muxaro_guest');
+    const stableGuestSeed =
+      guestCookie && GUEST_COOKIE_RE.test(guestCookie) ? guestCookie : clientIp;
+    const guestIpHash = hashIp(stableGuestSeed);
     request.guestIpHash = guestIpHash;
 
     let resolvedUser: UserSessionPayload | null = null;

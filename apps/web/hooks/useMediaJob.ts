@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getApiBaseUrl } from '@/lib/api-client';
+import { getApiBaseUrl, readCsrfTokenFromCookie } from '@/lib/api-client';
 
 export type JobStatus =
   | 'IDLE'
@@ -175,14 +175,21 @@ export function useMediaJob(initialJobId?: string | null): UseMediaJobReturn {
       setStageMessage('Submitting to media worker pool…');
 
       try {
-        const apiBase = getApiBaseUrl();
+        const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+        const csrf = readCsrfTokenFromCookie();
         const res = await fetch(`${apiBase}/jobs`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...(csrf ? { 'x-muxaro-csrf': csrf, 'X-CSRF-Token': csrf } : {}),
+          },
           body: JSON.stringify({
+            sourceUrl: opts.url,
             url: opts.url,
-            format: opts.format || 'mp4',
-            quality: opts.quality || 'best',
+            targetFormat: opts.format || 'mp4',
+            targetResolution: opts.quality || undefined,
           }),
         });
 
@@ -216,9 +223,15 @@ export function useMediaJob(initialJobId?: string | null): UseMediaJobReturn {
   const cancelJob = useCallback(async (): Promise<boolean> => {
     if (!jobId) return false;
     try {
-      const apiBase = getApiBaseUrl();
+      const apiBase = getApiBaseUrl().replace(/\/+$/, '');
+      const csrf = readCsrfTokenFromCookie();
       const res = await fetch(`${apiBase}/jobs/${encodeURIComponent(jobId)}/cancel`, {
         method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrf ? { 'x-muxaro-csrf': csrf, 'X-CSRF-Token': csrf } : {}),
+        },
       });
       if (res.ok) {
         setStatus('CANCELLED');
